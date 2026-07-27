@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "knowte"
+version = "0.1.0"
+description = "Local-first research discovery workspace combining academic databases and web search."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Knowte Contributors" }
+]
+keywords = ["research", "notes", "ai", "summarization"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12"
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/knowte"
+
+[project.scripts]
+knowte = "knowte.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests", "tests.*"]
+
+[tool.setuptools.package-data]
+knowte = ["web/*.html", "web/*.css", "web/*.js", "web/*.png"]

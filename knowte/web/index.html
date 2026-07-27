@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Knowte</title>
+    <link rel="stylesheet" href="styles.css?v=20260727c" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <div class="orbit-ring" aria-hidden="true"></div>
+    <div class="orbit-ring orbit-ring-inner" aria-hidden="true"></div>
+    <div class="orbit-planet" aria-hidden="true">
+      <div class="orbit-planet-dot"></div>
+    </div>
+    <div class="orbit-planet orbit-planet-inner" aria-hidden="true">
+      <div class="orbit-planet-dot orbit-planet-dot-inner"></div>
+    </div>
+
+    <div class="shell">
+      <aside class="side-panel" aria-label="Primary">
+        <div class="side-brand">
+          <div class="side-logo">
+            <img src="knowte_icon.png" alt="" aria-hidden="true" />
+          </div>
+          <div class="side-title">Knowte</div>
+        </div>
+        <nav class="side-nav">
+          <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
+          <button class="side-link" type="button" data-target="config-panel">Config</button>
+        </nav>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Theme: Auto. Switch to light mode" title="Auto mode">
+          <span class="theme-icon" aria-hidden="true">◐</span>
+        </button>
+      </aside>
+
+      <main class="content">
+        <section class="hero panel-view is-active" id="search-panel">
+          <div class="panel">
+            <form id="search-form">
+              <input
+                type="text"
+                name="keywords"
+                placeholder="Enter keywords, authors, or domains..."
+                aria-label="Enter research keywords"
+              />
+              <button type="submit">Search the Archive</button>
+            </form>
+            <div class="filters" id="search-filters">
+              <div class="filters-head">
+                <p class="filters-title">Search filters</p>
+                <button type="button" class="filters-toggle" id="filters-toggle" aria-expanded="true" aria-controls="filters-body" aria-label="Collapse filters" title="Toggle filters"><span class="filters-toggle-icon" aria-hidden="true">-</span></button>
+              </div>
+              <div class="filters-body" id="filters-body">
+                <div class="filter-presets" id="area-presets">
+                  <button type="button" class="scope-chip" data-preset="ai-generic">AI-Generic</button>
+                  <button type="button" class="scope-chip" data-preset="ai-rl">AI-RL</button>
+                  <button type="button" class="scope-chip" data-preset="ai-cv">AI-CV</button>
+                  <button type="button" class="scope-chip" data-preset="ai-nlp">AI-NLP</button>
+                  <button type="button" class="scope-chip" data-preset="ai-robo">AI-Robotics</button>
+                  <button type="button" class="scope-chip" data-preset="math-stat">Math/Stat</button>
+                  <button type="button" class="scope-chip" data-preset="physics">Physics</button>
+                  <button type="button" class="scope-chip" data-preset="graphics">CS-Graphics</button>
+                  <button type="button" class="scope-chip" data-preset="econ-fin">Econ/Finance</button>
+                  <button type="button" class="scope-chip" data-preset="bio-med">Bio/Med</button>
+                  <button type="button" class="scope-chip" data-preset="clear">Clear</button>
+                </div>
+                <div class="selected-areas" id="selected-areas"></div>
+                <div class="time-filter" aria-label="Time filter">
+                  <label for="year-from">From</label>
+                  <input type="number" id="year-from" min="1900" max="2100" step="1" placeholder="e.g. 2021" />
+                  <label for="year-to">To</label>
+                  <input type="number" id="year-to" min="1900" max="2100" step="1" placeholder="blank = now" />
+                  <button type="button" class="scope-chip" id="time-clear">Clear Time</button>
+                </div>
+                <small class="filters-hint">We map these areas to arXiv categories, OpenAlex concepts, and Semantic Scholar fields.</small>
+              </div>
+            </div>
+            <div class="usage" id="usage">
+              <div class="usage-group">
+                <div class="usage-head">
+                  <span class="usage-signal" aria-hidden="true"></span>
+                  <div>
+                    <div class="usage-label">Paper channel</div>
+                    <div class="usage-caption">Academic sources</div>
+                  </div>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-period">5 min</span>
+                  <div class="usage-meter"><div class="usage-bar" id="usage-bar-5min"></div></div>
+                  <strong><span id="usage-5min">0</span><small>/ 100</small></strong>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-period">Today</span>
+                  <div class="usage-meter"><div class="usage-bar" id="usage-bar-day"></div></div>
+                  <strong><span id="usage-day">0</span><small>/ 5000</small></strong>
+                </div>
+              </div>
+              <div class="usage-group usage-group-web">
+                <div class="usage-head">
+                  <span class="usage-signal" aria-hidden="true"></span>
+                  <div>
+                    <div class="usage-label">Web channel</div>
+                    <div class="usage-caption">SearXNG network</div>
+                  </div>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-period">5 min</span>
+                  <div class="usage-meter"><div class="usage-bar usage-bar-web" id="usage-bar-5min-web"></div></div>
+                  <strong><span id="usage-5min-web">0</span><small>/ 10</small></strong>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-period">Today</span>
+                  <div class="usage-meter"><div class="usage-bar usage-bar-web" id="usage-bar-day-web"></div></div>
+                  <strong><span id="usage-day-web">0</span><small>/ 500</small></strong>
+                </div>
+              </div>
+            </div>
+            <div class="status" id="status" role="status">
+              Awaiting query. The archive wakes slowly.
+            </div>
+            <div class="results-toolbar" id="results-toolbar" hidden>
+              <div class="results-actions">
+                <button class="find-more-btn" id="find-more" type="button" disabled>Find More</button>
+                <button class="abstract-toggle" id="abstract-toggle" type="button" aria-pressed="false">Hide abstracts</button>
+                <button class="stop-btn" id="stop-search" type="button" aria-label="Stop searching" disabled>Stop</button>
+              </div>
+              <div class="pager" id="results-pager" hidden>
+                <button type="button" id="page-prev-top">Prev</button>
+                <select id="page-select-top" aria-label="Top page selector"></select>
+                <button type="button" id="page-next-top">Next</button>
+              </div>
+            </div>
+
+            <div class="results" id="results" aria-live="polite"></div>
+            <div class="results-topline">
+              <button class="scroll-top-btn" id="scroll-top" type="button" aria-label="Go to top of list">↑ Top</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="hero panel-view" id="config-panel">
+          <div class="panel">
+            <div class="config">
+              <div class="config-row">
+                <label>Search backends</label>
+                <div class="backend-grid" id="backend-grid">
+                  <label><input type="checkbox" value="arxiv" checked /> arXiv</label>
+                  <label><input type="checkbox" value="openalex" checked /> OpenAlex</label>
+                  <label><input type="checkbox" value="semanticscholar" checked /> Semantic Scholar</label>
+                  <label><input type="checkbox" value="websearch" /> Web Search</label>
+                </div>
+              </div>
+              <div class="config-row">
+                <label for="max-papers">Max papers per search (N)</label>
+                <input
+                  type="number"
+                  id="max-papers"
+                  name="max-papers"
+                  min="20"
+                  max="1000"
+                  step="10"
+                  value="100"
+                  aria-label="Maximum number of papers per search"
+                />
+                <small>The default 100 matches the maximum candidate batch requested from each academic provider, using a full retrieval round without adding another request; unused candidates stay in memory for Find More. N is the final target for academic or mixed searches; source slots use 3:3:3:1, 4:4:2, or 7:3 with Web Search, and academic sources fill shortages. Web-only searches ignore N and use actual SearXNG pages.</small>
+              </div>
+              <div class="config-row">
+                <label for="email">OpenAlex email</label>
+                <input
+                  type="email"
+                  id="email"
+                  name="email"
+                  placeholder="you@example.com"
+                  aria-label="OpenAlex contact email"
+                />
+              </div>
+              <div class="config-row">
+                <label for="s2-key">Semantic Scholar API key</label>
+                <input
+                  type="text"
+                  id="s2-key"
+                  name="s2-key"
+                  placeholder="Optional API key"
+                  aria-label="Semantic Scholar API key"
+                />
+                <label>
+                  <input type="checkbox" id="s2-key-clear" /> Clear saved API key
+                </label>
+              </div>
+              <div class="config-row">
+                <label for="searxng-url">SearXNG URL</label>
+                <input
+                  type="text"
+                  id="searxng-url"
+                  name="searxng-url"
+                  value="http://127.0.0.1:8888/search"
+                  placeholder="http://127.0.0.1:8888/search"
+                  aria-label="SearXNG base search URL"
+                />
+                <label>
+                  <input type="checkbox" id="web-ignore-year-filter" /> Ignore year filter for Web Search
+                </label>
+                <small>A SearXNG service must be running at this URL. Managed setup prefers port 8888 and automatically chooses 8889–8898 if needed.</small>
+              </div>
+              <div class="managed-service" aria-labelledby="managed-searxng-title">
+                <div>
+                  <div class="managed-service-title" id="managed-searxng-title">Local Web Search</div>
+                <div class="managed-service-status" id="managed-searxng-status" role="status" aria-live="polite">
+                  Checking local service…
+                </div>
+                <small>Set up saves the managed endpoint automatically. Save applies the Config fields above.</small>
+                </div>
+                <div class="managed-service-actions">
+                  <button type="button" id="searxng-setup">Set up</button>
+                  <button type="button" id="searxng-start" hidden>Start</button>
+                  <button type="button" id="searxng-update" hidden>Update</button>
+                  <button type="button" id="searxng-logs" hidden>View logs</button>
+                  <button type="button" class="managed-service-danger" id="searxng-remove" hidden>Remove</button>
+                  <label class="managed-cache-option" id="searxng-remove-cache-option" hidden>
+                    <input type="checkbox" id="searxng-remove-cache" />
+                    Delete cached image too
+                  </label>
+                </div>
+                <div class="managed-service-log-note" id="searxng-log-note" hidden></div>
+                <pre class="managed-service-logs" id="searxng-log-output" hidden></pre>
+              </div>
+              <div class="config-actions">
+                <button class="config-save" type="button" id="save-config">Save</button>
+                <span class="config-status" id="config-status" role="status" aria-live="polite"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="app.js?v=20260727d"></script>
+  </body>
+</html>
