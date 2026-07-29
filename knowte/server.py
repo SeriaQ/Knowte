@@ -6,6 +6,8 @@ import functools
 import json
 import os
 import socketserver
+import threading
+import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
@@ -16,11 +18,16 @@ from .config import (
     load_config,
     set_email,
     set_enabled_backends,
+    set_intelligent_max_results,
     set_max_papers,
+    set_ai_settings,
     set_semanticscholar_key,
     set_searxng_url,
     set_web_ignore_year_filter,
 )
+from .ai import AIError
+from .intelligent import intelligent_search
+from .plans import PLANS_PATH, create_plan, delete_plan, list_plans, update_plan
 from .search import search_papers
 from .searxng import (
     SearxngManagerError,
@@ -29,7 +36,31 @@ from .searxng import (
     manage_searxng,
     start_searxng_job,
 )
-from .usage import can_request, get_usage, record_request
+from .usage import can_request, get_usage, record_ai_usage, record_request
+
+_INTELLIGENT_PROGRESS = {}
+_INTELLIGENT_PROGRESS_LOCK = threading.RLock()
+
+
+def _set_intelligent_progress(
+    run_id: str,
+    stage: str,
+    details: dict | None = None,
+) -> None:
+    if not run_id:
+        return
+    with _INTELLIGENT_PROGRESS_LOCK:
+        _INTELLIGENT_PROGRESS[run_id] = {
+            "stage": stage,
+            **(details or {}),
+            "updated": time.monotonic(),
+        }
+        if len(_INTELLIGENT_PROGRESS) > 128:
+            oldest = min(
+                _INTELLIGENT_PROGRESS,
+                key=lambda key: _INTELLIGENT_PROGRESS[key]["updated"],
+            )
+            _INTELLIGENT_PROGRESS.pop(oldest, None)
 
 
 class KnowteTCPServer(socketserver.ThreadingTCPServer):
@@ -39,6 +70,7 @@ class KnowteTCPServer(socketserver.ThreadingTCPServer):
 
 class KnowteHandler(SimpleHTTPRequestHandler):
     config_path = CONFIG_PATH
+    plans_path = PLANS_PATH
     allowed_backends = ["arxiv", "openalex", "semanticscholar", "websearch"]
     default_backends = ["arxiv", "openalex", "semanticscholar"]
 
@@ -56,6 +88,14 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         except (ValueError, TypeError):
             number = 100
         return max(20, min(number, 1000))
+
+    @staticmethod
+    def _parse_bounded_int(value, default, minimum, maximum):
+        try:
+            number = int(value or default)
+        except (ValueError, TypeError):
+            number = default
+        return max(minimum, min(number, maximum))
 
     @staticmethod
     def _parse_year(value: str | None):
@@ -100,11 +140,191 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "searxng_url": config.get("searxng_url", ""),
                 "enabled_backends": self._parse_backends(config.get("enabled_backends")),
                 "max_papers": self._parse_max_papers(config.get("max_papers")),
+                "intelligent_max_results": self._parse_bounded_int(
+                    config.get("intelligent_max_results"), 20, 1, 100
+                ),
                 "web_ignore_year_filter": self._parse_bool(
                     config.get("web_ignore_year_filter")
                 ),
+                "ai_base_url": config.get("ai_base_url", ""),
+                "ai_api_key": "",
+                "ai_api_key_configured": bool(config.get("ai_api_key", "")),
+                "ai_chat_model": config.get("ai_chat_model", ""),
+                "ai_embedding_model": config.get("ai_embedding_model", ""),
+                "ai_embedding_separate_connection": self._parse_bool(
+                    config.get("ai_embedding_separate_connection")
+                ),
+                "ai_enable_thinking": (
+                    self._parse_bool(config.get("ai_enable_thinking"))
+                    if "ai_enable_thinking" in config
+                    else False
+                ),
+                "ai_embedding_base_url": config.get("ai_embedding_base_url", ""),
+                "ai_embedding_api_key": "",
+                "ai_embedding_api_key_configured": bool(
+                    config.get("ai_embedding_api_key", "")
+                ),
+                "ai_verify_batch_size": self._parse_bounded_int(
+                    config.get("ai_verify_batch_size"), 5, 1, 20
+                ),
+                "ai_verify_concurrency": self._parse_bounded_int(
+                    config.get("ai_verify_concurrency"), 1, 1, 8
+                ),
+                "ai_timeout_seconds": self._parse_bounded_int(
+                    config.get("ai_timeout_seconds"), 45, 5, 600
+                ),
+                "ai_configured": bool(
+                    config.get("ai_base_url") and config.get("ai_chat_model")
+                ),
+                "ai_chat_configured": bool(
+                    config.get("ai_base_url") and config.get("ai_chat_model")
+                ),
+                "ai_embedding_configured": bool(
+                    config.get("ai_embedding_model")
+                    and (
+                        config.get("ai_embedding_base_url")
+                        if self._parse_bool(
+                            config.get("ai_embedding_separate_connection")
+                        )
+                        else config.get("ai_base_url")
+                    )
+                ),
             }
             body = json.dumps(payload).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path.rstrip("/") == "/api/intelligent-progress":
+            run_id = parse_qs(parsed.query).get("run_id", [""])[0][:100]
+            with _INTELLIGENT_PROGRESS_LOCK:
+                state = dict(_INTELLIGENT_PROGRESS.get(run_id, {}))
+            self._send_json(state)
+            return
+        if parsed.path.rstrip("/") == "/api/intelligent-search":
+            params = parse_qs(parsed.query)
+            run_id = params.get("run_id", [""])[0][:100]
+            query = params.get("q", [""])[0].strip()
+            if not query:
+                self._send_json(
+                    {"error": "empty_query", "message": "Query is required."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            config = load_config(self.config_path)
+            requested_backends = params.get("backends", [""])[0]
+            backends = (
+                self._parse_backends(requested_backends)
+                if requested_backends.strip()
+                else self._parse_backends(config.get("enabled_backends"))
+            )
+            warnings = []
+            if "websearch" in backends and not (config.get("searxng_url") or "").strip():
+                backends = [source for source in backends if source != "websearch"]
+                warnings.append("websearch_unconfigured")
+            if not backends:
+                self._send_json(
+                    {"error": "no_search_backends", "warnings": warnings},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            usage = can_request(backends=backends)
+            academic_enabled = any(
+                source in backends
+                for source in ("arxiv", "openalex", "semanticscholar")
+            )
+            web_enabled = "websearch" in backends
+            if (academic_enabled and not usage.get("allowed_paper", usage["allowed"])) or (
+                web_enabled and not usage.get("allowed_web", True)
+            ):
+                self._send_json(
+                    {
+                        "error": "intelligent_rate_limited",
+                        "usage": usage,
+                        "warnings": warnings,
+                    },
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                )
+                return
+            areas = [
+                value.strip()
+                for value in params.get("areas", [""])[0].split(",")
+                if value.strip()
+            ]
+            year_from = self._parse_year(params.get("year_from", [""])[0])
+            year_to = self._parse_year(params.get("year_to", [""])[0])
+            if year_from is not None and year_to is not None and year_from > year_to:
+                year_from, year_to = year_to, year_from
+            try:
+                limit = self._parse_bounded_int(
+                    params.get("limit", ["20"])[0], 20, 1, 100
+                )
+                web_pages = max(
+                    1,
+                    min(int(params.get("web_pages", ["1"])[0] or "1"), 10),
+                )
+                payload = intelligent_search(
+                    query,
+                    config,
+                    limit,
+                    backends,
+                    areas,
+                    year_from,
+                    year_to,
+                    web_pages,
+                    progress=lambda stage, details: _set_intelligent_progress(
+                        run_id, stage, details
+                    ),
+                )
+                payload["warnings"] = [*warnings, *payload.get("warnings", [])]
+                payload["enabled_backends"] = backends
+                payload["year_from"] = year_from
+                payload["year_to"] = year_to
+                budget = payload.get("request_budget", {})
+                ai_usage = payload.pop("_ai_usage", {})
+                latest_usage = get_usage()
+                for _ in range(int(budget.get("academic_retrieval", 0))):
+                    latest_usage = record_request(backends=["arxiv"])
+                for _ in range(int(budget.get("web_retrieval", 0))):
+                    latest_usage = record_request(backends=["websearch"])
+                if ai_usage:
+                    latest_usage = record_ai_usage(
+                        chat_requests=ai_usage.get("chat_requests", 0),
+                        chat_tokens=ai_usage.get("chat_tokens", 0),
+                        embedding_requests=ai_usage.get("embedding_requests", 0),
+                        embedding_tokens=ai_usage.get("embedding_tokens", 0),
+                    )
+                payload["usage"] = latest_usage
+                self._send_json(payload, HTTPStatus.OK)
+            except AIError as error:
+                self._send_json(
+                    {
+                        "error": error.code,
+                        "message": str(error),
+                        "warnings": warnings,
+                        "usage": get_usage(),
+                    },
+                    (
+                        HTTPStatus.BAD_REQUEST
+                        if error.code in {
+                            "ai_unconfigured",
+                            "invalid_base_url",
+                            "chat_model_missing",
+                            "embedding_model_missing",
+                        }
+                        else HTTPStatus.BAD_GATEWAY
+                    ),
+                )
+            except (TypeError, ValueError):
+                self._send_json(
+                    {"error": "invalid_request", "message": "Invalid search parameters."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if parsed.path.rstrip("/") == "/api/plans":
+            body = json.dumps({"plans": list_plans(self.plans_path)}).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -175,7 +395,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(body)
                 return
             config = load_config(self.config_path)
-            backends = self._parse_backends(config.get("enabled_backends"))
+            requested_backends = params.get("backends", [""])[0]
+            backends = (
+                self._parse_backends(requested_backends)
+                if requested_backends.strip()
+                else self._parse_backends(config.get("enabled_backends"))
+            )
             warnings = []
             if "websearch" in backends and not (config.get("searxng_url") or "").strip():
                 backends = [b for b in backends if b != "websearch"]
@@ -361,7 +586,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/")
-        if route not in {"/api/config", "/api/searxng"}:
+        if route not in {"/api/config", "/api/searxng", "/api/plans"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -370,6 +595,20 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
         except json.JSONDecodeError:
             payload = {}
+        if route == "/api/plans":
+            try:
+                response_payload = create_plan(payload, self.plans_path)
+                status_code = HTTPStatus.CREATED
+            except ValueError as error:
+                response_payload = {"error": "invalid_plan", "message": str(error)}
+                status_code = HTTPStatus.BAD_REQUEST
+            response = json.dumps(response_payload).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            return
         if route == "/api/searxng":
             action = str(payload.get("action") or "").strip()
             try:
@@ -457,13 +696,55 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self.wfile.write(response)
             return
         max_papers = self._parse_max_papers(str(payload.get("max_papers") or "100"))
+        intelligent_max_results = self._parse_bounded_int(
+            payload.get("intelligent_max_results"), 20, 1, 100
+        )
         config = set_email(email, self.config_path)
         if api_key_supplied:
             config = set_semanticscholar_key(api_key, self.config_path)
         config = set_searxng_url(searxng_url, self.config_path)
         config = set_enabled_backends(enabled_backends, self.config_path)
         config = set_max_papers(max_papers, self.config_path)
+        config = set_intelligent_max_results(
+            intelligent_max_results, self.config_path
+        )
         config = set_web_ignore_year_filter(web_ignore_year_filter, self.config_path)
+        ai_field_names = {
+            "ai_base_url",
+            "ai_api_key",
+            "ai_chat_model",
+            "ai_embedding_model",
+            "ai_embedding_separate_connection",
+            "ai_enable_thinking",
+            "ai_embedding_base_url",
+            "ai_embedding_api_key",
+            "ai_verify_batch_size",
+            "ai_verify_concurrency",
+            "ai_timeout_seconds",
+        }
+        if ai_field_names.intersection(payload):
+            ai_settings = {
+                "ai_base_url": payload.get("ai_base_url"),
+                "ai_chat_model": payload.get("ai_chat_model"),
+                "ai_embedding_model": payload.get("ai_embedding_model"),
+                "ai_embedding_separate_connection": self._parse_bool(
+                    payload.get("ai_embedding_separate_connection")
+                ),
+                "ai_enable_thinking": self._parse_bool(
+                    payload.get("ai_enable_thinking")
+                ),
+                "ai_embedding_base_url": payload.get("ai_embedding_base_url"),
+                "ai_verify_batch_size": payload.get("ai_verify_batch_size"),
+                "ai_verify_concurrency": payload.get("ai_verify_concurrency"),
+                "ai_timeout_seconds": payload.get("ai_timeout_seconds"),
+            }
+            if "ai_api_key" in payload:
+                ai_settings["ai_api_key"] = payload.get("ai_api_key")
+            if "ai_embedding_api_key" in payload:
+                ai_settings["ai_embedding_api_key"] = payload.get(
+                    "ai_embedding_api_key"
+                )
+            config = set_ai_settings(ai_settings, self.config_path)
         response_payload = {
             "email": config.get("email", ""),
             "semanticscholar_api_key": "",
@@ -473,8 +754,54 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "searxng_url": config.get("searxng_url", ""),
             "enabled_backends": self._parse_backends(config.get("enabled_backends")),
             "max_papers": self._parse_max_papers(config.get("max_papers")),
+            "intelligent_max_results": self._parse_bounded_int(
+                config.get("intelligent_max_results"), 20, 1, 100
+            ),
             "web_ignore_year_filter": self._parse_bool(
                 config.get("web_ignore_year_filter")
+            ),
+            "ai_base_url": config.get("ai_base_url", ""),
+            "ai_api_key": "",
+            "ai_api_key_configured": bool(config.get("ai_api_key", "")),
+            "ai_chat_model": config.get("ai_chat_model", ""),
+            "ai_embedding_model": config.get("ai_embedding_model", ""),
+            "ai_embedding_separate_connection": self._parse_bool(
+                config.get("ai_embedding_separate_connection")
+            ),
+            "ai_enable_thinking": (
+                self._parse_bool(config.get("ai_enable_thinking"))
+                if "ai_enable_thinking" in config
+                else False
+            ),
+            "ai_embedding_base_url": config.get("ai_embedding_base_url", ""),
+            "ai_embedding_api_key": "",
+            "ai_embedding_api_key_configured": bool(
+                config.get("ai_embedding_api_key", "")
+            ),
+            "ai_verify_batch_size": self._parse_bounded_int(
+                config.get("ai_verify_batch_size"), 5, 1, 20
+            ),
+            "ai_verify_concurrency": self._parse_bounded_int(
+                config.get("ai_verify_concurrency"), 1, 1, 8
+            ),
+            "ai_timeout_seconds": self._parse_bounded_int(
+                config.get("ai_timeout_seconds"), 45, 5, 600
+            ),
+            "ai_configured": bool(
+                config.get("ai_base_url") and config.get("ai_chat_model")
+            ),
+            "ai_chat_configured": bool(
+                config.get("ai_base_url") and config.get("ai_chat_model")
+            ),
+            "ai_embedding_configured": bool(
+                config.get("ai_embedding_model")
+                and (
+                    config.get("ai_embedding_base_url")
+                    if self._parse_bool(
+                        config.get("ai_embedding_separate_connection")
+                    )
+                    else config.get("ai_base_url")
+                )
             ),
         }
         response = json.dumps(response_payload).encode("utf-8")
@@ -484,13 +811,70 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response)
 
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        prefix = "/api/plans/"
+        if not parsed.path.startswith(prefix):
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        plan_id = parsed.path[len(prefix):].strip("/")
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length) if length > 0 else b""
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+            plan = update_plan(plan_id, payload, self.plans_path)
+            if plan is None:
+                response_payload = {"error": "plan_not_found"}
+                status_code = HTTPStatus.NOT_FOUND
+            else:
+                response_payload = plan
+                status_code = HTTPStatus.OK
+        except (json.JSONDecodeError, ValueError) as error:
+            response_payload = {"error": "invalid_plan", "message": str(error)}
+            status_code = HTTPStatus.BAD_REQUEST
+        response = json.dumps(response_payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        prefix = "/api/plans/"
+        if not parsed.path.startswith(prefix):
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        plan_id = parsed.path[len(prefix):].strip("/")
+        deleted = delete_plan(plan_id, self.plans_path)
+        response_payload = {"deleted": deleted}
+        response = json.dumps(response_payload).encode("utf-8")
+        self.send_response(HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
     def log_message(self, format, *args):
         return
+
+    def _send_json(self, payload, status=HTTPStatus.OK):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def create_server(host, port, config_path: Path | None = None):
     web_root = Path(__file__).resolve().parent / "web"
     KnowteHandler.config_path = config_path or CONFIG_PATH
+    KnowteHandler.plans_path = (
+        KnowteHandler.config_path.with_name("plans.json")
+        if config_path is not None
+        else PLANS_PATH
+    )
     handler = functools.partial(KnowteHandler, directory=str(web_root))
     server = KnowteTCPServer((host, port), handler)
     return server

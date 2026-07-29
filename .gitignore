@@ -1,3 +1,4 @@
+/_cleanup.py
 __pycache__/
 *.pyc
 *.pyo

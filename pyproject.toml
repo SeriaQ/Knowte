@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first research discovery workspace combining academic databases and web search."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,7 +15,7 @@ authors = [
 ]
 keywords = ["research", "notes", "ai", "summarization"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.9",
@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/knowte"
+Homepage = "https://github.com/SeriaQ/Knowte"
 
 [project.scripts]
 knowte = "knowte.server:main"

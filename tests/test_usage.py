@@ -74,6 +74,25 @@ class UsageLimitTests(unittest.TestCase):
         self.assertEqual(both["last_day"], 2)
         self.assertEqual(both["last_day_web"], 1)
 
+    def test_ai_usage_tracks_requests_and_tokens(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            usage_path = Path(temp_dir) / "usage.json"
+            with patch.object(usage, "USAGE_DIR", usage_path.parent), patch.object(
+                usage, "USAGE_PATH", usage_path
+            ):
+                result = usage.record_ai_usage(
+                    chat_requests=2,
+                    chat_tokens=150,
+                    embedding_requests=1,
+                    embedding_tokens=80,
+                    now=1_700_000_000,
+                )
+
+        self.assertEqual(result["last_day_ai_chat"], 2)
+        self.assertEqual(result["last_day_ai_chat_tokens"], 150)
+        self.assertEqual(result["last_day_ai_embedding"], 1)
+        self.assertEqual(result["last_day_ai_embedding_tokens"], 80)
+
 
 if __name__ == "__main__":
     unittest.main()

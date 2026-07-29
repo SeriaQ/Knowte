@@ -38,6 +38,10 @@ def save_config(config: Dict[str, str], path: Path | None = None) -> None:
         safe_value = str(value).replace("\n", " ")
         lines.append(f"{key}: {safe_value}")
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        config_path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def set_email(email: str, path: Path | None = None) -> Dict[str, str]:
@@ -91,8 +95,68 @@ def set_max_papers(max_papers: int, path: Path | None = None) -> Dict[str, str]:
     return config
 
 
+def set_intelligent_max_results(
+    max_results: int,
+    path: Path | None = None,
+) -> Dict[str, str]:
+    config = load_config(path)
+    if max_results > 0:
+        config["intelligent_max_results"] = str(max_results)
+    else:
+        config.pop("intelligent_max_results", None)
+    save_config(config, path)
+    return config
+
+
 def set_web_ignore_year_filter(enabled: bool, path: Path | None = None) -> Dict[str, str]:
     config = load_config(path)
     config["web_ignore_year_filter"] = "true" if enabled else "false"
+    save_config(config, path)
+    return config
+
+
+def set_ai_settings(
+    settings: Dict[str, object],
+    path: Path | None = None,
+) -> Dict[str, str]:
+    config = load_config(path)
+    config.pop("ai_verify_limit", None)
+    config.pop("ai_candidate_limit", None)
+    text_fields = (
+        "ai_base_url",
+        "ai_chat_model",
+        "ai_embedding_model",
+        "ai_embedding_base_url",
+    )
+    for field in text_fields:
+        value = str(settings.get(field) or "").strip()
+        if value:
+            config[field] = value
+        else:
+            config.pop(field, None)
+    for field, default, minimum, maximum in (
+        ("ai_verify_batch_size", 5, 1, 20),
+        ("ai_verify_concurrency", 1, 1, 8),
+        ("ai_timeout_seconds", 45, 5, 600),
+    ):
+        try:
+            value = int(settings.get(field) or default)
+        except (TypeError, ValueError):
+            value = default
+        config[field] = str(max(minimum, min(value, maximum)))
+    config["ai_embedding_separate_connection"] = (
+        "true" if settings.get("ai_embedding_separate_connection") else "false"
+    )
+    config["ai_enable_thinking"] = (
+        "true" if settings.get("ai_enable_thinking", False) else "false"
+    )
+    for field in ("ai_api_key", "ai_embedding_api_key"):
+        if field not in settings:
+            continue
+        value = str(settings.get(field) or "").strip()
+        if value:
+            config[field] = value
+        else:
+            config.pop(field, None)
     save_config(config, path)
     return config

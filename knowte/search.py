@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterable, List
 
 from .areas import AREAS
@@ -286,6 +287,7 @@ def search_papers(
     allow_paper_external: bool = True,
     allow_web_external: bool = True,
     diagnostics: Dict[str, object] | None = None,
+    strict_match: bool = True,
 ) -> List[dict]:
     query = (query or "").strip()
     if not query:
@@ -324,34 +326,41 @@ def search_papers(
         academic_results = {source: [] for source in academic_sources}
         if academic_sources and allow_paper_external:
             academic_external_request = True
-            if "arxiv" in enabled:
-                academic_results["arxiv"] = search_arxiv(
-                    query,
-                    limit=fetch_limit,
-                    categories=arxiv_cats,
-                    year_from=year_from,
-                    year_to=year_to,
-                )
-            if "openalex" in enabled:
-                academic_results["openalex"] = search_openalex(
-                    query,
-                    email=email,
-                    limit=fetch_limit,
-                    concepts=openalex_concepts,
-                    query_boosts=boosts,
-                    year_from=year_from,
-                    year_to=year_to,
-                )
-            if "semanticscholar" in enabled:
-                academic_results["semanticscholar"] = search_semanticscholar(
-                    query,
-                    limit=fetch_limit,
-                    fields=s2_fields,
-                    api_key=semanticscholar_key,
-                    query_boosts=boosts,
-                    year_from=year_from,
-                    year_to=year_to,
-                )
+            requests = {}
+            with ThreadPoolExecutor(max_workers=len(academic_sources)) as executor:
+                if "arxiv" in enabled:
+                    requests["arxiv"] = executor.submit(
+                        search_arxiv,
+                        query,
+                        limit=fetch_limit,
+                        categories=arxiv_cats,
+                        year_from=year_from,
+                        year_to=year_to,
+                    )
+                if "openalex" in enabled:
+                    requests["openalex"] = executor.submit(
+                        search_openalex,
+                        query,
+                        email=email,
+                        limit=fetch_limit,
+                        concepts=openalex_concepts,
+                        query_boosts=boosts,
+                        year_from=year_from,
+                        year_to=year_to,
+                    )
+                if "semanticscholar" in enabled:
+                    requests["semanticscholar"] = executor.submit(
+                        search_semanticscholar,
+                        query,
+                        limit=fetch_limit,
+                        fields=s2_fields,
+                        api_key=semanticscholar_key,
+                        query_boosts=boosts,
+                        year_from=year_from,
+                        year_to=year_to,
+                    )
+                for source, future in requests.items():
+                    academic_results[source] = future.result()
             _store_academic_pools(academic_cache_key, academic_results)
         elif academic_sources:
             academic_rate_limited = True
@@ -373,17 +382,20 @@ def search_papers(
         "arxiv": [
             paper
             for paper in academic_results.get("arxiv", [])
-            if _matches(query, paper) and _matches_year(paper, year_from, year_to)
+            if (not strict_match or _matches(query, paper))
+            and _matches_year(paper, year_from, year_to)
         ],
         "openalex": [
             paper
             for paper in academic_results.get("openalex", [])
-            if _matches(query, paper) and _matches_year(paper, year_from, year_to)
+            if (not strict_match or _matches(query, paper))
+            and _matches_year(paper, year_from, year_to)
         ],
         "semanticscholar": [
             paper
             for paper in academic_results.get("semanticscholar", [])
-            if _matches(query, paper) and _matches_year(paper, year_from, year_to)
+            if (not strict_match or _matches(query, paper))
+            and _matches_year(paper, year_from, year_to)
         ],
     }
     pools = {source: pools[source] for source in academic_sources}
@@ -391,7 +403,7 @@ def search_papers(
     filtered_web = [
         paper
         for paper in web_results
-        if _matches(query, paper)
+        if (not strict_match or _matches(query, paper))
         and (
             web_ignore_year_filter
             or _matches_year(paper, year_from, year_to)

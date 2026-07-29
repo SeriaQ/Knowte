@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260727c" />
+    <link rel="stylesheet" href="styles.css?v=20260729b" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -27,6 +27,7 @@
         </div>
         <nav class="side-nav">
           <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
+          <button class="side-link" type="button" data-target="plans-panel">Plans</button>
           <button class="side-link" type="button" data-target="config-panel">Config</button>
         </nav>
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Theme: Auto. Switch to light mode" title="Auto mode">
@@ -37,6 +38,13 @@
       <main class="content">
         <section class="hero panel-view is-active" id="search-panel">
           <div class="panel">
+            <div class="search-mode-bar">
+              <div class="search-mode-switch" role="group" aria-label="Search mode">
+                <button type="button" class="search-mode-option is-active" data-search-mode="keyword" aria-pressed="true">Keyword</button>
+                <button type="button" class="search-mode-option" data-search-mode="smart" aria-pressed="false">Intelligent</button>
+              </div>
+              <small id="search-mode-hint">Search providers directly with your keywords.</small>
+            </div>
             <form id="search-form">
               <input
                 type="text"
@@ -44,8 +52,37 @@
                 placeholder="Enter keywords, authors, or domains..."
                 aria-label="Enter research keywords"
               />
-              <button type="submit">Search the Archive</button>
+              <button type="submit" id="search-submit">Search</button>
+              <button type="button" class="save-plan-btn" id="save-plan">Save Plan</button>
             </form>
+            <div class="intelligent-progress" id="intelligent-progress" hidden>
+              <div class="intelligent-progress-head">
+                <div>Intelligent discovery</div>
+                <small>Uses the OpenAI-compatible connection configured in Config.</small>
+              </div>
+              <div class="intelligent-channels">
+                <div class="intelligent-channel">
+                  <strong>Academic</strong>
+                  <div class="intelligent-stages" id="academic-stages">
+                    <span data-stage="expand">Semantic expansion</span>
+                    <span data-stage="recall">Recall</span>
+                    <span data-stage="embed">Semantic ranking</span>
+                    <span data-stage="verify">LLM verify</span>
+                  </div>
+                </div>
+                <div class="intelligent-channel">
+                  <strong>Web</strong>
+                  <div class="intelligent-stages" id="web-stages">
+                    <span data-stage="recall">Recall</span>
+                    <span data-stage="verify">LLM verify</span>
+                  </div>
+                </div>
+              </div>
+              <div class="intelligent-budget" id="intelligent-budget">
+                Actual request counts appear after the search.
+              </div>
+              <div class="intelligent-expanded" id="intelligent-expanded" hidden></div>
+            </div>
             <div class="filters" id="search-filters">
               <div class="filters-head">
                 <p class="filters-title">Search filters</p>
@@ -115,6 +152,27 @@
                   <strong><span id="usage-day-web">0</span><small>/ 500</small></strong>
                 </div>
               </div>
+              <div class="usage-group usage-group-ai">
+                <div class="usage-head">
+                  <span class="usage-signal" aria-hidden="true"></span>
+                  <div>
+                    <div class="usage-label">AI channel</div>
+                    <div class="usage-caption">Model requests and tokens</div>
+                  </div>
+                </div>
+                <div class="usage-ai-split">
+                  <div class="usage-ai-part">
+                    <div class="usage-ai-title">Language model</div>
+                    <div><span id="usage-day-ai-chat">0</span><small> requests today</small></div>
+                    <strong><span id="usage-day-ai-chat-tokens">0</span><small> tokens</small></strong>
+                  </div>
+                  <div class="usage-ai-part">
+                    <div class="usage-ai-title">Embeddings</div>
+                    <div><span id="usage-day-ai-embedding">0</span><small> requests today</small></div>
+                    <strong><span id="usage-day-ai-embedding-tokens">0</span><small> tokens</small></strong>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="status" id="status" role="status">
               Awaiting query. The archive wakes slowly.
@@ -139,6 +197,20 @@
           </div>
         </section>
 
+        <section class="hero panel-view" id="plans-panel">
+          <div class="panel">
+            <div class="plans-toolbar">
+              <div>
+                <div class="plans-label">Reusable search conditions</div>
+                <small>Plans use current credentials and service endpoints from Config.</small>
+              </div>
+              <button type="button" id="go-to-search">Go to Search</button>
+            </div>
+            <div class="plans-status" id="plans-status" role="status"></div>
+            <div class="plans-list" id="plans-list"></div>
+          </div>
+        </section>
+
         <section class="hero panel-view" id="config-panel">
           <div class="panel">
             <div class="config">
@@ -151,20 +223,82 @@
                   <label><input type="checkbox" value="websearch" /> Web Search</label>
                 </div>
               </div>
-              <div class="config-row">
-                <label for="max-papers">Max papers per search (N)</label>
-                <input
-                  type="number"
-                  id="max-papers"
-                  name="max-papers"
-                  min="20"
-                  max="1000"
-                  step="10"
-                  value="100"
-                  aria-label="Maximum number of papers per search"
-                />
-                <small>The default 100 matches the maximum candidate batch requested from each academic provider, using a full retrieval round without adding another request; unused candidates stay in memory for Find More. N is the final target for academic or mixed searches; source slots use 3:3:3:1, 4:4:2, or 7:3 with Web Search, and academic sources fill shortages. Web-only searches ignore N and use actual SearXNG pages.</small>
+              <div class="ai-limits-grid search-result-limits">
+                <div class="config-row">
+                  <label for="max-papers">Keyword results</label>
+                  <input type="number" id="max-papers" name="max-papers" min="20" max="1000" step="10" value="100" />
+                  <small>Initial academic result target. Find More adds this many; Web-only searches use actual SearXNG pages.</small>
+                </div>
+                <div class="config-row">
+                  <label for="intelligent-max-results">Intelligent results</label>
+                  <input type="number" id="intelligent-max-results" min="1" max="100" step="1" value="20" />
+                  <small>Target number of results that pass LLM verification. Verification stops when this target or the candidate pool is exhausted.</small>
+                </div>
               </div>
+              <fieldset class="ai-config">
+                <legend>Intelligent Search · OpenAI-compatible</legend>
+                <div class="config-row">
+                  <label for="ai-base-url">AI Base URL</label>
+                  <input type="text" id="ai-base-url" placeholder="https://provider.example/v1" autocomplete="off" />
+                  <small>Enter the API root ending in <code>/v1</code>, not the full <code>/chat/completions</code> path. Local services work too, for example <code>http://127.0.0.1:11434/v1</code>.</small>
+                </div>
+                <div class="config-row">
+                  <label for="ai-api-key">AI API key</label>
+                  <div class="secret-input-row">
+                    <input type="password" id="ai-api-key" placeholder="Optional for local services" autocomplete="new-password" />
+                    <button type="button" class="secret-remove" id="ai-api-key-remove" hidden>Remove</button>
+                  </div>
+                  <small class="secret-remove-note" id="ai-api-key-remove-note" hidden>Removal pending. Select Save to apply.</small>
+                </div>
+                <div class="ai-model-grid">
+                  <div class="config-row">
+                    <label for="ai-chat-model">Language model</label>
+                    <input type="text" id="ai-chat-model" placeholder="Provider model ID" autocomplete="off" />
+                    <small>Used for search-query expansion and final relevance verification.</small>
+                    <label class="config-check">
+                      <input type="checkbox" id="ai-enable-thinking" />
+                      Enable Thinking
+                    </label>
+                  </div>
+                  <div class="config-row">
+                    <label for="ai-embedding-model">Embedding model</label>
+                    <input type="text" id="ai-embedding-model" placeholder="Provider embedding model ID" autocomplete="off" />
+                    <small>Optional but recommended. Used to rank academic titles and abstracts in batches; without it, Intelligent Search continues with LLM verification.</small>
+                  </div>
+                </div>
+                <details class="ai-embedding-details" id="ai-embedding-separate">
+                  <summary>Use a separate connection for embeddings</summary>
+                  <div class="ai-embedding-override" id="ai-embedding-override">
+                    <div class="config-row">
+                      <label for="ai-embedding-base-url">Embedding Base URL</label>
+                      <input type="text" id="ai-embedding-base-url" placeholder="https://embedding-provider.example/v1" autocomplete="off" />
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-embedding-api-key">Embedding API key</label>
+                      <div class="secret-input-row">
+                        <input type="password" id="ai-embedding-api-key" placeholder="Optional for local services" autocomplete="new-password" />
+                        <button type="button" class="secret-remove" id="ai-embedding-api-key-remove" hidden>Remove</button>
+                      </div>
+                      <small class="secret-remove-note" id="ai-embedding-api-key-remove-note" hidden>Removal pending. Select Save to apply.</small>
+                    </div>
+                  </div>
+                </details>
+                <div class="ai-limits-grid">
+                  <div class="config-row">
+                    <label for="ai-verify-batch-size">Verification batch size</label>
+                    <input type="number" id="ai-verify-batch-size" min="1" max="20" value="5" />
+                  </div>
+                  <div class="config-row">
+                    <label for="ai-verify-concurrency">Concurrent verification batches</label>
+                    <input type="number" id="ai-verify-concurrency" min="1" max="8" value="1" />
+                  </div>
+                  <div class="config-row">
+                    <label for="ai-timeout">AI request timeout (seconds)</label>
+                    <input type="number" id="ai-timeout" min="5" max="600" value="45" />
+                  </div>
+                </div>
+                <small class="ai-config-note">Keys are saved only in <code>~/.knowte/config.yml</code>, returned to the browser only as “configured / not configured”, and never copied into Plans.</small>
+              </fieldset>
               <div class="config-row">
                 <label for="email">OpenAlex email</label>
                 <input
@@ -177,16 +311,17 @@
               </div>
               <div class="config-row">
                 <label for="s2-key">Semantic Scholar API key</label>
-                <input
-                  type="text"
-                  id="s2-key"
-                  name="s2-key"
-                  placeholder="Optional API key"
-                  aria-label="Semantic Scholar API key"
-                />
-                <label>
-                  <input type="checkbox" id="s2-key-clear" /> Clear saved API key
-                </label>
+                <div class="secret-input-row">
+                  <input
+                    type="text"
+                    id="s2-key"
+                    name="s2-key"
+                    placeholder="Optional API key"
+                    aria-label="Semantic Scholar API key"
+                  />
+                  <button type="button" class="secret-remove" id="s2-key-remove" hidden>Remove</button>
+                </div>
+                <small class="secret-remove-note" id="s2-key-remove-note" hidden>Removal pending. Select Save to apply.</small>
               </div>
               <div class="config-row">
                 <label for="searxng-url">SearXNG URL</label>
@@ -198,7 +333,7 @@
                   placeholder="http://127.0.0.1:8888/search"
                   aria-label="SearXNG base search URL"
                 />
-                <label>
+                <label class="config-check">
                   <input type="checkbox" id="web-ignore-year-filter" /> Ignore year filter for Web Search
                 </label>
                 <small>A SearXNG service must be running at this URL. Managed setup prefers port 8888 and automatically chooses 8889–8898 if needed.</small>
@@ -234,6 +369,6 @@
         </section>
       </main>
     </div>
-    <script src="app.js?v=20260727d"></script>
+    <script src="app.js?v=20260729e"></script>
   </body>
 </html>

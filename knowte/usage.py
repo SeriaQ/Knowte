@@ -26,6 +26,10 @@ def _empty_usage() -> Dict[str, object]:
         "recent_paper": [],
         "day_web_count": 0,
         "recent_web": [],
+        "day_ai_chat_requests": 0,
+        "day_ai_chat_tokens": 0,
+        "day_ai_embedding_requests": 0,
+        "day_ai_embedding_tokens": 0,
     }
 
 
@@ -54,7 +58,6 @@ def _normalize_usage(data: Dict[str, object], now: float) -> Dict[str, object]:
     day_key = _today_key(now)
     recent_paper = [t for t in data.get("recent_paper", []) if now - t <= WINDOW_SECONDS]
     recent_web = [t for t in data.get("recent_web", []) if now - t <= WINDOW_SECONDS]
-
     if "recent_paper" not in data and "recent" in data:
         recent_paper = [t for t in data.get("recent", []) if now - t <= WINDOW_SECONDS]
     if "day_paper_count" not in data and "day_count" in data:
@@ -63,9 +66,26 @@ def _normalize_usage(data: Dict[str, object], now: float) -> Dict[str, object]:
         day_paper_count = int(data.get("day_paper_count", 0) or 0)
 
     day_web_count = int(data.get("day_web_count", 0) or 0)
+    day_ai_chat_requests = int(
+        data.get("day_ai_chat_requests", data.get("day_ai_requests", 0)) or 0
+    )
+    day_ai_chat_tokens = int(
+        data.get(
+            "day_ai_chat_tokens",
+            int(data.get("day_ai_prompt_tokens", 0) or 0)
+            + int(data.get("day_ai_completion_tokens", 0) or 0),
+        )
+        or 0
+    )
+    day_ai_embedding_requests = int(data.get("day_ai_embedding_requests", 0) or 0)
+    day_ai_embedding_tokens = int(data.get("day_ai_embedding_tokens", 0) or 0)
     if data.get("day") != day_key:
         day_paper_count = 0
         day_web_count = 0
+        day_ai_chat_requests = 0
+        day_ai_chat_tokens = 0
+        day_ai_embedding_requests = 0
+        day_ai_embedding_tokens = 0
 
     normalized = {
         "day": day_key,
@@ -73,6 +93,10 @@ def _normalize_usage(data: Dict[str, object], now: float) -> Dict[str, object]:
         "recent_paper": recent_paper,
         "day_web_count": day_web_count,
         "recent_web": recent_web,
+        "day_ai_chat_requests": day_ai_chat_requests,
+        "day_ai_chat_tokens": day_ai_chat_tokens,
+        "day_ai_embedding_requests": day_ai_embedding_requests,
+        "day_ai_embedding_tokens": day_ai_embedding_tokens,
     }
     return normalized
 
@@ -88,6 +112,10 @@ def get_usage(now: float | None = None) -> Dict[str, int]:
             "last_day": int(data["day_paper_count"]),
             "last_5_min_web": len(data["recent_web"]),
             "last_day_web": int(data["day_web_count"]),
+            "last_day_ai_chat": int(data["day_ai_chat_requests"]),
+            "last_day_ai_chat_tokens": int(data["day_ai_chat_tokens"]),
+            "last_day_ai_embedding": int(data["day_ai_embedding_requests"]),
+            "last_day_ai_embedding_tokens": int(data["day_ai_embedding_tokens"]),
         }
 
 
@@ -118,7 +146,44 @@ def record_request(backends: list[str] | None = None, now: float | None = None) 
             "last_day": int(data["day_paper_count"]),
             "last_5_min_web": len(data["recent_web"]),
             "last_day_web": int(data["day_web_count"]),
+            "last_day_ai_chat": int(data["day_ai_chat_requests"]),
+            "last_day_ai_chat_tokens": int(data["day_ai_chat_tokens"]),
+            "last_day_ai_embedding": int(data["day_ai_embedding_requests"]),
+            "last_day_ai_embedding_tokens": int(data["day_ai_embedding_tokens"]),
         }
+
+
+def record_ai_usage(
+    chat_requests: int = 0,
+    chat_tokens: int = 0,
+    embedding_requests: int = 0,
+    embedding_tokens: int = 0,
+    now: float | None = None,
+) -> Dict[str, int]:
+    if now is None:
+        now = time.time()
+    chat_request_count = max(0, int(chat_requests or 0))
+    chat_token_count = max(0, int(chat_tokens or 0))
+    embedding_request_count = max(0, int(embedding_requests or 0))
+    embedding_token_count = max(0, int(embedding_tokens or 0))
+    with _USAGE_LOCK:
+        data = _normalize_usage(_load_usage(), now)
+        if chat_request_count:
+            data["day_ai_chat_requests"] = (
+                int(data["day_ai_chat_requests"]) + chat_request_count
+            )
+        if embedding_request_count:
+            data["day_ai_embedding_requests"] = (
+                int(data["day_ai_embedding_requests"]) + embedding_request_count
+            )
+        data["day_ai_chat_tokens"] = (
+            int(data["day_ai_chat_tokens"]) + chat_token_count
+        )
+        data["day_ai_embedding_tokens"] = (
+            int(data["day_ai_embedding_tokens"]) + embedding_token_count
+        )
+        _save_usage(data)
+        return get_usage(now=now)
 
 
 def can_request(backends: list[str] | None = None) -> Dict[str, int | bool]:

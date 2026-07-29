@@ -1,0 +1,98 @@
+# Changelog
+
+All notable changes to Knowte will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-07-30
+
+### Added
+
+- OpenAI-compatible Chat Completions and Embeddings clients supporting shared
+  or separate cloud and local connections.
+- Production Intelligent Search pipeline with academic query expansion, broad
+  recall, cached batch Embeddings, semantic ranking, and LLM verification.
+- Web Intelligent Search path that skips academic expansion and Embeddings and
+  proceeds directly from SearXNG recall to LLM verification.
+- Per-result discovery paths, match explanations, semantic scores, actual AI
+  request counts, retrieval-round counts, and visible degraded-stage fallbacks.
+- Write-only AI and Embedding API key configuration with user-only config-file
+  permissions where supported.
+- Locally persisted search Plans that store intent, filters, mode, and logical
+  source selection while continuing to use current Config credentials and
+  service endpoints.
+- Plans view for loading, running, renaming, editing the query, and deleting
+  reusable searches.
+- Configurable AI request timeout, verification batch size, verification
+  concurrency, and model thinking behavior.
+- Live Intelligent Search stage progress, elapsed time, and visible expanded
+  retrieval queries.
+
+### Changed
+
+- Intelligent Search now runs directly from Search instead of opening an
+  intermediate Search Plan dialog.
+- Plans uses a direct **Go to Search** action instead of the ambiguous
+  **Save Current** action.
+- Keyword and Intelligent result targets are configured independently.
+- Academic candidate retrieval is derived automatically from the Keyword
+  result target and each provider's one-request maximum.
+- LLM verification now proceeds in batches until it reaches the Intelligent
+  result target or exhausts the candidate pool.
+- Academic providers run concurrently within each retrieval query while
+  original and expanded queries remain sequential to reduce rate-limit risk.
+- Intelligent Search progress now follows the actual order: semantic
+  expansion, recall, semantic ranking, and LLM verification.
+
+### Fixed
+
+- Intelligent Search no longer appears to remain in Recall while later AI
+  stages are running.
+- Verification fallback messages distinguish embedding-ranked, academic
+  recall, and Web recall results.
+- Local OpenAI-compatible endpoints bypass system proxies when appropriate.
+
+### Removed
+
+- The previous interpreted-query Search Plan dialog.
+- Manual Academic candidate and LLM verification candidate limits.
+
+## [0.1.0] - 2026-07-28
+
+### Added
+
+- Local browser interface with Search and Config views.
+- Unified search across arXiv, OpenAlex, and Semantic Scholar.
+- Optional Web Search through an existing or Knowte-managed SearXNG instance.
+- Research-area and publication-year filters mapped across academic providers.
+- Cross-source result deduplication and source-aware result allocation.
+- Direct Paper, PDF, and DOI actions when supplied by academic sources.
+- Pagination with short-lived academic candidate and Web page caches.
+- Independent five-minute and daily request limits for academic and Web
+  channels.
+- Local configuration and usage storage under `~/.knowte/`.
+- Configurable academic sources, result count, OpenAlex contact email, Semantic
+  Scholar API key, SearXNG endpoint, and Web year-filter behavior.
+- Automated local SearXNG setup, start, stop, update, log viewing, and removal
+  through Docker Compose.
+- SearXNG port conflict handling, setup timeouts, health checks, rollback, image
+  cleanup controls, and container log rotation.
+- Auto, Light, and Dark interface themes with saved user preference.
+- Python 3.9–3.12 support and a standard-library-only Python runtime.
+
+### Changed
+
+- Academic sources are enabled by default; Web Search is enabled automatically
+  after successful local SearXNG setup.
+
+### Fixed
+
+- Empty SearXNG language parameters are no longer sent.
+- Knowte can restart immediately on the same local port after shutdown.
+- Docker Desktop credential helpers are discoverable without assuming a
+  platform or Docker distribution.
+- Repeated searches recover correctly after an empty or failed Web response.
+- SearXNG logs wrap and remain contained within the Config panel.

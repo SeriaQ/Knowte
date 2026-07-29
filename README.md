@@ -10,7 +10,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Status-Pre--Alpha-orange" alt="Pre-Alpha">
+  <img src="https://img.shields.io/pypi/v/knowte?color=blue&label=Version" alt="Version">
+  <img src="https://img.shields.io/github/stars/SeriaQ/Knowte?style=social" alt="GitHub Repo Stars">
   <img src="https://img.shields.io/badge/Python-3.9%2B-blue" alt="Python 3.9+">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
@@ -24,6 +25,13 @@
 Search arXiv, OpenAlex, Semantic Scholar, and an optional SearXNG web source.
 Knowte applies your area and year filters, merges the responses, and removes
 duplicate papers.
+
+🧠 **Intent-aware discovery**
+
+Connect any OpenAI-compatible cloud or local service. Intelligent Search
+expands academic retrieval terminology, ranks papers with Embeddings, and asks
+an LLM to verify the strongest academic and Web candidates against the full
+intent.
 
 🖥️ **A local workspace you control**
 
@@ -80,7 +88,10 @@ Return to **Search**:
 1. enter keywords, an author, or a research topic;
 2. optionally choose one or more research areas;
 3. optionally enter a start and end year;
-4. select **Search the Archive**.
+4. choose **Keyword** or **Intelligent**, then select **Search**.
+
+**Keyword** works without an AI service. **Intelligent** must first be
+configured as described below.
 
 Each academic result provides whichever direct links are available:
 **Paper**, **PDF**, and **DOI**. Web results open their original pages.
@@ -92,6 +103,60 @@ needed.
 <p align="center">
   <img src="https://i.ibb.co/JRwZYw8J/knowte-search-guide.png" alt="Knowte search interface guide" />
 </p>
+
+---
+
+## 🧠 Enable Intelligent Search
+
+Knowte supports services that implement OpenAI-compatible
+`/chat/completions` and `/embeddings` endpoints. The service may be hosted by a
+cloud provider or run locally.
+
+Open **Config → Intelligent Search · OpenAI-compatible** and fill:
+
+- **AI Base URL** — the API root, normally ending in `/v1`, such as
+  `https://provider.example/v1` or `http://127.0.0.1:11434/v1`. Do not append
+  `/chat/completions`.
+- **AI API key** — the provider key. It may be blank when a local service does
+  not require authentication.
+- **Language model** — the provider's exact chat model ID.
+- **Embedding model** — the provider's exact embedding model ID.
+
+By default, both models use the same Base URL and API key. Enable **Use a
+separate connection for Embeddings** only when the embedding model is served
+elsewhere; then also fill **Embedding Base URL** and, when required,
+**Embedding API key**.
+
+The result and verification controls balance coverage, cost, and latency:
+
+- **Keyword results** also determines the academic candidate batch used by
+  Intelligent Search. Each original or expanded query requests up to that
+  value, capped at each provider's one-request maximum of `100`.
+- **Intelligent results** — target number of results that pass final LLM
+  verification; default `20`. Knowte verifies candidates in batches until it
+  reaches the target or exhausts the candidate pool.
+- **AI timeout** — timeout for each LLM or Embedding HTTP request; default
+  `45` seconds.
+
+Select **Save**, return to **Search**, and choose **Intelligent**.
+
+For academic sources, Knowte generates up to two retrieval variants, retrieves
+broad candidates, ranks their titles and abstracts with Embeddings, and asks
+the LLM to verify the strongest candidates. Web results skip expansion and
+Embedding ranking and go from SearXNG recall directly to LLM verification.
+When an explicit research area is selected, it remains a hard academic
+filter. Without one, the LLM may infer useful retrieval terminology but does
+not silently save an area filter.
+
+API keys are stored only in `~/.knowte/config.yml`; they are not returned by
+the Config API or copied into Plans. The file is written with user-only
+permissions on systems that support them. Intelligent Search sends the query,
+candidate titles, abstracts or Web snippets to the configured AI service, so
+choose a provider appropriate for the material being searched.
+
+If an AI stage fails, Knowte reports the degraded stage and falls back to the
+best available recall or Embedding order. Keyword Search remains independent
+of the AI configuration.
 
 ---
 
@@ -233,7 +298,7 @@ Node.js is only needed for the optional JavaScript syntax check.
 
 ## 🧭 Project Status
 
-Knowte is currently a pre-alpha research discovery tool. The longer-term
+Knowte is currently an alpha research discovery tool. The longer-term
 direction is a broader research workspace with persistent notes and
 AI-assisted synthesis.
 

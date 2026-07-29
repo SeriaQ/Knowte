@@ -1,10 +1,20 @@
 const form = document.querySelector("#search-form");
 const input = form.querySelector("input[name='keywords']");
+const searchSubmitBtn = document.querySelector("#search-submit");
+const savePlanBtn = document.querySelector("#save-plan");
+const searchModeButtons = document.querySelectorAll("[data-search-mode]");
+const searchModeHint = document.querySelector("#search-mode-hint");
+const intelligentProgressEl = document.querySelector("#intelligent-progress");
+const academicStagesEl = document.querySelector("#academic-stages");
+const webStagesEl = document.querySelector("#web-stages");
+const intelligentBudgetEl = document.querySelector("#intelligent-budget");
+const intelligentExpandedEl = document.querySelector("#intelligent-expanded");
 const statusEl = document.querySelector("#status");
 const resultsEl = document.querySelector("#results");
 const emailInput = document.querySelector("#email");
 const s2KeyInput = document.querySelector("#s2-key");
-const s2KeyClearInput = document.querySelector("#s2-key-clear");
+const s2KeyRemoveBtn = document.querySelector("#s2-key-remove");
+const s2KeyRemoveNote = document.querySelector("#s2-key-remove-note");
 const searxngInput = document.querySelector("#searxng-url");
 const webIgnoreYearFilterInput = document.querySelector("#web-ignore-year-filter");
 const saveConfigBtn = document.querySelector("#save-config");
@@ -21,10 +31,30 @@ const searxngLogOutput = document.querySelector("#searxng-log-output");
 const searxngLogNote = document.querySelector("#searxng-log-note");
 const backendGrid = document.querySelector("#backend-grid");
 const maxPapersInput = document.querySelector("#max-papers");
+const intelligentMaxResultsInput = document.querySelector("#intelligent-max-results");
+const aiBaseUrlInput = document.querySelector("#ai-base-url");
+const aiApiKeyInput = document.querySelector("#ai-api-key");
+const aiApiKeyRemoveBtn = document.querySelector("#ai-api-key-remove");
+const aiApiKeyRemoveNote = document.querySelector("#ai-api-key-remove-note");
+const aiChatModelInput = document.querySelector("#ai-chat-model");
+const aiEnableThinkingInput = document.querySelector("#ai-enable-thinking");
+const aiEmbeddingModelInput = document.querySelector("#ai-embedding-model");
+const aiEmbeddingSeparateInput = document.querySelector("#ai-embedding-separate");
+const aiEmbeddingBaseUrlInput = document.querySelector("#ai-embedding-base-url");
+const aiEmbeddingApiKeyInput = document.querySelector("#ai-embedding-api-key");
+const aiEmbeddingApiKeyRemoveBtn = document.querySelector("#ai-embedding-api-key-remove");
+const aiEmbeddingApiKeyRemoveNote = document.querySelector("#ai-embedding-api-key-remove-note");
+const aiVerifyBatchSizeInput = document.querySelector("#ai-verify-batch-size");
+const aiVerifyConcurrencyInput = document.querySelector("#ai-verify-concurrency");
+const aiTimeoutInput = document.querySelector("#ai-timeout");
 const usage5MinEl = document.querySelector("#usage-5min");
 const usageDayEl = document.querySelector("#usage-day");
 const usage5MinWebEl = document.querySelector("#usage-5min-web");
 const usageDayWebEl = document.querySelector("#usage-day-web");
+const usageDayAiChatEl = document.querySelector("#usage-day-ai-chat");
+const usageDayAiChatTokensEl = document.querySelector("#usage-day-ai-chat-tokens");
+const usageDayAiEmbeddingEl = document.querySelector("#usage-day-ai-embedding");
+const usageDayAiEmbeddingTokensEl = document.querySelector("#usage-day-ai-embedding-tokens");
 const usageBar5 = document.querySelector("#usage-bar-5min");
 const usageBarDay = document.querySelector("#usage-bar-day");
 const usageBar5Web = document.querySelector("#usage-bar-5min-web");
@@ -49,10 +79,24 @@ const navLinks = document.querySelectorAll(".side-link");
 const panels = document.querySelectorAll(".panel-view");
 const themeToggleBtn = document.querySelector("#theme-toggle");
 const configTab = document.querySelector('[data-target="config-panel"]');
-let currentUsage = { last_5_min: 0, last_day: 0, last_5_min_web: 0, last_day_web: 0 };
+const plansTab = document.querySelector('[data-target="plans-panel"]');
+const plansListEl = document.querySelector("#plans-list");
+const plansStatusEl = document.querySelector("#plans-status");
+const goToSearchBtn = document.querySelector("#go-to-search");
+let currentUsage = {
+  last_5_min: 0,
+  last_day: 0,
+  last_5_min_web: 0,
+  last_day_web: 0,
+  last_day_ai_chat: 0,
+  last_day_ai_chat_tokens: 0,
+  last_day_ai_embedding: 0,
+  last_day_ai_embedding_tokens: 0,
+};
 const activePresets = new Set();
 const pageSize = 20;
 let configuredMaxPapers = 100;
+let configuredIntelligentMaxResults = 20;
 let activeLimit = 100;
 let activeWebPages = 1;
 let lastSearchHasWeb = false;
@@ -68,20 +112,52 @@ let canFindMore = false;
 let abstractsHidden = false;
 let searchController = null;
 let semanticscholarKeyConfigured = false;
+let aiApiKeyConfigured = false;
+let aiEmbeddingApiKeyConfigured = false;
+let semanticscholarKeyRemovalPending = false;
+let aiApiKeyRemovalPending = false;
+let aiEmbeddingApiKeyRemovalPending = false;
 let savedProfileState = null;
 let configStatusTimer = null;
+let searchMode = "keyword";
+let savedPlans = [];
+let intelligentRunToken = 0;
+let lastBackends = [];
+let planSourceOverride = null;
+let isIntelligentSearching = false;
 const DEFAULT_SEARXNG_URL = "http://127.0.0.1:8888/search";
 
 const serializeProfileState = (overrides = {}) => JSON.stringify({
   email: overrides.email ?? emailInput.value.trim(),
   searxng_url: overrides.searxng_url ?? (searxngInput?.value.trim() || ""),
   max_papers: overrides.max_papers ?? parseMaxPapers(maxPapersInput.value || "100"),
+  intelligent_max_results: overrides.intelligent_max_results
+    ?? Number(intelligentMaxResultsInput.value || 20),
   enabled_backends: overrides.enabled_backends ?? Array.from(
     backendGrid.querySelectorAll("input[type='checkbox']:checked"),
   ).map((box) => box.value).sort(),
   api_key_update: s2KeyInput.value.trim(),
-  api_key_clear: Boolean(s2KeyClearInput?.checked),
+  api_key_clear: semanticscholarKeyRemovalPending,
   web_ignore_year_filter: Boolean(webIgnoreYearFilterInput?.checked),
+  ai_base_url: overrides.ai_base_url ?? aiBaseUrlInput.value.trim(),
+  ai_chat_model: overrides.ai_chat_model ?? aiChatModelInput.value.trim(),
+  ai_embedding_model: overrides.ai_embedding_model ?? aiEmbeddingModelInput.value.trim(),
+  ai_embedding_separate_connection: overrides.ai_embedding_separate_connection
+    ?? Boolean(aiEmbeddingSeparateInput.open),
+  ai_enable_thinking: overrides.ai_enable_thinking
+    ?? Boolean(aiEnableThinkingInput.checked),
+  ai_embedding_base_url: overrides.ai_embedding_base_url
+    ?? aiEmbeddingBaseUrlInput.value.trim(),
+  ai_verify_batch_size: overrides.ai_verify_batch_size
+    ?? Number(aiVerifyBatchSizeInput.value || 5),
+  ai_verify_concurrency: overrides.ai_verify_concurrency
+    ?? Number(aiVerifyConcurrencyInput.value || 1),
+  ai_timeout_seconds: overrides.ai_timeout_seconds
+    ?? Number(aiTimeoutInput.value || 45),
+  ai_api_key_update: aiApiKeyInput.value.trim(),
+  ai_api_key_clear: aiApiKeyRemovalPending,
+  ai_embedding_api_key_update: aiEmbeddingApiKeyInput.value.trim(),
+  ai_embedding_api_key_clear: aiEmbeddingApiKeyRemovalPending,
 });
 
 const isConfigDirty = () => (
@@ -381,6 +457,25 @@ const PRESETS = {
   "bio-med": ["bio.general", "med.general"],
 };
 
+const setSearchMode = (mode) => {
+  searchMode = mode === "smart" ? "smart" : "keyword";
+  searchModeButtons.forEach((button) => {
+    const active = button.dataset.searchMode === searchMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  if (searchMode === "smart") {
+    input.placeholder = "Describe what you want to understand...";
+    searchSubmitBtn.textContent = "Search";
+    searchModeHint.textContent = "Discover and verify results against your full intent.";
+  } else {
+    input.placeholder = "Enter keywords, authors, or domains...";
+    searchSubmitBtn.textContent = "Search";
+    searchModeHint.textContent = "Search providers directly with your keywords.";
+    intelligentProgressEl.hidden = true;
+  }
+};
+
 const getEffectiveAreas = () => {
   const effective = new Set();
   activePresets.forEach((preset) => {
@@ -548,6 +643,25 @@ const renderResults = () => {
     abstract.className = "result-abstract";
     abstract.textContent = paper.abstract;
 
+    const intelligence = document.createElement("div");
+    intelligence.className = "result-intelligence";
+    if (paper.discovery_path) {
+      const path = document.createElement("span");
+      path.className = "result-path";
+      path.textContent = paper.discovery_path;
+      intelligence.appendChild(path);
+    }
+    if (paper.match_reason) {
+      const reason = document.createElement("p");
+      reason.className = "result-reason";
+      const fitScore = paper.verification_score ?? paper.semantic_score;
+      const score = Number.isFinite(Number(fitScore))
+        ? ` · ${Math.round(Number(fitScore) * 100)}% verified fit`
+        : "";
+      reason.textContent = `Why it matches${score}: ${paper.match_reason}`;
+      intelligence.appendChild(reason);
+    }
+
     const actions = document.createElement("div");
     actions.className = "result-actions";
     const isWebResult = paper.result_type === "web";
@@ -561,6 +675,7 @@ const renderResults = () => {
     actionLinks.filter(Boolean).forEach((action) => actions.appendChild(action));
 
     card.append(title, meta, abstract);
+    if (intelligence.childElementCount) card.appendChild(intelligence);
     if (actions.childElementCount) card.appendChild(actions);
     resultsEl.appendChild(card);
   });
@@ -576,11 +691,19 @@ const updateUsage = (usage) => {
     last_day: usage.last_day ?? 0,
     last_5_min_web: usage.last_5_min_web ?? 0,
     last_day_web: usage.last_day_web ?? 0,
+    last_day_ai_chat: usage.last_day_ai_chat ?? 0,
+    last_day_ai_chat_tokens: usage.last_day_ai_chat_tokens ?? 0,
+    last_day_ai_embedding: usage.last_day_ai_embedding ?? 0,
+    last_day_ai_embedding_tokens: usage.last_day_ai_embedding_tokens ?? 0,
   };
   usage5MinEl.textContent = currentUsage.last_5_min;
   usageDayEl.textContent = currentUsage.last_day;
   if (usage5MinWebEl) usage5MinWebEl.textContent = currentUsage.last_5_min_web;
   if (usageDayWebEl) usageDayWebEl.textContent = currentUsage.last_day_web;
+  if (usageDayAiChatEl) usageDayAiChatEl.textContent = currentUsage.last_day_ai_chat;
+  if (usageDayAiChatTokensEl) usageDayAiChatTokensEl.textContent = currentUsage.last_day_ai_chat_tokens.toLocaleString();
+  if (usageDayAiEmbeddingEl) usageDayAiEmbeddingEl.textContent = currentUsage.last_day_ai_embedding;
+  if (usageDayAiEmbeddingTokensEl) usageDayAiEmbeddingTokensEl.textContent = currentUsage.last_day_ai_embedding_tokens.toLocaleString();
   if (usageBar5) {
     const pct = Math.min(100, currentUsage.last_5_min);
     usageBar5.style.width = pct + "%";
@@ -599,6 +722,45 @@ const updateUsage = (usage) => {
   }
 };
 
+const renderSecretControl = (
+  inputElement,
+  removeButton,
+  noteElement,
+  configured,
+  removalPending,
+) => {
+  removeButton.hidden = !configured;
+  removeButton.textContent = removalPending ? "Undo" : "Remove";
+  removeButton.classList.toggle("is-pending", removalPending);
+  noteElement.hidden = !removalPending;
+  inputElement.disabled = removalPending;
+  if (removalPending) inputElement.value = "";
+};
+
+const renderSecretControls = () => {
+  renderSecretControl(
+    s2KeyInput,
+    s2KeyRemoveBtn,
+    s2KeyRemoveNote,
+    semanticscholarKeyConfigured,
+    semanticscholarKeyRemovalPending,
+  );
+  renderSecretControl(
+    aiApiKeyInput,
+    aiApiKeyRemoveBtn,
+    aiApiKeyRemoveNote,
+    aiApiKeyConfigured,
+    aiApiKeyRemovalPending,
+  );
+  renderSecretControl(
+    aiEmbeddingApiKeyInput,
+    aiEmbeddingApiKeyRemoveBtn,
+    aiEmbeddingApiKeyRemoveNote,
+    aiEmbeddingApiKeyConfigured,
+    aiEmbeddingApiKeyRemovalPending,
+  );
+};
+
 const fetchConfig = async () => {
   try {
     const response = await fetch("/api/config");
@@ -612,6 +774,34 @@ const fetchConfig = async () => {
     s2KeyInput.placeholder = semanticscholarKeyConfigured
       ? "Configured; enter a new key to replace"
       : "Optional API key";
+    aiBaseUrlInput.value = data.ai_base_url || "";
+    aiApiKeyConfigured = Boolean(data.ai_api_key_configured);
+    aiApiKeyInput.value = "";
+    aiApiKeyInput.placeholder = aiApiKeyConfigured
+      ? "Configured; enter a new key to replace"
+      : "Optional for local services";
+    aiChatModelInput.value = data.ai_chat_model || "";
+    aiEmbeddingModelInput.value = data.ai_embedding_model || "";
+    aiEmbeddingSeparateInput.open = Boolean(
+      data.ai_embedding_separate_connection,
+    );
+    aiEnableThinkingInput.checked = Boolean(data.ai_enable_thinking);
+    aiEmbeddingBaseUrlInput.value = data.ai_embedding_base_url || "";
+    aiEmbeddingApiKeyConfigured = Boolean(
+      data.ai_embedding_api_key_configured,
+    );
+    aiEmbeddingApiKeyInput.value = "";
+    aiEmbeddingApiKeyInput.placeholder = aiEmbeddingApiKeyConfigured
+      ? "Configured; enter a new key to replace"
+      : "Optional for local services";
+    aiVerifyBatchSizeInput.value = String(data.ai_verify_batch_size || 5);
+    aiVerifyConcurrencyInput.value = String(data.ai_verify_concurrency || 1);
+    aiTimeoutInput.value = String(data.ai_timeout_seconds || 45);
+    semanticscholarKeyRemovalPending = false;
+    aiApiKeyRemovalPending = false;
+    aiEmbeddingApiKeyRemovalPending = false;
+    renderSecretControls();
+    s2KeyInput.disabled = false;
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
     }
@@ -619,8 +809,10 @@ const fetchConfig = async () => {
       webIgnoreYearFilterInput.checked = Boolean(data.web_ignore_year_filter);
     }
     configuredMaxPapers = parseMaxPapers(data.max_papers);
+    configuredIntelligentMaxResults = Number(data.intelligent_max_results || 20);
     activeLimit = configuredMaxPapers;
     maxPapersInput.value = String(configuredMaxPapers);
+    intelligentMaxResultsInput.value = String(configuredIntelligentMaxResults);
     const enabledBackends = new Set(data.enabled_backends || ["arxiv", "openalex", "semanticscholar"]);
     backendGrid.querySelectorAll("input[type='checkbox']").forEach((box) => {
       box.checked = enabledBackends.has(box.value);
@@ -647,14 +839,26 @@ const fetchUsage = async () => {
 
 const saveConfig = async () => {
   const email = emailInput.value.trim();
-  const semanticscholar_api_key = s2KeyInput.value.trim();
-  const clear_semanticscholar_api_key = Boolean(s2KeyClearInput?.checked);
+  const clear_semanticscholar_api_key = semanticscholarKeyRemovalPending;
+  const semanticscholar_api_key = clear_semanticscholar_api_key
+    ? ""
+    : s2KeyInput.value.trim();
   const searxng_url = searxngInput?.value.trim() || "";
   const web_ignore_year_filter = Boolean(webIgnoreYearFilterInput?.checked);
   const enabled_backends = Array.from(
     backendGrid.querySelectorAll("input[type='checkbox']:checked"),
   ).map((box) => box.value);
   const max_papers = parseMaxPapers(maxPapersInput.value || "100");
+  const intelligent_max_results = Math.max(
+    1,
+    Math.min(Number(intelligentMaxResultsInput.value || 20), 100),
+  );
+  const clear_ai_api_key = aiApiKeyRemovalPending;
+  const ai_api_key = clear_ai_api_key ? "" : aiApiKeyInput.value.trim();
+  const clear_ai_embedding_api_key = aiEmbeddingApiKeyRemovalPending;
+  const ai_embedding_api_key = clear_ai_embedding_api_key
+    ? ""
+    : aiEmbeddingApiKeyInput.value.trim();
   if (!enabled_backends.length) {
     setConfigStatus("Select at least one search backend.");
     return false;
@@ -676,6 +880,22 @@ const saveConfig = async () => {
         web_ignore_year_filter,
         enabled_backends,
         max_papers,
+        intelligent_max_results,
+        ai_base_url: aiBaseUrlInput.value.trim(),
+        ...(ai_api_key || clear_ai_api_key ? { ai_api_key } : {}),
+        ai_chat_model: aiChatModelInput.value.trim(),
+        ai_embedding_model: aiEmbeddingModelInput.value.trim(),
+        ai_embedding_separate_connection: Boolean(
+          aiEmbeddingSeparateInput.open,
+        ),
+        ai_enable_thinking: Boolean(aiEnableThinkingInput.checked),
+        ai_embedding_base_url: aiEmbeddingBaseUrlInput.value.trim(),
+        ...(ai_embedding_api_key || clear_ai_embedding_api_key
+          ? { ai_embedding_api_key }
+          : {}),
+        ai_verify_batch_size: Number(aiVerifyBatchSizeInput.value || 5),
+        ai_verify_concurrency: Number(aiVerifyConcurrencyInput.value || 1),
+        ai_timeout_seconds: Number(aiTimeoutInput.value || 45),
       }),
     });
     if (!response.ok) {
@@ -695,7 +915,33 @@ const saveConfig = async () => {
     s2KeyInput.placeholder = semanticscholarKeyConfigured
       ? "Configured; enter a new key to replace"
       : "Optional API key";
-    if (s2KeyClearInput) s2KeyClearInput.checked = false;
+    semanticscholarKeyRemovalPending = false;
+    aiBaseUrlInput.value = data.ai_base_url || "";
+    aiApiKeyConfigured = Boolean(data.ai_api_key_configured);
+    aiApiKeyInput.value = "";
+    aiApiKeyInput.placeholder = aiApiKeyConfigured
+      ? "Configured; enter a new key to replace"
+      : "Optional for local services";
+    aiApiKeyRemovalPending = false;
+    aiChatModelInput.value = data.ai_chat_model || "";
+    aiEmbeddingModelInput.value = data.ai_embedding_model || "";
+    aiEmbeddingSeparateInput.open = Boolean(
+      data.ai_embedding_separate_connection,
+    );
+    aiEnableThinkingInput.checked = Boolean(data.ai_enable_thinking);
+    aiEmbeddingBaseUrlInput.value = data.ai_embedding_base_url || "";
+    aiEmbeddingApiKeyConfigured = Boolean(
+      data.ai_embedding_api_key_configured,
+    );
+    aiEmbeddingApiKeyInput.value = "";
+    aiEmbeddingApiKeyInput.placeholder = aiEmbeddingApiKeyConfigured
+      ? "Configured; enter a new key to replace"
+      : "Optional for local services";
+    aiEmbeddingApiKeyRemovalPending = false;
+    aiVerifyBatchSizeInput.value = String(data.ai_verify_batch_size || 5);
+    aiVerifyConcurrencyInput.value = String(data.ai_verify_concurrency || 1);
+    aiTimeoutInput.value = String(data.ai_timeout_seconds || 45);
+    renderSecretControls();
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
     }
@@ -703,7 +949,9 @@ const saveConfig = async () => {
       webIgnoreYearFilterInput.checked = Boolean(data.web_ignore_year_filter);
     }
     configuredMaxPapers = parseMaxPapers(data.max_papers);
+    configuredIntelligentMaxResults = Number(data.intelligent_max_results || 20);
     maxPapersInput.value = String(configuredMaxPapers);
+    intelligentMaxResultsInput.value = String(configuredIntelligentMaxResults);
     activeLimit = configuredMaxPapers;
     const enabledBackends = new Set(data.enabled_backends || ["arxiv", "openalex", "semanticscholar", "websearch"]);
     backendGrid.querySelectorAll("input[type='checkbox']").forEach((box) => {
@@ -784,6 +1032,7 @@ const runSearch = async () => {
       areas: lastAreas,
       limit: String(activeLimit),
       web_pages: String(activeWebPages),
+      backends: lastBackends.join(","),
     });
     if (lastYearFrom) params.set("year_from", lastYearFrom);
     if (lastYearTo) params.set("year_to", lastYearTo);
@@ -877,10 +1126,7 @@ const runSearch = async () => {
   }
 };
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const query = input.value.trim();
-  const areas = Array.from(getEffectiveAreas()).join(",");
+const normalizeSearchYears = () => {
   let yearFrom = normalizeYearInput(yearFromInput?.value || "");
   let yearTo = normalizeYearInput(yearToInput?.value || "");
   if (yearFrom && yearTo && Number(yearFrom) > Number(yearTo)) {
@@ -888,30 +1134,294 @@ form.addEventListener("submit", async (event) => {
     if (yearFromInput) yearFromInput.value = yearFrom;
     if (yearToInput) yearToInput.value = yearTo;
   }
+  return { yearFrom, yearTo };
+};
+
+const configuredBackends = () => Array.from(
+  backendGrid.querySelectorAll("input[type='checkbox']:checked"),
+).map((box) => box.value);
+
+const activeBackends = () => {
+  const available = new Set(["arxiv", "openalex", "semanticscholar", "websearch"]);
+  const selected = (planSourceOverride || configuredBackends()).filter((source) => available.has(source));
+  return selected.length ? selected : configuredBackends();
+};
+
+const beginSearch = async (query, areas, yearFrom, yearTo, backends = activeBackends()) => {
+  if (!query) {
+    statusEl.textContent = "Enter a signal to wake the archive.";
+    return;
+  }
+
+  const wantsWeb = backends.includes("websearch");
+  const academicBackends = new Set(["arxiv", "openalex", "semanticscholar"]);
+  lastQuery = query;
+  lastAreas = areas;
+  lastYearFrom = yearFrom;
+  lastYearTo = yearTo;
+  lastBackends = [...backends];
+  activeLimit = configuredMaxPapers;
+  activeWebPages = 1;
+  lastSearchHasWeb = wantsWeb;
+  lastSearchHasAcademic = backends.some((backend) => academicBackends.has(backend));
+  canFindMoreWeb = false;
+  fullResults = [];
+  canFindMore = false;
+  pageSelectTop.value = "1";
+  await runSearch();
+};
+
+const resetStageGroup = (group, enabled) => {
+  group.querySelectorAll("[data-stage]").forEach((stage) => {
+    stage.classList.remove("is-active", "is-complete", "is-degraded");
+    stage.classList.toggle("is-skipped", !enabled);
+  });
+};
+
+const markStage = (group, stageName, state) => {
+  const stage = group.querySelector(`[data-stage="${stageName}"]`);
+  if (!stage) return;
+  stage.classList.remove(
+    "is-active",
+    "is-complete",
+    "is-degraded",
+    "is-skipped",
+  );
+  if (state === "skipped") {
+    stage.classList.add("is-skipped");
+  } else if (state === "degraded") {
+    stage.classList.add("is-degraded");
+  } else {
+    stage.classList.add(state === "complete" ? "is-complete" : "is-active");
+  }
+};
+
+const finishActiveStages = (group) => {
+  group.querySelectorAll(".is-active").forEach((stage) => {
+    stage.classList.remove("is-active");
+    stage.classList.add("is-complete");
+  });
+};
+
+const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) => {
+  const token = ++intelligentRunToken;
+  const startedAt = performance.now();
+  let elapsedTimer = null;
+  let progressTimer = null;
+  const academicEnabled = backends.some((source) => ["arxiv", "openalex", "semanticscholar"].includes(source));
+  const webEnabled = backends.includes("websearch");
+  if (!academicEnabled && !webEnabled) {
+    statusEl.textContent = "Select at least one source in Config.";
+    return;
+  }
+
+  lastQuery = query;
+  lastAreas = areas;
+  lastYearFrom = yearFrom;
+  lastYearTo = yearTo;
+  lastBackends = [...backends];
+  lastSearchHasAcademic = academicEnabled;
+  lastSearchHasWeb = webEnabled;
+  fullResults = [];
+  canFindMore = false;
+  canFindMoreWeb = false;
+  pageSelectTop.value = "1";
+  resultsEl.innerHTML = "";
+  intelligentProgressEl.hidden = false;
+  resetStageGroup(academicStagesEl, academicEnabled);
+  resetStageGroup(webStagesEl, webEnabled);
+  intelligentBudgetEl.textContent = "Request counts will appear when the pipeline completes.";
+  intelligentExpandedEl.hidden = true;
+  intelligentExpandedEl.replaceChildren();
+  isIntelligentSearching = true;
+  setSearching(true);
+  const renderElapsed = () => {
+    if (token !== intelligentRunToken) return;
+    const elapsedSeconds = Math.floor((performance.now() - startedAt) / 1000);
+    statusEl.textContent = `Running Intelligent discovery for “${query}”…\n${elapsedSeconds}s elapsed.`;
+  };
+  renderElapsed();
+  elapsedTimer = window.setInterval(renderElapsed, 1000);
+  const controller = new AbortController();
+  searchController = controller;
+  const runId = globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let lastProgressStage = "";
+  const renderExpandedQueries = (queries, expansionStatus = "complete") => {
+    intelligentExpandedEl.replaceChildren();
+    const label = document.createElement("strong");
+    label.textContent = "Expanded queries";
+    intelligentExpandedEl.appendChild(label);
+    if (queries.length) {
+      queries.forEach((expandedQuery) => {
+        const chip = document.createElement("span");
+        chip.textContent = expandedQuery;
+        intelligentExpandedEl.appendChild(chip);
+      });
+    } else {
+      const empty = document.createElement("span");
+      empty.textContent = expansionStatus === "degraded"
+        ? "Unavailable; continuing with the original query"
+        : "None generated; using the original query";
+      intelligentExpandedEl.appendChild(empty);
+    }
+    intelligentExpandedEl.hidden = false;
+  };
+  const renderProgressStage = (stage) => {
+    if (!stage || stage === lastProgressStage) return;
+    lastProgressStage = stage;
+    const academicOrder = ["expand", "recall", "embed", "verify"];
+    const academicIndex = academicOrder.indexOf(stage);
+    if (academicEnabled && academicIndex >= 0) {
+      academicOrder.forEach((name, index) => {
+        if (index <= academicIndex) {
+          markStage(
+            academicStagesEl,
+            name,
+            index < academicIndex ? "complete" : "active",
+          );
+        }
+      });
+    }
+    if (webEnabled) {
+      if (stage === "recall") {
+        markStage(webStagesEl, "recall", "active");
+      } else if (stage === "embed") {
+        markStage(webStagesEl, "recall", "complete");
+      } else if (stage === "verify") {
+        markStage(webStagesEl, "recall", "complete");
+        markStage(webStagesEl, "verify", "active");
+      }
+    }
+  };
+  const pollProgress = async () => {
+    try {
+      const response = await fetch(`/api/intelligent-progress?run_id=${encodeURIComponent(runId)}`);
+      if (!response.ok || token !== intelligentRunToken) return;
+      const progress = await response.json();
+      renderProgressStage(progress.stage);
+      if (
+        academicEnabled
+        && Object.hasOwn(progress, "expanded_queries")
+      ) {
+        renderExpandedQueries(
+          progress.expanded_queries || [],
+          progress.expansion_status || "complete",
+        );
+      }
+    } catch (_error) {
+      // The main request remains authoritative if a progress poll is missed.
+    }
+  };
+  progressTimer = window.setInterval(pollProgress, 500);
+
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      areas,
+      limit: String(configuredIntelligentMaxResults),
+      web_pages: "1",
+      backends: backends.join(","),
+      run_id: runId,
+    });
+    if (yearFrom) params.set("year_from", yearFrom);
+    if (yearTo) params.set("year_to", yearTo);
+    const response = await fetch(`/api/intelligent-search?${params}`, {
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (token !== intelligentRunToken) return;
+    if (!response.ok) {
+      if (data.error === "ai_unconfigured") {
+        throw new Error(data.message || "Add an AI Base URL and Language Model in Config, save, then try again.");
+      }
+      if (data.error === "intelligent_rate_limited") {
+        throw new Error("A search channel is rate limited. Wait before retrying.");
+      }
+      throw new Error(data.message || "Intelligent Search could not complete.");
+    }
+    const stages = data.stages || {};
+    if (academicEnabled) {
+      ["recall", "expand", "embed", "verify"].forEach((stageName) => {
+        markStage(
+          academicStagesEl,
+          stageName,
+          stages[stageName]?.status || "skipped",
+        );
+      });
+    }
+    if (webEnabled) {
+      markStage(webStagesEl, "recall", stages.recall?.status || "complete");
+      markStage(webStagesEl, "verify", stages.verify?.status || "skipped");
+    }
+    const budget = data.request_budget || {};
+    intelligentBudgetEl.textContent = `Actual pipeline work: ${budget.retrieval || 0} retrieval round(s) · ${budget.embedding || 0} embedding batch(es) · ${budget.chat || 0} LLM request(s)`;
+    const expandedQueries = data.expanded_queries || [];
+    if (academicEnabled) {
+      renderExpandedQueries(
+        expandedQueries,
+        stages.expand?.status || "complete",
+      );
+    }
+    fullResults = data.results || [];
+    updateUsage(data.usage);
+    renderResults();
+    if (fullResults.length) setFiltersCollapsed(true);
+    const counts = data.candidate_counts || {};
+    const degraded = (data.warnings || []).length
+      ? (
+          stages.verify?.message
+            ? ` LLM verification failed: ${stages.verify.message} Fallback results may be included.`
+            : " Some AI stages degraded; fallback results may be included."
+        )
+      : "";
+    statusEl.textContent = `Found ${fullResults.length} verified result(s) from ${counts.academic || 0} academic and ${counts.web || 0} Web candidate(s).${degraded}`;
+  } catch (error) {
+    if (token !== intelligentRunToken) return;
+    if (error.name === "AbortError") {
+      statusEl.textContent = "Intelligent Search stopped.";
+    } else {
+      statusEl.textContent = error.message;
+    }
+    resetStageGroup(academicStagesEl, academicEnabled);
+    resetStageGroup(webStagesEl, webEnabled);
+  } finally {
+    if (elapsedTimer !== null) {
+      window.clearInterval(elapsedTimer);
+    }
+    if (progressTimer !== null) {
+      window.clearInterval(progressTimer);
+    }
+    if (token === intelligentRunToken) {
+      isIntelligentSearching = false;
+      if (searchController === controller) searchController = null;
+      setSearching(false);
+    }
+  }
+};
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = input.value.trim();
 
   if (!query) {
     statusEl.textContent = "Enter a signal to wake the archive.";
     return;
   }
 
-  const enabledBackends = Array.from(
-    backendGrid.querySelectorAll("input[type='checkbox']:checked"),
-  ).map((box) => box.value);
-  const wantsWeb = enabledBackends.includes("websearch");
-  const academicBackends = new Set(["arxiv", "openalex", "semanticscholar"]);
-  lastQuery = query;
-  lastAreas = areas;
-  lastYearFrom = yearFrom;
-  lastYearTo = yearTo;
-  activeLimit = configuredMaxPapers;
-  activeWebPages = 1;
-  lastSearchHasWeb = wantsWeb;
-  lastSearchHasAcademic = enabledBackends.some((backend) => academicBackends.has(backend));
-  canFindMoreWeb = false;
-  fullResults = [];
-  canFindMore = false;
-  pageSelectTop.value = "1";
-  await runSearch();
+  const areas = Array.from(getEffectiveAreas()).join(",");
+  const { yearFrom, yearTo } = normalizeSearchYears();
+  const backends = activeBackends();
+  if (searchMode === "smart") {
+    await runIntelligentSearch(query, areas, yearFrom, yearTo, backends);
+  } else {
+    intelligentProgressEl.hidden = true;
+    await beginSearch(query, areas, yearFrom, yearTo, backends);
+  }
+});
+
+searchModeButtons.forEach((button) => {
+  button.addEventListener("click", () => setSearchMode(button.dataset.searchMode));
 });
 
 selectedAreasEl.addEventListener("click", (event) => {
@@ -988,7 +1498,16 @@ abstractToggleBtn.addEventListener("click", () => {
   abstractToggleBtn.textContent = abstractsHidden ? "Show abstracts" : "Hide abstracts";
 });
 stopBtn.addEventListener("click", () => {
-  if (isSearching && searchController) {
+  if (isIntelligentSearching) {
+    intelligentRunToken += 1;
+    if (searchController) {
+      searchController.abort();
+      searchController = null;
+    }
+    isIntelligentSearching = false;
+    statusEl.textContent = "Intelligent Search stopped.";
+    setSearching(false);
+  } else if (isSearching && searchController) {
     searchController.abort();
   }
 });
@@ -996,23 +1515,297 @@ scrollTopBtn.addEventListener("click", () => {
   resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
+const showPanel = (target) => {
+  navLinks.forEach((link) => {
+    link.classList.toggle("is-active", link.dataset.target === target);
+  });
+  panels.forEach((panel) => {
+    panel.classList.toggle("is-active", panel.id === target);
+  });
+};
+
+const currentPlanPayload = () => {
+  const query = input.value.trim();
+  if (!query) throw new Error("Enter a query before saving a plan.");
+  const { yearFrom, yearTo } = normalizeSearchYears();
+  return {
+    query,
+    mode: searchMode === "smart" ? "intelligent" : "keyword",
+    areas: Array.from(getEffectiveAreas()),
+    year_from: yearFrom || null,
+    year_to: yearTo || null,
+    sources: activeBackends(),
+  };
+};
+
+const sourceDisplayName = (source) => ({
+  arxiv: "arXiv",
+  openalex: "OpenAlex",
+  semanticscholar: "Semantic Scholar",
+  websearch: "Web",
+}[source] || source);
+
+const planSummary = (plan) => {
+  const year = plan.year_from && plan.year_to
+    ? `${plan.year_from}–${plan.year_to}`
+    : plan.year_from
+      ? `Since ${plan.year_from}`
+      : plan.year_to
+        ? `Through ${plan.year_to}`
+        : "Any year";
+  const areas = plan.areas?.length ? `${plan.areas.length} area codes` : "All areas";
+  const sources = (plan.sources || []).map(sourceDisplayName).join(" · ");
+  return `${year} · ${areas} · ${sources || "Default academic sources"}`;
+};
+
+const renderPlans = () => {
+  plansListEl.innerHTML = "";
+  if (!savedPlans.length) {
+    const empty = document.createElement("div");
+    empty.className = "plans-empty";
+    empty.textContent = "No saved plans yet. Save the current search to reuse its intent, filters, mode, and sources.";
+    plansListEl.appendChild(empty);
+    return;
+  }
+  savedPlans.forEach((plan) => {
+    const card = document.createElement("article");
+    card.className = "plan-card";
+    card.dataset.planId = plan.id;
+
+    const heading = document.createElement("div");
+    heading.className = "plan-card-head";
+    const name = document.createElement("strong");
+    name.textContent = plan.name;
+    const mode = document.createElement("span");
+    mode.className = `plan-mode ${plan.mode === "intelligent" ? "is-intelligent" : ""}`;
+    mode.textContent = plan.mode === "intelligent" ? "Intelligent" : "Keyword";
+    heading.append(name, mode);
+
+    const query = document.createElement("p");
+    query.className = "plan-query";
+    query.textContent = plan.query;
+    const summary = document.createElement("small");
+    summary.className = "plan-summary";
+    summary.textContent = planSummary(plan);
+
+    const actions = document.createElement("div");
+    actions.className = "plan-actions";
+    [
+      ["run", "Run"],
+      ["load", "Load"],
+      ["edit", "Edit"],
+      ["delete", "Delete"],
+    ].forEach(([action, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.planAction = action;
+      button.textContent = label;
+      if (action === "delete") button.classList.add("plan-delete");
+      actions.appendChild(button);
+    });
+    card.append(heading, query, summary, actions);
+    plansListEl.appendChild(card);
+  });
+};
+
+const fetchPlans = async () => {
+  plansStatusEl.textContent = "Loading plans…";
+  try {
+    const response = await fetch("/api/plans");
+    if (!response.ok) throw new Error("Could not load plans.");
+    const data = await response.json();
+    savedPlans = data.plans || [];
+    renderPlans();
+    plansStatusEl.textContent = "";
+  } catch (error) {
+    plansStatusEl.textContent = error.message;
+  }
+};
+
+const saveCurrentPlan = async () => {
+  let payload;
+  try {
+    payload = currentPlanPayload();
+  } catch (error) {
+    statusEl.textContent = error.message;
+    plansStatusEl.textContent = error.message;
+    input.focus();
+    return;
+  }
+  savePlanBtn.disabled = true;
+  try {
+    const response = await fetch("/api/plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error("Could not save this plan.");
+    const plan = await response.json();
+    statusEl.textContent = `Plan saved: ${plan.name}`;
+    await fetchPlans();
+    plansStatusEl.textContent = `Plan saved: ${plan.name}`;
+  } catch (error) {
+    statusEl.textContent = error.message;
+    plansStatusEl.textContent = error.message;
+  } finally {
+    savePlanBtn.disabled = false;
+  }
+};
+
+const restorePlanAreas = (areas) => {
+  const target = new Set(areas || []);
+  activePresets.clear();
+  const entries = Object.entries(PRESETS);
+  for (let mask = 0; mask < 2 ** entries.length; mask += 1) {
+    const combined = new Set();
+    const chosen = [];
+    entries.forEach(([name, codes], index) => {
+      if (!(mask & (1 << index))) return;
+      chosen.push(name);
+      codes.forEach((code) => combined.add(code));
+    });
+    if (combined.size === target.size && [...combined].every((code) => target.has(code))) {
+      chosen.forEach((name) => activePresets.add(name));
+      break;
+    }
+  }
+  renderPresetState();
+  renderSelectedAreas();
+};
+
+const loadPlanIntoSearch = (plan) => {
+  input.value = plan.query || "";
+  setSearchMode(plan.mode === "intelligent" ? "smart" : "keyword");
+  yearFromInput.value = plan.year_from || "";
+  yearToInput.value = plan.year_to || "";
+  restorePlanAreas(plan.areas);
+  planSourceOverride = [...(plan.sources || [])];
+  const sourceNames = planSourceOverride.map(sourceDisplayName).join(", ");
+  searchModeHint.textContent += sourceNames ? ` Plan sources: ${sourceNames}.` : "";
+  showPanel("search-panel");
+  statusEl.textContent = `Loaded plan “${plan.name}”. It will use current Config credentials and endpoints.`;
+};
+
+savePlanBtn.addEventListener("click", saveCurrentPlan);
+goToSearchBtn.addEventListener("click", () => {
+  showPanel("search-panel");
+  input.focus();
+});
+
+plansListEl.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-plan-action]");
+  const card = event.target.closest("[data-plan-id]");
+  if (!button || !card) return;
+  const plan = savedPlans.find((item) => item.id === card.dataset.planId);
+  if (!plan) return;
+  const action = button.dataset.planAction;
+  if (action === "load") {
+    loadPlanIntoSearch(plan);
+    return;
+  }
+  if (action === "run") {
+    loadPlanIntoSearch(plan);
+    await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ last_run_at: new Date().toISOString() }),
+    });
+    form.requestSubmit();
+    return;
+  }
+  if (action === "edit") {
+    const name = window.prompt("Plan name", plan.name);
+    if (name === null) return;
+    const query = window.prompt("Search intent or keywords", plan.query);
+    if (query === null) return;
+    const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, query }),
+    });
+    const message = response.ok ? "Plan updated." : "Could not update the plan.";
+    await fetchPlans();
+    plansStatusEl.textContent = message;
+    return;
+  }
+  if (action === "delete" && window.confirm(`Delete “${plan.name}”?`)) {
+    const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, { method: "DELETE" });
+    const message = response.ok ? "Plan deleted." : "Could not delete the plan.";
+    await fetchPlans();
+    plansStatusEl.textContent = message;
+  }
+});
+
 navLinks.forEach((link) => {
   link.addEventListener("click", () => {
     const target = link.dataset.target;
     if (!target) return;
-    navLinks.forEach((l) => l.classList.toggle("is-active", l === link));
-    panels.forEach((panel) => {
-      panel.classList.toggle("is-active", panel.id === target);
-    });
+    showPanel(target);
+    if (target === "plans-panel") fetchPlans();
   });
 });
 
-[emailInput, s2KeyInput, s2KeyClearInput, searxngInput, webIgnoreYearFilterInput, maxPapersInput, backendGrid]
+[
+  emailInput,
+  s2KeyInput,
+  searxngInput,
+  webIgnoreYearFilterInput,
+  maxPapersInput,
+  intelligentMaxResultsInput,
+  backendGrid,
+  aiBaseUrlInput,
+  aiApiKeyInput,
+  aiChatModelInput,
+  aiEnableThinkingInput,
+  aiEmbeddingModelInput,
+  aiEmbeddingSeparateInput,
+  aiEmbeddingBaseUrlInput,
+  aiEmbeddingApiKeyInput,
+  aiVerifyBatchSizeInput,
+  aiVerifyConcurrencyInput,
+  aiTimeoutInput,
+]
   .filter(Boolean)
   .forEach((control) => {
     control.addEventListener("input", updateProfileDirtyState);
     control.addEventListener("change", updateProfileDirtyState);
   });
+
+backendGrid.addEventListener("change", () => {
+  planSourceOverride = null;
+  setSearchMode(searchMode);
+});
+
+aiEmbeddingSeparateInput.addEventListener("toggle", () => {
+  updateProfileDirtyState();
+});
+
+[
+  {
+    button: s2KeyRemoveBtn,
+    toggle: () => {
+      semanticscholarKeyRemovalPending = !semanticscholarKeyRemovalPending;
+    },
+  },
+  {
+    button: aiApiKeyRemoveBtn,
+    toggle: () => {
+      aiApiKeyRemovalPending = !aiApiKeyRemovalPending;
+    },
+  },
+  {
+    button: aiEmbeddingApiKeyRemoveBtn,
+    toggle: () => {
+      aiEmbeddingApiKeyRemovalPending = !aiEmbeddingApiKeyRemovalPending;
+    },
+  },
+].forEach(({ button, toggle }) => {
+  button.addEventListener("click", () => {
+    toggle();
+    renderSecretControls();
+    updateProfileDirtyState();
+  });
+});
 
 
 const initTheme = () => {
