@@ -1,14 +1,16 @@
 import json
+import os
 from http.client import HTTPConnection
 import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from knowte import usage
 from knowte import search as search_module
 from knowte.models import Paper
+from knowte.knowledge import create_artifact, save_source
 from knowte.server import create_server
 
 
@@ -61,6 +63,361 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(payload["warnings"], ["websearch_unconfigured"])
         self.assertEqual(payload["usage"]["last_day"], 1)
         self.assertEqual(payload["usage"]["last_day_web"], 0)
+
+    def test_companion_pair_capture_and_confirm_flow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            server = create_server("127.0.0.1", 0, config_path)
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            port = server.server_address[1]
+
+            def request(method, path, payload=None, token=""):
+                connection = HTTPConnection("127.0.0.1", port)
+                headers = {}
+                body = None
+                if payload is not None:
+                    headers["Content-Type"] = "application/json"
+                    body = json.dumps(payload)
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
+                data = json.loads(response.read())
+                connection.close()
+                return response.status, data
+
+            try:
+                info_status, info = request("GET", "/api/companion/info")
+                _, pairing = request("POST", "/api/companion/pairing")
+                pair_status, paired = request(
+                    "POST", "/api/companion/pair",
+                    {"code": pairing["code"], "nonce": pairing["nonce"]},
+                )
+                direct_status, direct = request(
+                    "POST", "/api/companion/commit",
+                    {
+                        "kind": "source",
+                        "source": {
+                            "title": "A page saved for later",
+                            "url": "https://example.test/bookmark",
+                        },
+                        "blocks": [{
+                            "type": "paragraph",
+                            "text": "A page saved without creating Evidence.",
+                        }],
+                        "options": {
+                            "tags": ["read-later"],
+                            "annotation": "Review this Source later.",
+                        },
+                    },
+                    paired["token"],
+                )
+                capture_status, pending = request(
+                    "POST", "/api/companion/captures",
+                    {
+                        "kind": "text",
+                        "source": {
+                            "title": "Rendered web article",
+                            "url": "https://example.test/rendered",
+                        },
+                        "quote": "The browser rendered this precise statement.",
+                        "blocks": [{
+                            "type": "heading", "text": "Rendered article",
+                            "metadata": {"level": 1},
+                        }, {
+                            "type": "paragraph",
+                            "text": "The browser rendered this precise statement.",
+                        }],
+                    },
+                    paired["token"],
+                )
+                confirm_status, confirmed = request(
+                    "POST",
+                    f"/api/companion/inbox/{pending['id']}/confirm",
+                    {},
+                )
+                _, inbox = request("GET", "/api/companion/inbox")
+                _, workspace = request(
+                    "GET",
+                    f"/api/library/sources/{confirmed['source']['id']}/workspace",
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+
+        self.assertEqual(info_status, 200)
+        manifest_path = Path(info["path"]) / "manifest.json"
+        self.assertTrue(manifest_path.is_file())
+        self.assertEqual(
+            info["version"],
+            json.loads(manifest_path.read_text(encoding="utf-8"))["version"],
+        )
+        self.assertEqual(pair_status, 200)
+        self.assertEqual(direct_status, 201)
+        self.assertIsNone(direct["evidence"])
+        self.assertEqual(capture_status, 201)
+        self.assertEqual(confirm_status, 201)
+        self.assertEqual(inbox["items"], [])
+        self.assertEqual(confirmed["evidence"]["evidence_type"], "text")
+        self.assertEqual(workspace["segments"][0]["block_type"], "heading")
+
+    def test_artifact_and_library_api_complete_first_collection_step(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            artifact_server = create_server("127.0.0.1", 0, config_path)
+            artifact_status, artifact = self._request(
+                artifact_server,
+                "POST",
+                "/api/artifacts",
+                json.dumps(
+                    {
+                        "title": "Open LLM frontier",
+                        "purpose": "Understand current open model technology.",
+                    }
+                ),
+            )
+            source_server = create_server("127.0.0.1", 0, config_path)
+            source_status, saved = self._request(
+                source_server,
+                "POST",
+                "/api/library/sources",
+                json.dumps(
+                    {
+                        "artifact_id": artifact["id"],
+                        "source": {
+                            "id": "paper-1",
+                            "title": "A frontier model report",
+                            "authors": "Researcher",
+                            "year": 2026,
+                            "abstract": "Model details.",
+                            "url": "https://example.test/model",
+                            "source": "Web",
+                            "result_type": "web",
+                        },
+                    }
+                ),
+            )
+            library_server = create_server("127.0.0.1", 0, config_path)
+            library_status, library = self._request(
+                library_server,
+                "GET",
+                "/api/library/sources",
+            )
+            list_server = create_server("127.0.0.1", 0, config_path)
+            list_status, artifact_list = self._request(
+                list_server,
+                "GET",
+                "/api/artifacts",
+            )
+
+        self.assertEqual(artifact_status, 201)
+        self.assertEqual(source_status, 201)
+        self.assertTrue(saved["source_created"])
+        self.assertTrue(saved["artifact_link_created"])
+        self.assertEqual(library_status, 200)
+        self.assertEqual(len(library["sources"]), 1)
+        self.assertEqual(
+            library["sources"][0]["artifacts"][0]["id"],
+            artifact["id"],
+        )
+        self.assertEqual(list_status, 200)
+        self.assertEqual(artifact_list["artifacts"][0]["source_count"], 1)
+
+    def test_source_workspace_capture_evidence_and_annotation_api(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            source, _, _ = save_source(
+                {
+                    "title": "Qwen report",
+                    "url": "https://example.test/qwen",
+                    "source": "Web",
+                    "result_type": "web",
+                },
+                path=Path(temp_dir) / "knowte.db",
+            )
+            captured_file = Path(temp_dir) / "content" / "capture.html"
+            captured_file.parent.mkdir(parents=True)
+            captured_file.write_text("<p>Qwen systems.</p>", encoding="utf-8")
+            captured = {
+                "url": "https://example.test/qwen",
+                "media_type": "text/html",
+                "sha256": "capture-hash",
+                "raw_path": str(captured_file),
+                "segments": ["Qwen combines model and systems improvements."],
+                "locators": ["Section 1"],
+            }
+            with patch("knowte.server.capture_source_content", return_value=captured):
+                capture_server = create_server("127.0.0.1", 0, config_path)
+                capture_status, workspace = self._request(
+                    capture_server,
+                    "POST",
+                    f"/api/library/sources/{source['id']}/capture",
+                )
+            text = workspace["segments"][0]["text"]
+            quote = "systems improvements"
+            start = text.index(quote)
+            evidence_server = create_server("127.0.0.1", 0, config_path)
+            evidence_status, evidence = self._request(
+                evidence_server,
+                "POST",
+                "/api/evidence",
+                json.dumps(
+                    {
+                        "segment_id": workspace["segments"][0]["id"],
+                        "quote": quote,
+                        "start_offset": start,
+                        "end_offset": start + len(quote),
+                    }
+                ),
+            )
+            annotation_server = create_server("127.0.0.1", 0, config_path)
+            annotation_status, _ = self._request(
+                annotation_server,
+                "POST",
+                "/api/annotations",
+                json.dumps(
+                    {
+                        "target_type": "evidence",
+                        "target_id": evidence["id"],
+                        "body": "Review this support.",
+                    }
+                ),
+            )
+            workspace_server = create_server("127.0.0.1", 0, config_path)
+            workspace_status, loaded = self._request(
+                workspace_server,
+                "GET",
+                f"/api/library/sources/{source['id']}/workspace",
+            )
+            content_server = create_server("127.0.0.1", 0, config_path)
+            thread = threading.Thread(target=content_server.serve_forever)
+            thread.start()
+            try:
+                connection = HTTPConnection(
+                    "127.0.0.1", content_server.server_address[1]
+                )
+                connection.request(
+                    "GET", f"/api/library/sources/{source['id']}/content"
+                )
+                content_response = connection.getresponse()
+                content_status = content_response.status
+                content_type = content_response.getheader("Content-Type")
+                content_body = content_response.read()
+                connection.close()
+            finally:
+                content_server.shutdown()
+                content_server.server_close()
+                thread.join()
+
+        self.assertEqual(capture_status, 201)
+        self.assertEqual(evidence_status, 201)
+        self.assertEqual(annotation_status, 201)
+        self.assertEqual(workspace_status, 200)
+        self.assertEqual(content_status, 200)
+        self.assertEqual(content_type, "text/html")
+        self.assertEqual(content_body, b"<p>Qwen systems.</p>")
+        self.assertEqual(loaded["segments"][0]["locator"], "Section 1")
+        self.assertEqual(loaded["evidence"][0]["annotations"][0]["body"], "Review this support.")
+
+    def test_batch_collection_adds_sources_and_links_them_to_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            artifact = create_artifact(
+                {"title": "Batch target", "purpose": "Review selected Sources."},
+                database_path,
+            )
+            server = create_server(
+                "127.0.0.1",
+                0,
+                config_path,
+            )
+            status, payload = self._request(
+                server,
+                "POST",
+                "/api/library/sources/batch",
+                json.dumps(
+                    {
+                        "artifact_id": artifact["id"],
+                        "sources": [
+                            {
+                                "id": "source-1",
+                                "title": "First Source",
+                                "url": "https://example.test/1",
+                            },
+                            {
+                                "id": "source-2",
+                                "title": "Second Source",
+                                "url": "https://example.test/2",
+                            },
+                        ],
+                    }
+                ),
+            )
+
+        self.assertEqual(status, 201)
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["sources_created"], 2)
+        self.assertEqual(payload["artifact_links_created"], 2)
+
+    def test_review_chat_returns_advice_without_writing_sources(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            usage_path = temp_path / "usage.json"
+            client = MagicMock()
+            client.chat_json.return_value = {
+                "answer": "Keep the technical report.",
+                "recommendations": [
+                    {"source_index": 1, "decision": "add", "reason": "Primary source."}
+                ],
+            }
+            client.usage_snapshot.return_value = {
+                "chat_requests": 1,
+                "chat_tokens": 42,
+                "embedding_requests": 0,
+                "embedding_tokens": 0,
+            }
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(
+                usage, "USAGE_DIR", temp_path
+            ), patch.object(usage, "USAGE_PATH", usage_path):
+                server = create_server(
+                    "127.0.0.1",
+                    0,
+                    config_path,
+                )
+                status, payload = self._request(
+                    server,
+                    "POST",
+                    "/api/review/chat",
+                    json.dumps(
+                        {
+                            "question": "Should this be collected?",
+                            "sources": [{"title": "Qwen report", "abstract": "Technical details."}],
+                            "evidence": [{
+                                "id": "evidence-1",
+                                "evidence_type": "text",
+                                "source_title": "Qwen report",
+                                "locator": "Page 4",
+                                "quote": "The model uses grouped-query attention.",
+                            }],
+                        }
+                    ),
+                )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["answer"], "Keep the technical report.")
+        self.assertEqual(payload["recommendations"][0]["decision"], "add")
+        self.assertEqual(payload["usage"]["last_day_ai_chat"], 1)
+        self.assertIn("selected_evidence", client.chat_json.call_args.args[1])
+        self.assertIn("grouped-query attention", client.chat_json.call_args.args[1])
+        self.assertIn("local-first system", client.chat_json.call_args.args[0])
+        self.assertEqual(client.chat_json.call_args.kwargs["temperature"], 0.2)
+        self.assertEqual(client.chat_json.call_args.kwargs["extra_parameters"], {"top_p": 0.9})
 
     def test_cached_find_more_does_not_increment_paper_usage(self):
         def papers(prefix, source):
@@ -134,7 +491,118 @@ class SearchApiTests(unittest.TestCase):
         self.assertNotIn("websearch", payload["enabled_backends"])
         self.assertEqual(payload["max_papers"], 100)
         self.assertEqual(payload["intelligent_max_results"], 20)
+        self.assertEqual(payload["default_search_mode"], "keyword")
         self.assertFalse(payload["ai_enable_thinking"])
+
+    def test_default_search_mode_is_saved_independently(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            server = create_server("127.0.0.1", 0, config_path)
+            status, saved = self._request(
+                server,
+                "POST",
+                "/api/config/default-search-mode",
+                json.dumps({"mode": "intelligent"}),
+            )
+            server = create_server("127.0.0.1", 0, config_path)
+            get_status, fetched = self._request(server, "GET", "/api/config")
+            config_text = config_path.read_text(encoding="utf-8")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["default_search_mode"], "intelligent")
+        self.assertEqual(get_status, 200)
+        self.assertEqual(fetched["default_search_mode"], "intelligent")
+        self.assertIn("default_search_mode: intelligent", config_text)
+
+    def test_debug_replay_uses_saved_artifact_sources_without_search_or_ai(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            usage_path = temp_path / "usage.json"
+            artifact = create_artifact(
+                {
+                    "title": "Qwen baseline",
+                    "purpose": "Exercise the knowledge pipeline without retrieval.",
+                },
+                database_path,
+            )
+            save_source(
+                {
+                    "id": "https://arxiv.org/abs/2401.00001",
+                    "title": "Qwen baseline report",
+                    "authors": "Qwen Team",
+                    "year": 2024,
+                    "source": "arXiv",
+                    "result_type": "paper",
+                    "paper_url": "https://arxiv.org/abs/2401.00001",
+                    "abstract": "A saved and previously verified baseline.",
+                    "match_reason": "Previously verified.",
+                    "verification_score": 0.95,
+                    "discovery_path": "Academic recall → LLM verify",
+                },
+                artifact["id"],
+                database_path,
+            )
+            save_source(
+                {
+                    "id": "https://example.test/qwen",
+                    "title": "Qwen Web baseline",
+                    "source": "Web",
+                    "result_type": "web",
+                    "url": "https://example.test/qwen",
+                    "abstract": "A saved Web source without verification metadata.",
+                },
+                artifact["id"],
+                database_path,
+            )
+            replay_environment = {
+                "KNOWTE_DEBUG_REPLAY_QUERY": "qwen",
+                "KNOWTE_DEBUG_REPLAY_ARTIFACT": "Qwen baseline",
+            }
+            with patch.dict(os.environ, replay_environment), patch.object(
+                usage, "USAGE_DIR", temp_path
+            ), patch.object(
+                usage, "USAGE_PATH", usage_path
+            ), patch(
+                "knowte.server.search_papers"
+            ) as keyword_search, patch(
+                "knowte.server.intelligent_search"
+            ) as intelligent_pipeline:
+                keyword_server = create_server("127.0.0.1", 0, config_path)
+                keyword_status, keyword = self._request(
+                    keyword_server,
+                    "GET",
+                    "/api/search?q=qwen&year_from=2026",
+                )
+                intelligent_server = create_server("127.0.0.1", 0, config_path)
+                intelligent_status, intelligent = self._request(
+                    intelligent_server,
+                    "GET",
+                    "/api/intelligent-search?q=qwen&year_from=2026",
+                )
+
+        self.assertEqual(keyword_status, 200)
+        self.assertEqual(intelligent_status, 200)
+        self.assertEqual(keyword["count"], 2)
+        self.assertEqual(intelligent["count"], 2)
+        self.assertTrue(keyword["debug_replay"]["enabled"])
+        self.assertFalse(keyword["debug_replay"]["filters_applied"])
+        self.assertEqual(keyword["debug_replay"]["verified_count"], 1)
+        self.assertEqual(keyword["debug_replay"]["unverified_count"], 1)
+        self.assertEqual(intelligent["candidate_counts"]["verified"], 1)
+        self.assertEqual(intelligent["candidate_counts"]["web"], 1)
+        self.assertEqual(intelligent["request_budget"]["chat"], 0)
+        self.assertEqual(
+            intelligent["results"][0]["match_reason"],
+            "Previously verified.",
+        )
+        self.assertIn(
+            "Debug replay",
+            intelligent["results"][0]["discovery_path"],
+        )
+        keyword_search.assert_not_called()
+        intelligent_pipeline.assert_not_called()
 
     def test_server_can_restart_immediately_on_same_port(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Knowte Web Companion",
+  "version": "0.3.0",
+  "description": "Read on the original web and send Sources and Evidence to local Knowte.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "action": {
+    "default_title": "Knowte Web Companion",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "capture-text": {
+      "suggested_key": { "default": "Alt+Shift+K" },
+      "description": "Add selected text to Knowte"
+    },
+    "capture-region": {
+      "suggested_key": { "default": "Alt+Shift+X" },
+      "description": "Capture a region for Knowte"
+    }
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "service_worker": "background.js"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "web-companion@knowte.local",
+      "strict_min_version": "121.0"
+    }
+  }
+}

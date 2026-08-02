@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260729b" />
+    <link rel="stylesheet" href="styles.css?v=20260802b" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -27,6 +27,8 @@
         </div>
         <nav class="side-nav">
           <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
+          <button class="side-link" type="button" data-target="library-panel">Library</button>
+          <button class="side-link" type="button" data-target="create-panel">Create</button>
           <button class="side-link" type="button" data-target="plans-panel">Plans</button>
           <button class="side-link" type="button" data-target="config-panel">Config</button>
         </nav>
@@ -40,8 +42,14 @@
           <div class="panel">
             <div class="search-mode-bar">
               <div class="search-mode-switch" role="group" aria-label="Search mode">
-                <button type="button" class="search-mode-option is-active" data-search-mode="keyword" aria-pressed="true">Keyword</button>
-                <button type="button" class="search-mode-option" data-search-mode="smart" aria-pressed="false">Intelligent</button>
+                <div class="search-mode-choice">
+                  <button type="button" class="search-mode-option is-active" data-search-mode="keyword" aria-pressed="true">Keyword</button>
+                  <button type="button" class="search-mode-default" data-default-search-mode="keyword" aria-label="Set Keyword as the default search mode" aria-pressed="true" title="Default search mode">★</button>
+                </div>
+                <div class="search-mode-choice">
+                  <button type="button" class="search-mode-option" data-search-mode="smart" aria-pressed="false">Intelligent</button>
+                  <button type="button" class="search-mode-default" data-default-search-mode="intelligent" aria-label="Set Intelligent as the default search mode" aria-pressed="false" title="Set as default">☆</button>
+                </div>
               </div>
               <small id="search-mode-hint">Search providers directly with your keywords.</small>
             </div>
@@ -183,6 +191,7 @@
                 <button class="abstract-toggle" id="abstract-toggle" type="button" aria-pressed="false">Hide abstracts</button>
                 <button class="stop-btn" id="stop-search" type="button" aria-label="Stop searching" disabled>Stop</button>
               </div>
+              <label class="master-select"><input type="checkbox" id="results-select-all" /> Select all</label>
               <div class="pager" id="results-pager" hidden>
                 <button type="button" id="page-prev-top">Prev</button>
                 <select id="page-select-top" aria-label="Top page selector"></select>
@@ -194,6 +203,74 @@
             <div class="results-topline">
               <button class="scroll-top-btn" id="scroll-top" type="button" aria-label="Go to top of list">↑ Top</button>
             </div>
+          </div>
+        </section>
+
+        <section class="hero panel-view" id="library-panel">
+          <div class="panel">
+            <div class="knowledge-panel-head">
+              <div>
+                <div class="knowledge-panel-label">Global Library</div>
+                <small>Saved Sources are shared across every Artifact.</small>
+              </div>
+              <div class="knowledge-panel-actions">
+                <label class="master-select"><input type="checkbox" id="library-select-all" /> Select all</label>
+                <button type="button" id="library-abstract-toggle" aria-pressed="false">Hide abstracts</button>
+                <button type="button" id="library-go-search">Find Sources</button>
+              </div>
+            </div>
+            <div class="knowledge-status" id="library-status" role="status"></div>
+            <div class="library-list" id="library-list"></div>
+            <section class="source-reader" id="source-reader" hidden>
+              <div class="source-reader-head">
+                <div><small id="source-reader-meta"></small><h2 id="source-reader-title"></h2></div>
+              </div>
+              <div class="source-viewer-toolbar" id="source-viewer-toolbar">
+                <div class="source-viewer-tools">
+                  <button type="button" id="source-reader-back"><span class="tool-icon" aria-hidden="true">←</span><span>Library</span></button>
+                  <button type="button" id="source-details-toggle" aria-expanded="false"><span class="tool-icon disclosure-icon" aria-hidden="true">▾</span><span class="tool-label">Details</span></button>
+                  <button type="button" id="source-capture"><span class="tool-icon" aria-hidden="true">↻</span><span class="tool-label">Refresh</span></button>
+                  <a id="source-open-original" target="_blank" rel="noopener noreferrer"><span class="tool-icon" aria-hidden="true">↗</span><span>Original web</span></a>
+                </div>
+                <div class="source-viewer-pdf-controls" id="source-viewer-pdf-controls">
+                  <div class="source-viewer-tools">
+                    <button class="is-active" type="button" id="evidence-text-tool" aria-pressed="true"><span class="tool-icon text-tool-icon" aria-hidden="true">T</span><span>Select text</span></button>
+                    <button type="button" id="evidence-snapshot-tool" aria-pressed="false"><span class="tool-icon" aria-hidden="true">⌗</span><span>Capture region</span></button>
+                  </div>
+                  <div class="source-viewer-tools">
+                    <button type="button" id="pdf-zoom-out" aria-label="Zoom out">−</button>
+                    <span id="pdf-zoom-label">Fit</span>
+                    <button type="button" id="pdf-zoom-in" aria-label="Zoom in">+</button>
+                  </div>
+                </div>
+              </div>
+              <div class="knowledge-status" id="source-reader-status" role="status"></div>
+              <div class="source-reader-segments" id="source-reader-segments"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="hero panel-view" id="create-panel">
+          <div class="panel">
+            <div class="knowledge-panel-head">
+              <div>
+                <div class="knowledge-panel-label">Artifacts</div>
+                <small>Each Artifact carries its own Purpose while reusing global knowledge.</small>
+              </div>
+            </div>
+            <form class="artifact-form" id="artifact-form">
+              <div>
+                <label for="artifact-title">Title</label>
+                <textarea id="artifact-title" maxlength="200" rows="4" placeholder="e.g. Open-source LLM frontier" required></textarea>
+              </div>
+              <div class="artifact-purpose-field">
+                <label for="artifact-purpose">Purpose</label>
+                <textarea id="artifact-purpose" maxlength="4000" rows="4" placeholder="What should this work understand, decide, or create?" required></textarea>
+              </div>
+              <button type="submit" id="artifact-create">Create Artifact</button>
+            </form>
+            <div class="knowledge-status" id="artifact-status" role="status"></div>
+            <div class="artifact-list" id="artifact-list"></div>
           </div>
         </section>
 
@@ -214,7 +291,9 @@
         <section class="hero panel-view" id="config-panel">
           <div class="panel">
             <div class="config">
-              <div class="config-row">
+              <fieldset class="config-section search-config-section">
+                <legend>Search</legend>
+                <div class="config-row">
                 <label>Search backends</label>
                 <div class="backend-grid" id="backend-grid">
                   <label><input type="checkbox" value="arxiv" checked /> arXiv</label>
@@ -222,8 +301,8 @@
                   <label><input type="checkbox" value="semanticscholar" checked /> Semantic Scholar</label>
                   <label><input type="checkbox" value="websearch" /> Web Search</label>
                 </div>
-              </div>
-              <div class="ai-limits-grid search-result-limits">
+                </div>
+                <div class="ai-limits-grid search-result-limits">
                 <div class="config-row">
                   <label for="max-papers">Keyword results</label>
                   <input type="number" id="max-papers" name="max-papers" min="20" max="1000" step="10" value="100" />
@@ -234,9 +313,10 @@
                   <input type="number" id="intelligent-max-results" min="1" max="100" step="1" value="20" />
                   <small>Target number of results that pass LLM verification. Verification stops when this target or the candidate pool is exhausted.</small>
                 </div>
-              </div>
+                </div>
+              </fieldset>
               <fieldset class="ai-config">
-                <legend>Intelligent Search · OpenAI-compatible</legend>
+                <legend>AI Models · OpenAI-compatible</legend>
                 <div class="config-row">
                   <label for="ai-base-url">AI Base URL</label>
                   <input type="text" id="ai-base-url" placeholder="https://provider.example/v1" autocomplete="off" />
@@ -283,23 +363,61 @@
                     </div>
                   </div>
                 </details>
-                <div class="ai-limits-grid">
-                  <div class="config-row">
-                    <label for="ai-verify-batch-size">Verification batch size</label>
-                    <input type="number" id="ai-verify-batch-size" min="1" max="20" value="5" />
-                  </div>
-                  <div class="config-row">
-                    <label for="ai-verify-concurrency">Concurrent verification batches</label>
-                    <input type="number" id="ai-verify-concurrency" min="1" max="8" value="1" />
-                  </div>
-                  <div class="config-row">
-                    <label for="ai-timeout">AI request timeout (seconds)</label>
-                    <input type="number" id="ai-timeout" min="5" max="600" value="45" />
+                <div class="config-subsection ai-search-settings">
+                  <h3>Intelligent Search</h3>
+                  <div class="ai-limits-grid">
+                    <div class="config-row">
+                      <label for="ai-verify-batch-size">Verification batch size</label>
+                      <input type="number" id="ai-verify-batch-size" min="1" max="20" value="5" />
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-verify-concurrency">Concurrent verification batches</label>
+                      <input type="number" id="ai-verify-concurrency" min="1" max="8" value="1" />
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-timeout">AI request timeout (seconds)</label>
+                      <input type="number" id="ai-timeout" min="5" max="600" value="45" />
+                    </div>
                   </div>
                 </div>
-                <small class="ai-config-note">Keys are saved only in <code>~/.knowte/config.yml</code>, returned to the browser only as “configured / not configured”, and never copied into Plans.</small>
+                <small class="ai-config-note">This connection is shared by Intelligent Search and Review Copilot. Keys stay in <code>~/.knowte/config.yml</code>, are exposed only as “configured / not configured”, and are never copied into Plans.</small>
               </fieldset>
-              <div class="config-row">
+              <fieldset class="ai-config copilot-config">
+                <legend>Review Copilot</legend>
+                <section class="copilot-behavior" aria-label="Review Copilot behavior">
+                  <div class="config-row">
+                    <label for="ai-copilot-instructions">Custom instructions</label>
+                    <textarea id="ai-copilot-instructions" rows="3" placeholder="Optional preferences for how the Copilot reviews and responds"></textarea>
+                    <small>Appended to Knowte's core system prompt. It cannot replace Knowte's object definitions or safety boundaries.</small>
+                  </div>
+                  <div class="copilot-common-grid">
+                    <div class="config-row">
+                      <label for="ai-copilot-temperature">Temperature</label>
+                      <input type="number" id="ai-copilot-temperature" min="0" max="2" step="0.1" value="0.2" />
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-copilot-max-tokens">Max output tokens</label>
+                      <input type="number" id="ai-copilot-max-tokens" min="1" max="32768" step="1" value="1200" />
+                    </div>
+                  </div>
+                  <details class="ai-embedding-details copilot-advanced" id="ai-copilot-advanced">
+                    <summary>Advanced</summary>
+                    <div class="copilot-parameter-list" id="ai-copilot-parameter-list"></div>
+                    <button type="button" class="copilot-add-parameter" id="ai-copilot-add-parameter">+ Add parameter</button>
+                    <small>Values use JSON syntax: numbers and booleans need no quotes; strings do. Reserved request fields cannot be overridden.</small>
+                  </details>
+                  <details class="ai-embedding-details copilot-prompt-preview">
+                    <summary>View final Copilot system prompt</summary>
+                    <pre id="ai-copilot-prompt-preview"></pre>
+                  </details>
+                </section>
+              </fieldset>
+              <fieldset class="config-section source-config-section">
+                <legend>Source Connections</legend>
+                <div class="config-subsection">
+                  <h3>Academic Sources</h3>
+                  <div class="source-connection-grid">
+                  <div class="config-row">
                 <label for="email">OpenAlex email</label>
                 <input
                   type="email"
@@ -308,8 +426,8 @@
                   placeholder="you@example.com"
                   aria-label="OpenAlex contact email"
                 />
-              </div>
-              <div class="config-row">
+                  </div>
+                  <div class="config-row">
                 <label for="s2-key">Semantic Scholar API key</label>
                 <div class="secret-input-row">
                   <input
@@ -322,8 +440,12 @@
                   <button type="button" class="secret-remove" id="s2-key-remove" hidden>Remove</button>
                 </div>
                 <small class="secret-remove-note" id="s2-key-remove-note" hidden>Removal pending. Select Save to apply.</small>
-              </div>
-              <div class="config-row">
+                  </div>
+                  </div>
+                </div>
+                <div class="config-subsection web-source-config">
+                  <h3>Web Search · SearXNG</h3>
+                  <div class="config-row">
                 <label for="searxng-url">SearXNG URL</label>
                 <input
                   type="text"
@@ -337,8 +459,8 @@
                   <input type="checkbox" id="web-ignore-year-filter" /> Ignore year filter for Web Search
                 </label>
                 <small>A SearXNG service must be running at this URL. Managed setup prefers port 8888 and automatically chooses 8889–8898 if needed.</small>
-              </div>
-              <div class="managed-service" aria-labelledby="managed-searxng-title">
+                  </div>
+                  <div class="managed-service" aria-labelledby="managed-searxng-title">
                 <div>
                   <div class="managed-service-title" id="managed-searxng-title">Local Web Search</div>
                 <div class="managed-service-status" id="managed-searxng-status" role="status" aria-live="polite">
@@ -359,7 +481,21 @@
                 </div>
                 <div class="managed-service-log-note" id="searxng-log-note" hidden></div>
                 <pre class="managed-service-logs" id="searxng-log-output" hidden></pre>
-              </div>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset class="ai-config companion-config">
+                <legend>Knowte Web Companion</legend>
+                <div class="config-row">
+                  <label>Browser pairing</label>
+                  <div class="secret-input-row companion-pairing-row">
+                    <input id="companion-pairing-key" type="text" readonly placeholder="Generate a temporary pairing key" />
+                    <button type="button" id="companion-pairing-generate">Generate</button>
+                    <button type="button" id="companion-path-copy">Copy extension path</button>
+                  </div>
+                  <small id="companion-path-status">Copy its local path for Load unpacked, then generate a key and enter it in the extension within five minutes.</small>
+                </div>
+              </fieldset>
               <div class="config-actions">
                 <button class="config-save" type="button" id="save-config">Save</button>
                 <span class="config-status" id="config-status" role="status" aria-live="polite"></span>
@@ -367,8 +503,139 @@
             </div>
           </div>
         </section>
+        <section class="chat-workspace" id="chat-workspace" hidden aria-label="Expanded copilot workspace">
+          <div class="chat-workspace-head">
+            <div><span>Copilot</span><small id="chat-workspace-context">Review context</small></div>
+            <button type="button" id="chat-collapse" class="chat-window-action" aria-label="Return chat to Review panel" title="Return to Review panel">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5H3M16 21v-5h5M3 8l6-6M21 16l-6 6" /></svg>
+            </button>
+          </div>
+          <div class="chat-workspace-body" id="chat-workspace-body"></div>
+        </section>
       </main>
+      <button class="context-panel-toggle" id="context-panel-toggle" type="button" aria-controls="context-panel" aria-expanded="false">
+        Review <span id="context-toggle-count">0</span>
+      </button>
+      <aside class="context-panel" id="context-panel" aria-label="Review and actions">
+        <div class="context-panel-head">
+          <div>
+            <span>Review workspace</span>
+            <small id="context-mode-label">Search · No selection</small>
+          </div>
+          <button class="context-panel-close" id="context-panel-close" type="button" aria-label="Close review workspace">×</button>
+        </div>
+        <div class="context-panel-body">
+          <section class="review-section companion-inbox" id="companion-inbox" hidden>
+            <div class="review-section-head">
+              <span class="context-label">Web Companion</span>
+              <strong id="companion-inbox-count">0 pending</strong>
+            </div>
+            <div id="companion-inbox-list"></div>
+            <small id="companion-inbox-status" role="status"></small>
+          </section>
+          <section class="review-section review-context" id="review-context-section">
+            <div class="review-section-head">
+              <span class="context-label" id="context-selection-label">Selection</span>
+              <strong id="context-selected-count">0 selected</strong>
+            </div>
+            <div class="context-selection-list" id="context-selection-list">
+              <p>Select results in the main workspace to review them here.</p>
+            </div>
+          </section>
+          <section class="review-section review-actions" id="review-actions-section">
+            <label class="context-label" for="collect-artifact">Collection target</label>
+            <select id="collect-artifact">
+              <option value="">Library only</option>
+            </select>
+            <div class="context-action-row">
+              <button class="context-primary-action" type="button" id="context-collect-selected">Add selected Sources</button>
+            </div>
+            <small id="context-action-status" role="status" aria-live="polite"></small>
+          </section>
+          <section class="review-section review-knowledge" id="review-knowledge-section" hidden>
+            <div class="review-section-head"><span class="context-label">Evidence</span><label class="master-select"><input type="checkbox" id="evidence-select-all" /> Select all</label></div>
+            <small id="evidence-selection-location">Select text in the Source reader.</small>
+            <blockquote id="evidence-selection-quote" hidden></blockquote>
+            <img id="evidence-snapshot-preview" alt="Selected Source region" hidden />
+            <label class="context-label" for="evidence-artifact">Attach to Artifact</label>
+            <select id="evidence-artifact"><option value="">Library only</option></select>
+            <button class="context-primary-action" type="button" id="create-evidence" disabled>Create Evidence in Library</button>
+            <div class="review-evidence-list" id="review-evidence-list"></div>
+            <div class="review-section-head"><span class="context-label">Annotation</span><small id="annotation-target-label">Source</small></div>
+            <textarea id="annotation-body" rows="3" placeholder="Add a note, question, interpretation, or warning…"></textarea>
+            <button class="context-primary-action" type="button" id="create-annotation">Add Annotation</button>
+            <div class="review-annotation-list" id="review-annotation-list"></div>
+            <small id="review-knowledge-status" role="status"></small>
+          </section>
+          <section class="review-section review-copilot" id="review-copilot-section">
+            <div class="review-section-head">
+              <span class="context-label">Copilot</span>
+              <div class="review-copilot-tools">
+                <small>Suggestions require your confirmation.</small>
+                <button type="button" id="chat-expand" class="chat-window-action" aria-label="Expand chat into main workspace" aria-expanded="false" title="Expand chat">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-8 8M10 21H3v-7M3 21l8-8" /></svg>
+                </button>
+              </div>
+            </div>
+            <div class="chat-context-compact">
+              <span id="chat-context-summary">No context attached</span>
+              <button type="button" id="chat-context-add">Add selection</button>
+              <button type="button" id="chat-context-clear">Clear</button>
+              <small id="chat-context-status" role="status"></small>
+            </div>
+            <div class="chat-context-tray" id="chat-context-tray"></div>
+            <div class="context-chat" id="context-chat"></div>
+          </section>
+        </div>
+        <form class="context-chat-form" id="context-chat-form">
+          <textarea id="context-chat-input" rows="2" placeholder="Discuss this selection with the LLM…" aria-label="Message review copilot"></textarea>
+          <button type="submit" id="context-chat-send">Send</button>
+        </form>
+      </aside>
     </div>
-    <script src="app.js?v=20260729e"></script>
+    <dialog class="evidence-detail-dialog" id="evidence-detail-dialog">
+      <div class="evidence-detail-head">
+        <div><small id="evidence-detail-meta"></small><h2>Evidence</h2></div>
+        <button type="button" id="evidence-detail-close" aria-label="Close">×</button>
+      </div>
+      <div class="entity-tag-strip" id="evidence-detail-tags"></div>
+      <div class="evidence-detail-content" id="evidence-detail-content"></div>
+      <section class="evidence-detail-annotations">
+        <h3 id="evidence-detail-annotation-count">Annotations</h3>
+        <div id="evidence-detail-annotation-list"></div>
+      </section>
+      <div class="evidence-detail-actions">
+        <button type="button" id="evidence-detail-edit-tags">Edit Tags</button>
+        <button class="danger-action" type="button" id="evidence-detail-delete">Delete Evidence</button>
+      </div>
+    </dialog>
+    <dialog class="tag-editor-dialog" id="tag-editor-dialog">
+      <div class="evidence-detail-head">
+        <div><small id="tag-editor-type"></small><h2>Tags</h2></div>
+        <button type="button" id="tag-editor-close" aria-label="Close">×</button>
+      </div>
+      <div class="tag-editor-body">
+        <div class="entity-tag-strip" id="tag-editor-selected"></div>
+        <form id="tag-editor-form">
+          <input id="tag-editor-input" list="tag-suggestions" maxlength="60" placeholder="Add a Tag…" autocomplete="off" />
+          <button type="submit">Add</button>
+        </form>
+        <datalist id="tag-suggestions"></datalist>
+        <small>Tags are free-form. Entity types remain controlled by Knowte.</small>
+      </div>
+      <div class="evidence-detail-actions">
+        <button type="button" id="tag-editor-save">Done</button>
+      </div>
+    </dialog>
+    <section class="evidence-quick-editor" id="evidence-quick-editor" hidden>
+      <div class="evidence-quick-head"><strong id="evidence-quick-title">Evidence</strong><small id="evidence-quick-kind"></small></div>
+      <p id="evidence-quick-preview"></p>
+      <label>Destination<select id="evidence-quick-artifact"><option value="">Library only</option></select></label>
+      <label>Tags<input id="evidence-quick-tags" placeholder="Comma-separated" /></label>
+      <label>Annotation<textarea id="evidence-quick-annotation" rows="2" placeholder="Optional note, question, or warning"></textarea></label>
+      <div class="evidence-quick-actions"><button type="button" id="evidence-quick-discard">Discard</button><button type="button" id="evidence-quick-save">Save</button></div>
+      <small id="evidence-quick-status" role="status"></small>
+    </section>
+    <script src="app.js?v=20260802a"></script>
   </body>
 </html>

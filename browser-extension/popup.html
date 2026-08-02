@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Knowte Web Companion</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <header><strong>Knowte</strong><small>Web Companion · v<span id="extension-version"></span></small></header>
+  <label>Local Knowte URL<input id="server-url" value="http://127.0.0.1:7880"></label>
+  <section id="pairing"><label>Pairing key<input id="pairing-key" placeholder="000000.xxxxx"></label><button id="pair">Pair</button></section>
+  <section class="actions">
+    <button data-mode="source">Save page</button>
+    <button data-mode="text"><span>Highlight selection</span><kbd>Alt ⇧ K</kbd></button>
+    <button data-mode="snapshot"><span>Capture region</span><kbd>Alt ⇧ X</kbd></button>
+    <button id="open-knowte">Open Knowte</button>
+  </section>
+  <p id="status" role="status"></p>
+  <script type="module" src="popup.js"></script>
+</body></html>

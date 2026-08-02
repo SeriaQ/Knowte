@@ -4,6 +4,7 @@ import hashlib
 import json
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List
 
@@ -509,6 +510,9 @@ def intelligent_search(
 
     final_limit = limit if academic_backends else len(web_candidates)
     final_results = selected[:final_limit]
+    source_counts = dict(
+        Counter(result.get("source") or "Unknown" for result in final_results)
+    )
     return {
         "query": query,
         "results": final_results,
@@ -521,6 +525,7 @@ def intelligent_search(
             "web": len(web_candidates),
             "verified": len(selected),
         },
+        "source_counts": source_counts,
         "request_budget": {
             "retrieval": stages["recall"]["requests"],
             "academic_retrieval": (

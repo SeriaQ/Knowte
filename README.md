@@ -35,8 +35,9 @@ intent.
 
 🖥️ **A local workspace you control**
 
-Knowte runs on your machine. Configuration and usage data stay in
-`~/.knowte/`, and the Python runtime uses only the standard library.
+Knowte runs on your machine. Configuration, captured knowledge, and usage data
+stay local; cloud or LAN AI services are contacted only when you configure and
+use AI-assisted features.
 
 ---
 
@@ -77,9 +78,8 @@ immediately. Open **Config** if you want to change the selected sources:
 - **Semantic Scholar** accepts an optional API key.
 - **Web Search** is off initially and requires SearXNG. See the next section.
 
-Leave **Max papers per search (N)** at its default value unless you want a
-smaller or larger academic result set. Select **Save** after changing any
-Config option.
+Leave **Keyword results** at its default value unless you want a smaller or
+larger academic result set. Select **Save** after changing any Config option.
 
 ### 3. Run a search
 
@@ -106,13 +106,50 @@ needed.
 
 ---
 
+## 🌍 Read and Capture Sources
+
+Save search results to the global **Library**, then select **Inspect** to open
+the Source workspace:
+
+- PDFs retain their original pages and support text or region Evidence.
+- Web Sources open in a structured **Clean Reader**. Use **Original web** when
+  the site's native layout, images, tables, or interaction matters.
+- Text and Snapshot Evidence remain attached to the captured Source version;
+  Annotations and Tags can be added from the Review workspace.
+
+Knowte also includes **Knowte Web Companion**, a browser extension for working
+directly on original webpages. It supports Chromium browsers and Firefox.
+Start Knowte and open **Config → Knowte Web Companion**:
+
+1. Select **Copy extension path**.
+2. In the browser's extension page, choose **Load unpacked** and paste or
+   navigate to the copied path. In the native folder picker, use `⌘⇧G` on
+   macOS or `Ctrl+L` on Windows/Linux, paste the path, and confirm the folder.
+3. Generate a temporary pairing key and enter it in the extension within five
+   minutes.
+4. Select text and press `Alt+Shift+K`, or press `Alt+Shift+X` and drag a
+   region. The shortcuts can be customized in the browser's extension settings.
+5. Use the floating editor on the original page to choose a destination, add
+   Tags or an Annotation, and Save or Discard without leaving the page.
+
+**Save page** stores the current webpage as a Source in the Library without
+creating Evidence. It is useful when the page is worth retaining but no exact
+passage or region has been selected yet.
+
+Chromium users load the folder from `chrome://extensions` with Developer mode
+enabled. Firefox users can load its `manifest.json` temporarily from
+`about:debugging#/runtime/this-firefox`. Store-packaged browser releases will
+follow after the workflow stabilizes.
+
+---
+
 ## 🧠 Enable Intelligent Search
 
 Knowte supports services that implement OpenAI-compatible
 `/chat/completions` and `/embeddings` endpoints. The service may be hosted by a
 cloud provider or run locally.
 
-Open **Config → Intelligent Search · OpenAI-compatible** and fill:
+Open **Config → AI Models · OpenAI-compatible** and fill:
 
 - **AI Base URL** — the API root, normally ending in `/v1`, such as
   `https://provider.example/v1` or `http://127.0.0.1:11434/v1`. Do not append
@@ -298,14 +335,17 @@ Node.js is only needed for the optional JavaScript syntax check.
 
 ## 🧭 Project Status
 
-Knowte is currently an alpha research discovery tool. The longer-term
-direction is a broader research workspace with persistent notes and
-AI-assisted synthesis.
+Knowte is currently an alpha local-first research workspace. It supports
+discovery, a persistent Source Library, Artifact linking, Source inspection,
+Evidence, Annotations, Tags, and contextual AI review. The longer-term
+direction is an end-to-end system for digesting sources, distilling knowledge,
+and creating durable outputs.
 
 Not implemented yet:
 
-- persistent notes, collections, or annotations;
-- AI summarization or multi-paper synthesis;
+- durable Claims and Claim relationships;
+- multi-source synthesis and user-review workflows;
+- scheduled or recurring Plans;
 - authentication or multi-user isolation.
 
 Bug reports, ideas, and careful feedback are welcome.

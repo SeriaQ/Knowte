@@ -4,16 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.2.0"
-description = "Local-first research discovery workspace combining academic databases and web search."
+version = "0.3.0"
+description = "Local-first research workspace for discovering sources, capturing evidence, and building artifacts with AI."
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+  "pypdf>=6.0,<7",
+]
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
   { name = "Knowte Contributors" }
 ]
-keywords = ["research", "notes", "ai", "summarization"]
+keywords = ["research", "knowledge-management", "evidence", "ai"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -32,7 +35,27 @@ knowte = "knowte.server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["tests", "tests.*"]
+exclude = ["tests", "tests.*", "browser-extension", "browser-extension.*"]
 
 [tool.setuptools.package-data]
-knowte = ["web/*.html", "web/*.css", "web/*.js", "web/*.png"]
+knowte = [
+  "web/*.html",
+  "web/*.css",
+  "web/*.js",
+  "web/*.png",
+  "web/vendor/pdfjs/*.mjs",
+  "web/vendor/pdfjs/LICENSE",
+  "web/vendor/pdfjs/cmaps/*",
+  "web/vendor/pdfjs/standard_fonts/*",
+]
+
+[tool.setuptools.data-files]
+"knowte/browser-extension" = [
+  "browser-extension/manifest.json",
+  "browser-extension/background.js",
+  "browser-extension/content.js",
+  "browser-extension/popup.html",
+  "browser-extension/popup.js",
+  "browser-extension/popup.css",
+  "browser-extension/README.md",
+]

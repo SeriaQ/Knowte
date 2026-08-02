@@ -133,6 +133,57 @@ class OpenAICompatibleClientTests(unittest.TestCase):
             {"enable_thinking": False},
         )
 
+    def test_chat_accepts_multimodal_user_content(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": "{}"}}]}
+        ).encode("utf-8")
+        with patch("knowte.ai.build_opener") as build_opener:
+            build_opener.return_value.open.return_value = response
+            client = OpenAICompatibleClient(
+                AIConnection("http://192.168.1.12:8000/v1", ""),
+                "local-vlm",
+                AIConnection("http://192.168.1.12:8000/v1", ""),
+                "",
+            )
+            content = [
+                {"type": "text", "text": "Inspect this Evidence."},
+                {"type": "image_url", "image_url": {
+                    "url": "data:image/png;base64,iVBORw0KGgo="
+                }},
+            ]
+            client.chat_json("system", content)
+
+        request = build_opener.return_value.open.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(payload["messages"][1]["content"], content)
+
+    def test_chat_forwards_extra_parameters_without_overriding_managed_fields(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": "{}"}}]}
+        ).encode("utf-8")
+        with patch("knowte.ai.build_opener") as build_opener:
+            build_opener.return_value.open.return_value = response
+            client = OpenAICompatibleClient(
+                AIConnection("http://192.168.1.12:8000/v1", ""),
+                "local-model",
+                AIConnection("http://192.168.1.12:8000/v1", ""),
+                "",
+            )
+            client.chat_json(
+                "system",
+                "user",
+                temperature=0.2,
+                extra_parameters={"top_p": 0.9, "temperature": 1.5, "stream": True},
+            )
+
+        request = build_opener.return_value.open.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(payload["temperature"], 0.2)
+        self.assertEqual(payload["top_p"], 0.9)
+        self.assertNotIn("stream", payload)
+
     def test_timeout_has_a_distinct_error_code(self):
         with patch("knowte.ai.build_opener") as build_opener:
             build_opener.return_value.open.side_effect = TimeoutError()

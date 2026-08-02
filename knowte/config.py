@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from typing import Dict
 
 CONFIG_DIR = Path.home() / ".knowte"
@@ -108,6 +109,19 @@ def set_intelligent_max_results(
     return config
 
 
+def set_default_search_mode(
+    mode: str,
+    path: Path | None = None,
+) -> Dict[str, str]:
+    normalized = str(mode or "").strip().lower()
+    if normalized not in {"keyword", "intelligent"}:
+        raise ValueError("default search mode must be keyword or intelligent")
+    config = load_config(path)
+    config["default_search_mode"] = normalized
+    save_config(config, path)
+    return config
+
+
 def set_web_ignore_year_filter(enabled: bool, path: Path | None = None) -> Dict[str, str]:
     config = load_config(path)
     config["web_ignore_year_filter"] = "true" if enabled else "false"
@@ -127,6 +141,7 @@ def set_ai_settings(
         "ai_chat_model",
         "ai_embedding_model",
         "ai_embedding_base_url",
+        "ai_copilot_instructions",
     )
     for field in text_fields:
         value = str(settings.get(field) or "").strip()
@@ -138,12 +153,24 @@ def set_ai_settings(
         ("ai_verify_batch_size", 5, 1, 20),
         ("ai_verify_concurrency", 1, 1, 8),
         ("ai_timeout_seconds", 45, 5, 600),
+        ("ai_copilot_max_tokens", 1200, 1, 32768),
     ):
         try:
             value = int(settings.get(field) or default)
         except (TypeError, ValueError):
             value = default
         config[field] = str(max(minimum, min(value, maximum)))
+    try:
+        temperature = float(settings.get("ai_copilot_temperature", 0.2))
+    except (TypeError, ValueError):
+        temperature = 0.2
+    config["ai_copilot_temperature"] = str(max(0.0, min(temperature, 2.0)))
+    advanced = settings.get("ai_copilot_advanced_parameters", {"top_p": 0.9})
+    if not isinstance(advanced, dict):
+        advanced = {"top_p": 0.9}
+    config["ai_copilot_advanced_parameters"] = json.dumps(
+        advanced, ensure_ascii=False, separators=(",", ":")
+    )
     config["ai_embedding_separate_connection"] = (
         "true" if settings.get("ai_embedding_separate_connection") else "false"
     )

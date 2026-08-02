@@ -3,6 +3,9 @@ const input = form.querySelector("input[name='keywords']");
 const searchSubmitBtn = document.querySelector("#search-submit");
 const savePlanBtn = document.querySelector("#save-plan");
 const searchModeButtons = document.querySelectorAll("[data-search-mode]");
+const defaultSearchModeButtons = document.querySelectorAll(
+  "[data-default-search-mode]",
+);
 const searchModeHint = document.querySelector("#search-mode-hint");
 const intelligentProgressEl = document.querySelector("#intelligent-progress");
 const academicStagesEl = document.querySelector("#academic-stages");
@@ -47,6 +50,16 @@ const aiEmbeddingApiKeyRemoveNote = document.querySelector("#ai-embedding-api-ke
 const aiVerifyBatchSizeInput = document.querySelector("#ai-verify-batch-size");
 const aiVerifyConcurrencyInput = document.querySelector("#ai-verify-concurrency");
 const aiTimeoutInput = document.querySelector("#ai-timeout");
+const aiCopilotInstructionsInput = document.querySelector("#ai-copilot-instructions");
+const aiCopilotTemperatureInput = document.querySelector("#ai-copilot-temperature");
+const aiCopilotMaxTokensInput = document.querySelector("#ai-copilot-max-tokens");
+const aiCopilotParameterList = document.querySelector("#ai-copilot-parameter-list");
+const aiCopilotAddParameterBtn = document.querySelector("#ai-copilot-add-parameter");
+const aiCopilotPromptPreviewEl = document.querySelector("#ai-copilot-prompt-preview");
+const companionPairingKeyInput = document.querySelector("#companion-pairing-key");
+const companionPairingGenerateBtn = document.querySelector("#companion-pairing-generate");
+const companionPathCopyBtn = document.querySelector("#companion-path-copy");
+const companionPathStatusEl = document.querySelector("#companion-path-status");
 const usage5MinEl = document.querySelector("#usage-5min");
 const usageDayEl = document.querySelector("#usage-day");
 const usage5MinWebEl = document.querySelector("#usage-5min-web");
@@ -83,6 +96,107 @@ const plansTab = document.querySelector('[data-target="plans-panel"]');
 const plansListEl = document.querySelector("#plans-list");
 const plansStatusEl = document.querySelector("#plans-status");
 const goToSearchBtn = document.querySelector("#go-to-search");
+const collectArtifactSelect = document.querySelector("#collect-artifact");
+const libraryListEl = document.querySelector("#library-list");
+const libraryStatusEl = document.querySelector("#library-status");
+const libraryGoSearchBtn = document.querySelector("#library-go-search");
+const libraryAbstractToggleBtn = document.querySelector("#library-abstract-toggle");
+const resultsSelectAllInput = document.querySelector("#results-select-all");
+const librarySelectAllInput = document.querySelector("#library-select-all");
+const evidenceSelectAllInput = document.querySelector("#evidence-select-all");
+const sourceReaderEl = document.querySelector("#source-reader");
+const libraryPanelInnerEl = sourceReaderEl.closest(".panel");
+const sourceReaderBackBtn = document.querySelector("#source-reader-back");
+const sourceDetailsToggleBtn = document.querySelector("#source-details-toggle");
+const sourceReaderTitleEl = document.querySelector("#source-reader-title");
+const sourceReaderMetaEl = document.querySelector("#source-reader-meta");
+const sourceReaderStatusEl = document.querySelector("#source-reader-status");
+const sourceReaderSegmentsEl = document.querySelector("#source-reader-segments");
+const sourceCaptureBtn = document.querySelector("#source-capture");
+const sourceViewerToolbarEl = document.querySelector("#source-viewer-toolbar");
+const sourceViewerPdfControlsEl = document.querySelector("#source-viewer-pdf-controls");
+const evidenceTextToolBtn = document.querySelector("#evidence-text-tool");
+const evidenceSnapshotToolBtn = document.querySelector("#evidence-snapshot-tool");
+const pdfZoomOutBtn = document.querySelector("#pdf-zoom-out");
+const pdfZoomInBtn = document.querySelector("#pdf-zoom-in");
+const pdfZoomLabelEl = document.querySelector("#pdf-zoom-label");
+const sourceOpenOriginalEl = document.querySelector("#source-open-original");
+const contextPanel = document.querySelector("#context-panel");
+const contextPanelBody = document.querySelector(".context-panel-body");
+const contextPanelToggleBtn = document.querySelector("#context-panel-toggle");
+const contextPanelCloseBtn = document.querySelector("#context-panel-close");
+const contextToggleCountEl = document.querySelector("#context-toggle-count");
+const contextModeLabelEl = document.querySelector("#context-mode-label");
+const contextSelectionLabelEl = document.querySelector("#context-selection-label");
+const contextSelectedCountEl = document.querySelector("#context-selected-count");
+const contextSelectionListEl = document.querySelector("#context-selection-list");
+const reviewActionsSection = document.querySelector("#review-actions-section");
+const reviewCopilotSection = document.querySelector("#review-copilot-section");
+const reviewKnowledgeSection = document.querySelector("#review-knowledge-section");
+const evidenceSelectionLocationEl = document.querySelector("#evidence-selection-location");
+const evidenceSelectionQuoteEl = document.querySelector("#evidence-selection-quote");
+const evidenceSnapshotPreviewEl = document.querySelector("#evidence-snapshot-preview");
+const evidenceArtifactSelect = document.querySelector("#evidence-artifact");
+const createEvidenceBtn = document.querySelector("#create-evidence");
+const reviewEvidenceListEl = document.querySelector("#review-evidence-list");
+const annotationTargetLabelEl = document.querySelector("#annotation-target-label");
+const annotationBodyEl = document.querySelector("#annotation-body");
+const createAnnotationBtn = document.querySelector("#create-annotation");
+const reviewAnnotationListEl = document.querySelector("#review-annotation-list");
+const reviewKnowledgeStatusEl = document.querySelector("#review-knowledge-status");
+const companionInboxEl = document.querySelector("#companion-inbox");
+const companionInboxCountEl = document.querySelector("#companion-inbox-count");
+const companionInboxListEl = document.querySelector("#companion-inbox-list");
+const companionInboxStatusEl = document.querySelector("#companion-inbox-status");
+const evidenceDetailDialog = document.querySelector("#evidence-detail-dialog");
+const evidenceDetailMetaEl = document.querySelector("#evidence-detail-meta");
+const evidenceDetailContentEl = document.querySelector("#evidence-detail-content");
+const evidenceDetailAnnotationCountEl = document.querySelector("#evidence-detail-annotation-count");
+const evidenceDetailAnnotationListEl = document.querySelector("#evidence-detail-annotation-list");
+const evidenceDetailTagsEl = document.querySelector("#evidence-detail-tags");
+const evidenceDetailCloseBtn = document.querySelector("#evidence-detail-close");
+const evidenceDetailEditTagsBtn = document.querySelector("#evidence-detail-edit-tags");
+const evidenceDetailDeleteBtn = document.querySelector("#evidence-detail-delete");
+const evidenceQuickEditor = document.querySelector("#evidence-quick-editor");
+const evidenceQuickTitleEl = document.querySelector("#evidence-quick-title");
+const evidenceQuickKindEl = document.querySelector("#evidence-quick-kind");
+const evidenceQuickPreviewEl = document.querySelector("#evidence-quick-preview");
+const evidenceQuickArtifactSelect = document.querySelector("#evidence-quick-artifact");
+const evidenceQuickTagsInput = document.querySelector("#evidence-quick-tags");
+const evidenceQuickAnnotationInput = document.querySelector("#evidence-quick-annotation");
+const evidenceQuickDiscardBtn = document.querySelector("#evidence-quick-discard");
+const evidenceQuickSaveBtn = document.querySelector("#evidence-quick-save");
+const evidenceQuickStatusEl = document.querySelector("#evidence-quick-status");
+const tagEditorDialog = document.querySelector("#tag-editor-dialog");
+const tagEditorTypeEl = document.querySelector("#tag-editor-type");
+const tagEditorSelectedEl = document.querySelector("#tag-editor-selected");
+const tagEditorForm = document.querySelector("#tag-editor-form");
+const tagEditorInput = document.querySelector("#tag-editor-input");
+const tagEditorSuggestions = document.querySelector("#tag-suggestions");
+const tagEditorCloseBtn = document.querySelector("#tag-editor-close");
+const tagEditorSaveBtn = document.querySelector("#tag-editor-save");
+const contextCollectSelectedBtn = document.querySelector("#context-collect-selected");
+const contextActionStatusEl = document.querySelector("#context-action-status");
+const contextChatEl = document.querySelector("#context-chat");
+const contextChatForm = document.querySelector("#context-chat-form");
+const contextChatInput = document.querySelector("#context-chat-input");
+const contextChatSendBtn = document.querySelector("#context-chat-send");
+const chatExpandBtn = document.querySelector("#chat-expand");
+const chatWorkspace = document.querySelector("#chat-workspace");
+const chatWorkspaceBody = document.querySelector("#chat-workspace-body");
+const chatWorkspaceContextEl = document.querySelector("#chat-workspace-context");
+const chatCollapseBtn = document.querySelector("#chat-collapse");
+const chatContextSummaryEl = document.querySelector("#chat-context-summary");
+const chatContextAddBtn = document.querySelector("#chat-context-add");
+const chatContextClearBtn = document.querySelector("#chat-context-clear");
+const chatContextStatusEl = document.querySelector("#chat-context-status");
+const chatContextTrayEl = document.querySelector("#chat-context-tray");
+const artifactForm = document.querySelector("#artifact-form");
+const artifactTitleInput = document.querySelector("#artifact-title");
+const artifactPurposeInput = document.querySelector("#artifact-purpose");
+const artifactCreateBtn = document.querySelector("#artifact-create");
+const artifactListEl = document.querySelector("#artifact-list");
+const artifactStatusEl = document.querySelector("#artifact-status");
 let currentUsage = {
   last_5_min: 0,
   last_day: 0,
@@ -120,12 +234,256 @@ let aiEmbeddingApiKeyRemovalPending = false;
 let savedProfileState = null;
 let configStatusTimer = null;
 let searchMode = "keyword";
+let defaultSearchMode = "keyword";
 let savedPlans = [];
 let intelligentRunToken = 0;
 let lastBackends = [];
 let planSourceOverride = null;
 let isIntelligentSearching = false;
+let artifacts = [];
+let librarySources = [];
+const selectedResultKeys = new Set();
+const selectedLibrarySourceKeys = new Set();
+const selectedEvidenceIds = new Set();
+const chatContextSources = new Map();
+const chatContextEvidence = new Map();
+const CHAT_CONTEXT_LIMIT = 12;
+const CHAT_SNAPSHOT_LIMIT = 4;
+let libraryAbstractsHidden = false;
+let activeSourceWorkspace = null;
+let pendingEvidenceSelection = null;
+let annotationTarget = null;
+let pdfjsLib = null;
+let activePdfDocument = null;
+let pdfRenderToken = 0;
+let pdfZoom = 1;
+let evidenceTool = "text";
+let activeEvidenceDetailId = null;
+let pendingPdfScrollAnchor = null;
+let activeTagEditor = null;
+let readerDetailsExpanded = false;
+let companionInboxItems = [];
+let activeReviewContextKey = "search";
+let chatExpanded = false;
+const reviewConversations = {
+  search: [],
+  library: [],
+  artifact: [],
+};
+const expandedArtifactIds = new Set();
 const DEFAULT_SEARXNG_URL = "http://127.0.0.1:8888/search";
+
+const closeEvidenceQuickEditor = ({ discard = false } = {}) => {
+  evidenceQuickEditor.hidden = true;
+  evidenceQuickStatusEl.textContent = "";
+  if (discard) {
+    pendingEvidenceSelection = null;
+    renderReviewWorkspace();
+  }
+};
+
+const openEvidenceQuickEditor = (rect = null) => {
+  if (!pendingEvidenceSelection || !activeSourceWorkspace) return;
+  evidenceQuickTitleEl.textContent = activeSourceWorkspace.source.title;
+  evidenceQuickKindEl.textContent = pendingEvidenceSelection.evidence_type === "snapshot"
+    ? "Snapshot Evidence" : "Text Evidence";
+  evidenceQuickPreviewEl.textContent = pendingEvidenceSelection.quote || "Selected region";
+  evidenceQuickArtifactSelect.replaceChildren(new Option("Library only", ""));
+  artifacts.forEach((artifact) => evidenceQuickArtifactSelect.appendChild(
+    new Option(`Library + ${artifact.title}`, artifact.id),
+  ));
+  evidenceQuickTagsInput.value = "";
+  evidenceQuickAnnotationInput.value = "";
+  evidenceQuickStatusEl.textContent = "";
+  evidenceQuickEditor.hidden = false;
+  const anchor = rect || { left: innerWidth / 2 - 172, bottom: innerHeight / 2 - 120 };
+  const left = Math.max(12, Math.min(innerWidth - 356, anchor.left));
+  const top = Math.max(12, Math.min(innerHeight - 390, anchor.bottom + 8));
+  evidenceQuickEditor.style.left = `${left}px`;
+  evidenceQuickEditor.style.top = `${top}px`;
+};
+
+const fetchCompanionInbox = async () => {
+  try {
+    const response = await fetch("/api/companion/inbox");
+    if (!response.ok) return;
+    companionInboxItems = (await response.json()).items || [];
+    renderCompanionInbox();
+  } catch (_) {
+    // Knowte can continue normally when the optional companion is unavailable.
+  }
+};
+
+const renderCompanionInbox = () => {
+  companionInboxEl.hidden = companionInboxItems.length === 0;
+  companionInboxCountEl.textContent = `${companionInboxItems.length} pending`;
+  if (companionInboxItems.length) {
+    contextPanelToggleBtn.classList.add("has-selection");
+    if (!Number(contextToggleCountEl.textContent || 0)) {
+      contextToggleCountEl.textContent = String(companionInboxItems.length);
+    }
+  }
+  companionInboxListEl.replaceChildren();
+  companionInboxItems.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "companion-inbox-item";
+    const title = document.createElement("strong");
+    title.textContent = item.source?.title || item.source?.url || "Web Source";
+    const meta = document.createElement("small");
+    meta.textContent = `${item.kind === "text" ? "Text Evidence" : item.kind === "snapshot" ? "Snapshot Evidence" : "Source"} · Original web`;
+    const quote = document.createElement("p");
+    quote.textContent = item.quote || "Save this page to the Library.";
+    const target = document.createElement("select");
+    target.appendChild(new Option("Library only", ""));
+    artifacts.forEach((artifact) => target.appendChild(
+      new Option(`Library + ${artifact.title}`, artifact.id),
+    ));
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "context-primary-action";
+    confirm.textContent = "Confirm";
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      companionInboxStatusEl.textContent = "Saving Companion capture…";
+      try {
+        const response = await fetch(`/api/companion/inbox/${item.id}/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ artifact_id: target.value }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "Could not confirm capture.");
+        companionInboxStatusEl.textContent = "Saved to Library.";
+        await Promise.all([fetchCompanionInbox(), fetchLibrary(), fetchArtifacts()]);
+      } catch (error) {
+        companionInboxStatusEl.textContent = error.message;
+        confirm.disabled = false;
+      }
+    });
+    const discard = document.createElement("button");
+    discard.type = "button";
+    discard.className = "danger-action";
+    discard.textContent = "Discard";
+    discard.addEventListener("click", async () => {
+      await fetch(`/api/companion/inbox/${item.id}`, { method: "DELETE" });
+      await fetchCompanionInbox();
+    });
+    const actions = document.createElement("div");
+    actions.className = "companion-inbox-actions";
+    actions.append(confirm, discard);
+    card.append(title, meta, quote, target, actions);
+    companionInboxListEl.appendChild(card);
+  });
+};
+
+companionPairingGenerateBtn.addEventListener("click", async () => {
+  companionPairingGenerateBtn.disabled = true;
+  try {
+    const response = await fetch("/api/companion/pairing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        theme: document.body.dataset.theme === "light" ? "light" : "dark",
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not generate key.");
+    companionPairingKeyInput.value = `${data.code}.${data.nonce}`;
+    companionPairingKeyInput.select();
+  } finally {
+    companionPairingGenerateBtn.disabled = false;
+  }
+});
+
+companionPathCopyBtn.addEventListener("click", async () => {
+  companionPathCopyBtn.disabled = true;
+  try {
+    const response = await fetch("/api/companion/info");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not locate the extension.");
+    try {
+      await navigator.clipboard.writeText(data.path);
+    } catch (_) {
+      const temporary = document.createElement("textarea");
+      temporary.value = data.path;
+      temporary.style.position = "fixed";
+      temporary.style.opacity = "0";
+      document.body.appendChild(temporary);
+      temporary.select();
+      document.execCommand("copy");
+      temporary.remove();
+    }
+    const platform = navigator.userAgentData?.platform || navigator.platform || "";
+    const pickerSteps = /mac/i.test(platform)
+      ? "In the folder picker: ⌘⇧G → ⌘V → Enter → Select."
+      : /win/i.test(platform)
+        ? "In the folder picker: Ctrl+L → Ctrl+V → Enter → Select Folder."
+        : "In the folder picker: Ctrl+L → Ctrl+V → Enter → Select.";
+    companionPathStatusEl.textContent = `Path copied. ${pickerSteps}`;
+  } catch (error) {
+    companionPathStatusEl.textContent = error.message;
+  } finally {
+    companionPathCopyBtn.disabled = false;
+  }
+});
+
+const parseCopilotParameterValue = (value) => {
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    throw new Error("Advanced parameter values must use valid JSON syntax.");
+  }
+};
+
+const copilotAdvancedParameters = () => {
+  const parameters = Object.create(null);
+  aiCopilotParameterList.querySelectorAll(".copilot-parameter-row").forEach((row) => {
+    const key = row.querySelector(".copilot-parameter-key").value.trim();
+    const rawValue = row.querySelector(".copilot-parameter-value").value.trim();
+    if (!key && !rawValue) return;
+    if (!key) throw new Error("Each Advanced parameter needs a key.");
+    if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key)) {
+      throw new Error(`Invalid Advanced parameter key: ${key}.`);
+    }
+    if (["model", "messages", "temperature", "max_tokens", "stream", "chat_template_kwargs"].includes(key)) {
+      throw new Error(`${key} is managed by Knowte and cannot be overridden.`);
+    }
+    if (Object.hasOwn(parameters, key)) throw new Error(`Duplicate Advanced parameter: ${key}.`);
+    parameters[key] = parseCopilotParameterValue(rawValue);
+  });
+  return parameters;
+};
+
+const addCopilotParameterRow = (key = "", value = "") => {
+  const row = document.createElement("div");
+  row.className = "copilot-parameter-row";
+  row.innerHTML = `
+    <input class="copilot-parameter-key" type="text" aria-label="Parameter key" placeholder="parameter" />
+    <input class="copilot-parameter-value" type="text" aria-label="Parameter JSON value" placeholder="JSON value" />
+    <button type="button" class="copilot-parameter-remove" aria-label="Remove parameter">×</button>
+  `;
+  row.querySelector(".copilot-parameter-key").value = key;
+  row.querySelector(".copilot-parameter-value").value = value;
+  row.querySelector(".copilot-parameter-remove").addEventListener("click", () => {
+    row.remove();
+    updateProfileDirtyState();
+  });
+  row.querySelectorAll("input").forEach((field) => field.addEventListener("input", updateProfileDirtyState));
+  aiCopilotParameterList.appendChild(row);
+};
+
+const renderCopilotAdvancedParameters = (parameters = { top_p: 0.9 }) => {
+  aiCopilotParameterList.replaceChildren();
+  Object.entries(parameters).forEach(([key, value]) => {
+    addCopilotParameterRow(key, JSON.stringify(value));
+  });
+};
+
+aiCopilotAddParameterBtn.addEventListener("click", () => {
+  addCopilotParameterRow();
+  aiCopilotParameterList.lastElementChild?.querySelector("input")?.focus();
+  updateProfileDirtyState();
+});
 
 const serializeProfileState = (overrides = {}) => JSON.stringify({
   email: overrides.email ?? emailInput.value.trim(),
@@ -154,15 +512,28 @@ const serializeProfileState = (overrides = {}) => JSON.stringify({
     ?? Number(aiVerifyConcurrencyInput.value || 1),
   ai_timeout_seconds: overrides.ai_timeout_seconds
     ?? Number(aiTimeoutInput.value || 45),
+  ai_copilot_instructions: overrides.ai_copilot_instructions
+    ?? aiCopilotInstructionsInput.value.trim(),
+  ai_copilot_temperature: overrides.ai_copilot_temperature
+    ?? Number(aiCopilotTemperatureInput.value || 0),
+  ai_copilot_max_tokens: overrides.ai_copilot_max_tokens
+    ?? Number(aiCopilotMaxTokensInput.value || 1200),
+  ai_copilot_advanced_parameters: overrides.ai_copilot_advanced_parameters
+    ?? copilotAdvancedParameters(),
   ai_api_key_update: aiApiKeyInput.value.trim(),
   ai_api_key_clear: aiApiKeyRemovalPending,
   ai_embedding_api_key_update: aiEmbeddingApiKeyInput.value.trim(),
   ai_embedding_api_key_clear: aiEmbeddingApiKeyRemovalPending,
 });
 
-const isConfigDirty = () => (
-  savedProfileState !== null && serializeProfileState() !== savedProfileState
-);
+const isConfigDirty = () => {
+  if (savedProfileState === null) return false;
+  try {
+    return serializeProfileState() !== savedProfileState;
+  } catch (_) {
+    return true;
+  }
+};
 
 const updateProfileDirtyState = () => {
   if (savedProfileState === null || !configTab) return;
@@ -457,8 +828,36 @@ const PRESETS = {
   "bio-med": ["bio.general", "med.general"],
 };
 
+const clearDisplayedSearchResults = () => {
+  if (searchController) {
+    searchController.abort();
+    searchController = null;
+  }
+  intelligentRunToken += 1;
+  isSearching = false;
+  isIntelligentSearching = false;
+  fullResults = [];
+  selectedResultKeys.clear();
+  lastQuery = "";
+  lastAreas = "";
+  lastYearFrom = "";
+  lastYearTo = "";
+  lastBackends = [];
+  canFindMore = false;
+  canFindMoreWeb = false;
+  lastSearchHasWeb = false;
+  lastSearchHasAcademic = false;
+  pageSelectTop.value = "1";
+  resultsEl.replaceChildren();
+  intelligentProgressEl.hidden = true;
+  setSearching(false);
+  renderPaginationControls();
+};
+
 const setSearchMode = (mode) => {
-  searchMode = mode === "smart" ? "smart" : "keyword";
+  const nextMode = mode === "smart" ? "smart" : "keyword";
+  const modeChanged = nextMode !== searchMode;
+  searchMode = nextMode;
   searchModeButtons.forEach((button) => {
     const active = button.dataset.searchMode === searchMode;
     button.classList.toggle("is-active", active);
@@ -474,6 +873,32 @@ const setSearchMode = (mode) => {
     searchModeHint.textContent = "Search providers directly with your keywords.";
     intelligentProgressEl.hidden = true;
   }
+  if (modeChanged) {
+    clearDisplayedSearchResults();
+    statusEl.textContent = searchMode === "smart"
+      ? "Intelligent mode ready. Describe what you want to understand."
+      : "Keyword mode ready. Enter a query to search providers directly.";
+  }
+};
+
+const renderDefaultSearchMode = () => {
+  defaultSearchModeButtons.forEach((button) => {
+    const isDefault = button.dataset.defaultSearchMode === defaultSearchMode;
+    const label = isDefault ? "Default search mode" : "Set as default";
+    const modeName = button.dataset.defaultSearchMode === "intelligent"
+      ? "Intelligent"
+      : "Keyword";
+    button.classList.toggle("is-default", isDefault);
+    button.textContent = isDefault ? "★" : "☆";
+    button.setAttribute("aria-pressed", String(isDefault));
+    button.setAttribute(
+      "aria-label",
+      isDefault
+        ? `${modeName} is the default search mode`
+        : `Set ${modeName} as the default search mode`,
+    );
+    button.title = label;
+  });
 };
 
 const getEffectiveAreas = () => {
@@ -547,7 +972,7 @@ const renderPaginationControls = () => {
   }
   pagePrevTop.disabled = currentPage <= 1;
   pageNextTop.disabled = currentPage >= totalPages;
-  scrollTopBtn.style.visibility = fullResults.length > pageSize ? "visible" : "hidden";
+  scrollTopBtn.style.visibility = fullResults.length ? "visible" : "hidden";
   updateResultTools();
 };
 
@@ -570,6 +995,30 @@ const RESULT_ACTION_ICONS = {
     ["circle", { cx: "12", cy: "12", r: "9" }],
     ["path", { d: "M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" }],
   ],
+};
+
+const CONTROL_ICONS = {
+  inspect: [
+    ["circle", { cx: "11", cy: "11", r: "6.5" }],
+    ["path", { d: "m16 16 4.25 4.25" }],
+  ],
+  delete: [
+    ["path", { d: "M4.5 7h15M9 7V4.5h6V7M7 7l.75 13h8.5L17 7" }],
+    ["path", { d: "M10 10.5v6M14 10.5v6" }],
+  ],
+};
+
+const createControlIcon = (iconName) => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const [tag, attributes] of CONTROL_ICONS[iconName] || []) {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+    svg.appendChild(node);
+  }
+  return svg;
 };
 
 const createResultAction = (label, href, iconName) => {
@@ -597,8 +1046,322 @@ const createResultAction = (label, href, iconName) => {
   return link;
 };
 
+const resultKey = (source) => String(
+  source.id || source.doi_url || source.paper_url || source.url || source.title || "",
+);
+
+const selectedResults = () => fullResults.filter(
+  (source) => selectedResultKeys.has(resultKey(source)),
+);
+
+const selectedLibrarySources = () => librarySources.filter(
+  (source) => selectedLibrarySourceKeys.has(resultKey(source)),
+);
+
+const currentReviewContext = () => {
+  const panelId = document.querySelector(".panel-view.is-active")?.id;
+  if (panelId === "library-panel") return "library";
+  if (panelId === "create-panel") return "artifact";
+  if (panelId === "plans-panel") return "plans";
+  if (panelId === "config-panel") return "config";
+  return "search";
+};
+
+const activeReviewSources = () => (
+  currentReviewContext() === "library" ? selectedLibrarySources() : selectedResults()
+);
+
+const activeReviewArtifact = () => (
+  ["search", "artifact"].includes(currentReviewContext())
+    ? artifacts.find((artifact) => artifact.id === collectArtifactSelect.value) || null
+    : null
+);
+
+const selectedEvidence = () => (
+  activeSourceWorkspace?.evidence.filter((item) => selectedEvidenceIds.has(item.id)) || []
+);
+
+const updateSelectAllState = (input, selectedCount, totalCount) => {
+  if (!input) return;
+  input.checked = totalCount > 0 && selectedCount === totalCount;
+  input.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+  input.disabled = totalCount === 0;
+};
+
+const renderChatContext = () => {
+  const sourceCount = chatContextSources.size;
+  const evidenceCount = chatContextEvidence.size;
+  const total = sourceCount + evidenceCount;
+  chatContextSummaryEl.textContent = total
+    ? `${sourceCount} Source${sourceCount === 1 ? "" : "s"} · ${evidenceCount} Evidence`
+    : "No context attached";
+  chatContextTrayEl.replaceChildren();
+  const appendChip = (type, key, label, collection) => {
+    const chip = document.createElement("div");
+    chip.className = "chat-context-chip";
+    const text = document.createElement("span");
+    text.textContent = `${type} · ${label}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${label} from chat context`);
+    remove.addEventListener("click", () => {
+      collection.delete(key);
+      chatContextStatusEl.textContent = "";
+      renderChatContext();
+    });
+    chip.append(text, remove);
+    chatContextTrayEl.appendChild(chip);
+  };
+  chatContextSources.forEach((source, key) => appendChip(
+    "Source", key, source.title || "Untitled Source", chatContextSources,
+  ));
+  chatContextEvidence.forEach((entry, key) => appendChip(
+    "Evidence", key, entry.locator || entry.quote || "Evidence", chatContextEvidence,
+  ));
+  const selectionCount = activeReviewSources().length + selectedEvidence().length;
+  chatContextAddBtn.disabled = selectionCount === 0;
+  chatContextClearBtn.disabled = total === 0;
+};
+
+const addSelectionToChatContext = () => {
+  const sources = activeReviewSources();
+  const evidence = selectedEvidence();
+  const newSourceEntries = sources.filter(
+    (source) => !chatContextSources.has(resultKey(source)),
+  );
+  const newEvidenceEntries = evidence.filter(
+    (item) => !chatContextEvidence.has(item.id),
+  );
+  const nextTotal = chatContextSources.size + chatContextEvidence.size
+    + newSourceEntries.length + newEvidenceEntries.length;
+  if (nextTotal > CHAT_CONTEXT_LIMIT) {
+    chatContextStatusEl.textContent = (
+      `Context supports ${CHAT_CONTEXT_LIMIT} items. Remove or deselect ${nextTotal - CHAT_CONTEXT_LIMIT}, then try again.`
+    );
+    return;
+  }
+  const nextSnapshotCount = [...chatContextEvidence.values()].filter(
+    (item) => item.evidence_type === "snapshot",
+  ).length + newEvidenceEntries.filter(
+    (item) => item.evidence_type === "snapshot",
+  ).length;
+  if (nextSnapshotCount > CHAT_SNAPSHOT_LIMIT) {
+    chatContextStatusEl.textContent = (
+      `Chat supports ${CHAT_SNAPSHOT_LIMIT} Snapshot Evidence items at a time. Remove or deselect ${nextSnapshotCount - CHAT_SNAPSHOT_LIMIT}, then try again.`
+    );
+    return;
+  }
+  newSourceEntries.forEach((source) => chatContextSources.set(resultKey(source), source));
+  newEvidenceEntries.forEach((item) => chatContextEvidence.set(item.id, {
+    ...item,
+    source_title: activeSourceWorkspace?.source.title || "",
+    source_id: activeSourceWorkspace?.source.id || "",
+  }));
+  chatContextStatusEl.textContent = newSourceEntries.length || newEvidenceEntries.length
+    ? "Selection added to chat context." : "Selection is already in chat context.";
+  renderChatContext();
+};
+
+chatContextAddBtn.addEventListener("click", addSelectionToChatContext);
+chatContextClearBtn.addEventListener("click", () => {
+  chatContextSources.clear();
+  chatContextEvidence.clear();
+  chatContextStatusEl.textContent = "Chat context cleared.";
+  renderChatContext();
+});
+
+resultsSelectAllInput.addEventListener("change", () => {
+  fullResults.forEach((source) => {
+    const key = resultKey(source);
+    if (resultsSelectAllInput.checked) selectedResultKeys.add(key);
+    else selectedResultKeys.delete(key);
+  });
+  renderResults();
+});
+
+librarySelectAllInput.addEventListener("change", () => {
+  librarySources.forEach((source) => {
+    const key = resultKey(source);
+    if (librarySelectAllInput.checked) selectedLibrarySourceKeys.add(key);
+    else selectedLibrarySourceKeys.delete(key);
+  });
+  renderLibrary();
+  renderReviewWorkspace();
+});
+
+evidenceSelectAllInput.addEventListener("change", () => {
+  (activeSourceWorkspace?.evidence || []).forEach((item) => {
+    if (evidenceSelectAllInput.checked) selectedEvidenceIds.add(item.id);
+    else selectedEvidenceIds.delete(item.id);
+  });
+  if (!evidenceSelectAllInput.checked && annotationTarget?.type === "evidence") {
+    annotationTarget = { type: "source", id: activeSourceWorkspace.source.id };
+  }
+  renderReviewWorkspace();
+});
+
+const setChatExpanded = (expanded) => {
+  chatExpanded = Boolean(expanded);
+  chatWorkspace.hidden = !chatExpanded;
+  chatExpandBtn.setAttribute("aria-expanded", String(chatExpanded));
+  if (chatExpanded) {
+    chatWorkspaceContextEl.textContent = contextModeLabelEl.textContent;
+    chatWorkspaceBody.append(reviewCopilotSection, contextChatForm);
+    if (window.innerWidth <= 1270) {
+      contextPanel.classList.remove("is-open");
+      contextPanelToggleBtn.setAttribute("aria-expanded", "false");
+    }
+    window.requestAnimationFrame(() => contextChatInput.focus());
+  } else {
+    contextPanelBody.appendChild(reviewCopilotSection);
+    contextPanel.appendChild(contextChatForm);
+  }
+  contextChatEl.scrollTop = contextChatEl.scrollHeight;
+};
+
+chatExpandBtn.addEventListener("click", () => setChatExpanded(true));
+chatCollapseBtn.addEventListener("click", () => setChatExpanded(false));
+
+const renderReviewWorkspace = () => {
+  const context = currentReviewContext();
+  const selected = activeReviewSources();
+  const activeArtifact = activeReviewArtifact();
+  const contextNames = {
+    search: "Search",
+    library: "Library",
+    artifact: "Artifact",
+    plans: "Plans",
+    config: "Config",
+  };
+  const contextChanged = activeReviewContextKey !== context;
+  activeReviewContextKey = context;
+  const selectionCount = context === "artifact"
+    ? Number(activeArtifact?.source_count || 0)
+    : selected.length;
+  contextModeLabelEl.textContent = context === "library"
+    ? `Library · ${librarySources.length} Source${librarySources.length === 1 ? "" : "s"}`
+    : context === "artifact"
+      ? `Artifact · ${activeArtifact?.title || "No active Artifact"}`
+      : context === "plans"
+        ? `Plans · ${savedPlans.length} saved`
+        : context === "config"
+          ? "Config · Local settings"
+          : `Search · ${selected.length || "No"} selection${selected.length === 1 ? "" : "s"}`;
+  contextSelectionLabelEl.textContent = context === "artifact"
+    ? "Active Artifact"
+    : context === "plans"
+      ? "Saved Plans"
+      : context === "config"
+        ? "Scope"
+        : "Selection";
+  contextSelectedCountEl.textContent = context === "artifact"
+    ? `${selectionCount} linked`
+    : context === "plans"
+      ? `${savedPlans.length} saved`
+      : context === "config"
+        ? "Operational"
+        : `${selected.length} selected`;
+  contextToggleCountEl.textContent = String(
+    ["search", "library"].includes(context) ? selected.length : selectionCount,
+  );
+  contextPanelToggleBtn.classList.toggle("has-selection", selectionCount > 0);
+  reviewActionsSection.hidden = context !== "search";
+  reviewKnowledgeSection.hidden = context !== "library" || !activeSourceWorkspace;
+  const copilotAvailable = ["search", "library", "artifact"].includes(context);
+  if (!copilotAvailable && chatExpanded) setChatExpanded(false);
+  reviewCopilotSection.hidden = !copilotAvailable;
+  contextChatForm.hidden = !copilotAvailable;
+  if (chatExpanded) chatWorkspaceContextEl.textContent = contextModeLabelEl.textContent;
+  contextChatInput.placeholder = context === "library"
+    ? "Discuss selected Library Sources…"
+    : context === "artifact"
+      ? "Discuss this Artifact…"
+      : "Discuss this selection with the LLM…";
+  contextSelectionListEl.replaceChildren();
+
+  const appendContextItem = (label, removeCallback = null, openCallback = null) => {
+    const row = document.createElement("div");
+    row.className = "context-selection-item";
+    const title = document.createElement(openCallback ? "button" : "span");
+    title.textContent = label;
+    if (openCallback) {
+      title.type = "button";
+      title.className = "context-selection-open";
+      title.title = "Inspect Source";
+      title.addEventListener("click", openCallback);
+    }
+    row.appendChild(title);
+    if (removeCallback) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Remove ${label} from selection`);
+      remove.addEventListener("click", removeCallback);
+      row.appendChild(remove);
+    }
+    contextSelectionListEl.appendChild(row);
+  };
+
+  if (["search", "library"].includes(context) && !selected.length) {
+    const empty = document.createElement("p");
+    empty.textContent = context === "search"
+      ? "No search results selected."
+      : "No Library Sources selected.";
+    contextSelectionListEl.appendChild(empty);
+  } else if (["search", "library"].includes(context)) {
+    selected.forEach((source) => {
+      appendContextItem(source.title || "Untitled Source", () => {
+        if (context === "library") {
+          selectedLibrarySourceKeys.delete(resultKey(source));
+          renderLibrary();
+        } else {
+          selectedResultKeys.delete(resultKey(source));
+          renderResults();
+        }
+        renderReviewWorkspace();
+      }, context === "library" ? () => openSourceReader(source.id) : null);
+    });
+  } else if (context === "artifact") {
+    if (activeArtifact) {
+      appendContextItem(activeArtifact.title);
+      const purpose = document.createElement("p");
+      purpose.textContent = activeArtifact.purpose;
+      contextSelectionListEl.appendChild(purpose);
+    } else {
+      const empty = document.createElement("p");
+      empty.textContent = "No active Artifact.";
+      contextSelectionListEl.appendChild(empty);
+    }
+  } else if (context === "plans") {
+    savedPlans.slice(0, 6).forEach((plan) => appendContextItem(plan.name));
+    if (!savedPlans.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No saved Plans.";
+      contextSelectionListEl.appendChild(empty);
+    }
+  } else {
+    const scope = document.createElement("p");
+    scope.textContent = "Configuration controls infrastructure and is not part of the knowledge review context.";
+    contextSelectionListEl.appendChild(scope);
+  }
+
+  contextCollectSelectedBtn.disabled = selected.length === 0;
+  contextCollectSelectedBtn.textContent = selected.length
+    ? (
+        collectArtifactSelect.value
+          ? `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Library & Artifact(s)`
+          : `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Library`
+      )
+    : "Add selected Sources";
+  renderKnowledgeReview();
+  renderChatContext();
+  if (contextChanged && copilotAvailable) renderReviewConversation();
+};
+
 const renderResults = () => {
   resultsEl.innerHTML = "";
+  updateSelectAllState(resultsSelectAllInput, selectedResultKeys.size, fullResults.length);
   const totalPages = Math.max(1, Math.ceil(fullResults.length / pageSize));
   const currentPage = Math.min(
     totalPages,
@@ -619,6 +1382,29 @@ const renderResults = () => {
   visible.forEach((paper) => {
     const card = document.createElement("article");
     card.className = "result-card";
+    const key = resultKey(paper);
+    const isSelected = selectedResultKeys.has(key);
+    card.classList.toggle("is-selected", isSelected);
+
+    const selection = document.createElement("label");
+    selection.className = "result-selection";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = isSelected;
+    checkbox.setAttribute("aria-label", `Select ${paper.title || "this Source"}`);
+    const selectionText = document.createElement("span");
+    selectionText.textContent = "Select";
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedResultKeys.add(key);
+      } else {
+        selectedResultKeys.delete(key);
+      }
+      card.classList.toggle("is-selected", checkbox.checked);
+      updateSelectAllState(resultsSelectAllInput, selectedResultKeys.size, fullResults.length);
+      renderReviewWorkspace();
+    });
+    selection.append(checkbox, selectionText);
 
     const title = document.createElement("h3");
     const primaryUrl = paper.paper_url || paper.url;
@@ -673,13 +1459,13 @@ const renderResults = () => {
           createResultAction("DOI", paper.doi_url, "doi"),
         ];
     actionLinks.filter(Boolean).forEach((action) => actions.appendChild(action));
-
-    card.append(title, meta, abstract);
+    card.append(selection, title, meta, abstract);
     if (intelligence.childElementCount) card.appendChild(intelligence);
     if (actions.childElementCount) card.appendChild(actions);
     resultsEl.appendChild(card);
   });
   renderPaginationControls();
+  renderReviewWorkspace();
 };
 
 const updateUsage = (usage) => {
@@ -797,6 +1583,11 @@ const fetchConfig = async () => {
     aiVerifyBatchSizeInput.value = String(data.ai_verify_batch_size || 5);
     aiVerifyConcurrencyInput.value = String(data.ai_verify_concurrency || 1);
     aiTimeoutInput.value = String(data.ai_timeout_seconds || 45);
+    aiCopilotInstructionsInput.value = data.ai_copilot_instructions || "";
+    aiCopilotTemperatureInput.value = String(data.ai_copilot_temperature ?? 0.2);
+    aiCopilotMaxTokensInput.value = String(data.ai_copilot_max_tokens || 1200);
+    renderCopilotAdvancedParameters(data.ai_copilot_advanced_parameters ?? { top_p: 0.9 });
+    aiCopilotPromptPreviewEl.textContent = data.ai_copilot_prompt_preview || "";
     semanticscholarKeyRemovalPending = false;
     aiApiKeyRemovalPending = false;
     aiEmbeddingApiKeyRemovalPending = false;
@@ -810,6 +1601,11 @@ const fetchConfig = async () => {
     }
     configuredMaxPapers = parseMaxPapers(data.max_papers);
     configuredIntelligentMaxResults = Number(data.intelligent_max_results || 20);
+    defaultSearchMode = data.default_search_mode === "intelligent"
+      ? "intelligent"
+      : "keyword";
+    renderDefaultSearchMode();
+    setSearchMode(defaultSearchMode === "intelligent" ? "smart" : "keyword");
     activeLimit = configuredMaxPapers;
     maxPapersInput.value = String(configuredMaxPapers);
     intelligentMaxResultsInput.value = String(configuredIntelligentMaxResults);
@@ -896,6 +1692,10 @@ const saveConfig = async () => {
         ai_verify_batch_size: Number(aiVerifyBatchSizeInput.value || 5),
         ai_verify_concurrency: Number(aiVerifyConcurrencyInput.value || 1),
         ai_timeout_seconds: Number(aiTimeoutInput.value || 45),
+        ai_copilot_instructions: aiCopilotInstructionsInput.value.trim(),
+        ai_copilot_temperature: Number(aiCopilotTemperatureInput.value || 0),
+        ai_copilot_max_tokens: Number(aiCopilotMaxTokensInput.value || 1200),
+        ai_copilot_advanced_parameters: copilotAdvancedParameters(),
       }),
     });
     if (!response.ok) {
@@ -941,6 +1741,11 @@ const saveConfig = async () => {
     aiVerifyBatchSizeInput.value = String(data.ai_verify_batch_size || 5);
     aiVerifyConcurrencyInput.value = String(data.ai_verify_concurrency || 1);
     aiTimeoutInput.value = String(data.ai_timeout_seconds || 45);
+    aiCopilotInstructionsInput.value = data.ai_copilot_instructions || "";
+    aiCopilotTemperatureInput.value = String(data.ai_copilot_temperature ?? 0.2);
+    aiCopilotMaxTokensInput.value = String(data.ai_copilot_max_tokens || 1200);
+    renderCopilotAdvancedParameters(data.ai_copilot_advanced_parameters ?? { top_p: 0.9 });
+    aiCopilotPromptPreviewEl.textContent = data.ai_copilot_prompt_preview || "";
     renderSecretControls();
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
@@ -961,9 +1766,13 @@ const saveConfig = async () => {
     updateProfileDirtyState();
     saved = true;
   } catch (error) {
-    setConfigStatus(error.message === "no_search_backends"
-      ? "Select at least one search backend."
-      : "Could not save config.");
+    setConfigStatus(
+      error.message === "no_search_backends"
+        ? "Select at least one search backend."
+        : error.message === "save_failed"
+          ? "Could not save config."
+          : error.message,
+    );
   } finally {
     saveConfigBtn.disabled = false;
     saveConfigBtn.textContent = "Save";
@@ -1098,13 +1907,19 @@ const runSearch = async () => {
       .map(([source, count]) => `${source}: ${count}`)
       .join(", ");
     const sourceHint = sourceSummary ? ` Sources: ${sourceSummary}.` : "";
+    const replay = data.debug_replay || {};
+    const replayVerification = replay.unverified_count
+      ? `${replay.verified_count || 0} previously verified and ${replay.unverified_count} unverified`
+      : `${replay.verified_count || fullResults.length} previously verified`;
     const webDiagnostics = data.search_diagnostics?.websearch;
     const cacheHint = webDiagnostics?.cache_hits > 0
       && webDiagnostics?.external_requests === 0
       ? " Reused cached Web results."
       : "";
     const warningHint = warningMessages.length ? ` ${warningMessages.join(" ")}` : "";
-    statusEl.textContent = `Found ${data.count} paper(s) for "${data.query}"${timeHint}.` + sourceHint + cacheHint + warningHint;
+    statusEl.textContent = data.debug_replay
+      ? `Debug Replay: loaded ${data.count} saved Source(s) for “${data.query}” from the baseline Artifact. No provider, Web, Embedding, or LLM requests were made; active search filters were not applied.${sourceHint}`
+      : `Found ${data.count} paper(s) for "${data.query}"${timeHint}.` + sourceHint + cacheHint + warningHint;
     updateUsage(data.usage);
     renderResults();
     if (data.count > 0) {
@@ -1166,6 +1981,7 @@ const beginSearch = async (query, areas, yearFrom, yearTo, backends = activeBack
   lastSearchHasAcademic = backends.some((backend) => academicBackends.has(backend));
   canFindMoreWeb = false;
   fullResults = [];
+  selectedResultKeys.clear();
   canFindMore = false;
   pageSelectTop.value = "1";
   await runSearch();
@@ -1223,6 +2039,7 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
   lastSearchHasAcademic = academicEnabled;
   lastSearchHasWeb = webEnabled;
   fullResults = [];
+  selectedResultKeys.clear();
   canFindMore = false;
   canFindMoreWeb = false;
   pageSelectTop.value = "1";
@@ -1355,19 +2172,32 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
       markStage(webStagesEl, "verify", stages.verify?.status || "skipped");
     }
     const budget = data.request_budget || {};
-    intelligentBudgetEl.textContent = `Actual pipeline work: ${budget.retrieval || 0} retrieval round(s) · ${budget.embedding || 0} embedding batch(es) · ${budget.chat || 0} LLM request(s)`;
+    intelligentBudgetEl.textContent = data.debug_replay
+      ? "Debug Replay: 0 retrieval rounds · 0 embedding batches · 0 LLM requests"
+      : `Actual pipeline work: ${budget.retrieval || 0} retrieval round(s) · ${budget.embedding || 0} embedding batch(es) · ${budget.chat || 0} LLM request(s)`;
     const expandedQueries = data.expanded_queries || [];
-    if (academicEnabled) {
+    if (academicEnabled && !data.debug_replay) {
       renderExpandedQueries(
         expandedQueries,
         stages.expand?.status || "complete",
       );
+    } else if (data.debug_replay) {
+      intelligentExpandedEl.hidden = true;
+      intelligentExpandedEl.replaceChildren();
     }
     fullResults = data.results || [];
     updateUsage(data.usage);
     renderResults();
     if (fullResults.length) setFiltersCollapsed(true);
     const counts = data.candidate_counts || {};
+    const sourceSummary = Object.entries(data.source_counts || {})
+      .map(([source, count]) => `${source}: ${count}`)
+      .join(", ");
+    const sourceHint = sourceSummary ? ` Sources: ${sourceSummary}.` : "";
+    const replay = data.debug_replay || {};
+    const replayVerification = replay.unverified_count
+      ? `${replay.verified_count || 0} previously verified and ${replay.unverified_count} unverified`
+      : `${replay.verified_count || fullResults.length} previously verified`;
     const degraded = (data.warnings || []).length
       ? (
           stages.verify?.message
@@ -1375,7 +2205,9 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
             : " Some AI stages degraded; fallback results may be included."
         )
       : "";
-    statusEl.textContent = `Found ${fullResults.length} verified result(s) from ${counts.academic || 0} academic and ${counts.web || 0} Web candidate(s).${degraded}`;
+    statusEl.textContent = data.debug_replay
+      ? `Debug Replay: loaded ${fullResults.length} baseline Source(s): ${replayVerification}. No retrieval, Embedding, or LLM verification requests were made; active search filters were not applied.${sourceHint}`
+      : `Found ${fullResults.length} verified result(s) from ${counts.academic || 0} academic and ${counts.web || 0} Web candidate(s).${sourceHint}${degraded}`;
   } catch (error) {
     if (token !== intelligentRunToken) return;
     if (error.name === "AbortError") {
@@ -1422,6 +2254,33 @@ form.addEventListener("submit", async (event) => {
 
 searchModeButtons.forEach((button) => {
   button.addEventListener("click", () => setSearchMode(button.dataset.searchMode));
+});
+
+defaultSearchModeButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const requestedMode = button.dataset.defaultSearchMode;
+    if (!requestedMode || requestedMode === defaultSearchMode) return;
+    defaultSearchModeButtons.forEach((item) => {
+      item.disabled = true;
+    });
+    try {
+      const response = await fetch("/api/config/default-search-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: requestedMode }),
+      });
+      if (!response.ok) throw new Error("save_failed");
+      const data = await response.json();
+      defaultSearchMode = data.default_search_mode;
+      renderDefaultSearchMode();
+    } catch (_error) {
+      button.title = "Could not save the default search mode";
+    } finally {
+      defaultSearchModeButtons.forEach((item) => {
+        item.disabled = false;
+      });
+    }
+  });
 });
 
 selectedAreasEl.addEventListener("click", (event) => {
@@ -1512,7 +2371,1384 @@ stopBtn.addEventListener("click", () => {
   }
 });
 scrollTopBtn.addEventListener("click", () => {
-  resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector("#search-panel .panel")?.scrollTo({
+    top: 0,
+    behavior: "smooth",
+  });
+});
+
+const renderArtifactOptions = () => {
+  const preferred = collectArtifactSelect.value
+    || localStorage.getItem("knowte-active-artifact")
+    || "";
+  collectArtifactSelect.replaceChildren();
+  const noArtifactOption = document.createElement("option");
+  noArtifactOption.value = "";
+  noArtifactOption.textContent = "Library only";
+  collectArtifactSelect.appendChild(noArtifactOption);
+  artifacts.forEach((artifact) => {
+    const option = document.createElement("option");
+    option.value = artifact.id;
+    option.textContent = `Library + ${artifact.title}`;
+    collectArtifactSelect.appendChild(option);
+  });
+  collectArtifactSelect.value = artifacts.some((item) => item.id === preferred)
+    ? preferred
+    : "";
+};
+
+const renderContextPanel = () => {
+  renderReviewWorkspace();
+};
+
+const renderTagChips = (container, tags = [], { editable = false, onEdit = null } = {}) => {
+  container.replaceChildren();
+  container.classList.add("entity-tag-strip");
+  tags.forEach((tag) => {
+    const chip = document.createElement("span");
+    chip.className = "entity-tag-chip";
+    chip.textContent = tag.name;
+    container.appendChild(chip);
+  });
+  if (!tags.length) {
+    const empty = document.createElement("small");
+    empty.textContent = "No Tags";
+    container.appendChild(empty);
+  }
+  if (editable && onEdit) {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "entity-tag-edit";
+    edit.textContent = "+ Tag";
+    edit.addEventListener("click", onEdit);
+    container.appendChild(edit);
+  }
+};
+
+const openTagEditor = async (entityType, entityId, tags, afterSave) => {
+  activeTagEditor = {
+    entityType, entityId, names: tags.map((tag) => tag.name), afterSave,
+  };
+  tagEditorTypeEl.textContent = entityType[0].toUpperCase() + entityType.slice(1);
+  const response = await fetch("/api/tags");
+  const data = response.ok ? await response.json() : { tags: [] };
+  tagEditorSuggestions.replaceChildren();
+  (data.tags || []).forEach((tag) => {
+    const option = document.createElement("option");
+    option.value = tag.name;
+    tagEditorSuggestions.appendChild(option);
+  });
+  renderTagEditor();
+  tagEditorDialog.showModal();
+  tagEditorInput.focus();
+};
+
+const renderTagEditor = () => {
+  if (!activeTagEditor) return;
+  tagEditorSelectedEl.replaceChildren();
+  activeTagEditor.names.forEach((name) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "entity-tag-chip is-removable";
+    chip.textContent = `${name} ×`;
+    chip.addEventListener("click", () => {
+      activeTagEditor.names = activeTagEditor.names.filter((item) => item !== name);
+      renderTagEditor();
+    });
+    tagEditorSelectedEl.appendChild(chip);
+  });
+  if (!activeTagEditor.names.length) {
+    const empty = document.createElement("small");
+    empty.textContent = "No Tags";
+    tagEditorSelectedEl.appendChild(empty);
+  }
+};
+
+const saveTagEditor = async () => {
+  if (!activeTagEditor) return;
+  tagEditorSaveBtn.disabled = true;
+  try {
+    const response = await fetch("/api/tags/entity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entity_type: activeTagEditor.entityType,
+        entity_id: activeTagEditor.entityId,
+        tags: activeTagEditor.names,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not save Tags.");
+    const afterSave = activeTagEditor.afterSave;
+    tagEditorDialog.close();
+    activeTagEditor = null;
+    await afterSave?.(data.tags || []);
+  } finally {
+    tagEditorSaveBtn.disabled = false;
+  }
+};
+
+tagEditorForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = tagEditorInput.value.trim();
+  if (!name || !activeTagEditor) return;
+  if (!activeTagEditor.names.some((item) => item.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    activeTagEditor.names.push(name);
+  }
+  tagEditorInput.value = "";
+  renderTagEditor();
+  tagEditorInput.focus();
+});
+tagEditorSaveBtn.addEventListener("click", saveTagEditor);
+tagEditorCloseBtn.addEventListener("click", () => tagEditorDialog.close());
+tagEditorDialog.addEventListener("click", (event) => {
+  if (event.target === tagEditorDialog) tagEditorDialog.close();
+});
+
+const renderArtifacts = () => {
+  artifactListEl.replaceChildren();
+  if (!artifacts.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = "No Artifacts yet. Create one with a concrete Purpose, then collect Sources for it from Search.";
+    artifactListEl.appendChild(empty);
+    return;
+  }
+  artifacts.forEach((artifact) => {
+    const card = document.createElement("article");
+    card.className = "artifact-card";
+
+    const head = document.createElement("div");
+    head.className = "artifact-card-head";
+    const title = document.createElement("strong");
+    title.textContent = artifact.title;
+    const state = document.createElement("span");
+    state.className = "artifact-state";
+    state.textContent = artifact.status;
+    head.append(title, state);
+
+    const purpose = document.createElement("p");
+    purpose.textContent = artifact.purpose;
+    const meta = document.createElement("small");
+    meta.textContent = `${artifact.source_count || 0} linked Source${artifact.source_count === 1 ? "" : "s"}`;
+    const tagStrip = document.createElement("div");
+    renderTagChips(tagStrip, artifact.tags, {
+      editable: true,
+      onEdit: () => openTagEditor("artifact", artifact.id, artifact.tags || [], async () => {
+        await fetchArtifacts();
+      }),
+    });
+    const linkedSources = librarySources.filter((source) => (
+      source.artifacts || []
+    ).some((linkedArtifact) => linkedArtifact.id === artifact.id));
+
+    const actions = document.createElement("div");
+    actions.className = "artifact-card-actions";
+    const collect = document.createElement("button");
+    collect.type = "button";
+    collect.textContent = collectArtifactSelect.value === artifact.id
+      ? "Active in Search"
+      : "Collect Sources";
+    collect.disabled = collectArtifactSelect.value === artifact.id;
+    collect.addEventListener("click", () => {
+      collectArtifactSelect.value = artifact.id;
+      localStorage.setItem("knowte-active-artifact", artifact.id);
+      renderArtifacts();
+      showPanel("search-panel");
+      statusEl.textContent = `“${artifact.title}” is selected as the Review workspace target.`;
+      input.focus();
+    });
+    actions.appendChild(collect);
+    const toggleSources = document.createElement("button");
+    toggleSources.type = "button";
+    const isExpanded = expandedArtifactIds.has(artifact.id);
+    toggleSources.textContent = isExpanded
+      ? "Hide Sources"
+      : `Show Sources (${artifact.source_count || 0})`;
+    toggleSources.setAttribute("aria-expanded", String(isExpanded));
+    toggleSources.disabled = !artifact.source_count;
+    toggleSources.addEventListener("click", () => {
+      if (expandedArtifactIds.has(artifact.id)) {
+        expandedArtifactIds.delete(artifact.id);
+      } else {
+        expandedArtifactIds.add(artifact.id);
+      }
+      renderArtifacts();
+    });
+    actions.appendChild(toggleSources);
+
+    card.append(head, purpose, tagStrip, meta, actions);
+    if (isExpanded) {
+      const sourceList = document.createElement("div");
+      sourceList.className = "artifact-source-list";
+      linkedSources.forEach((source) => {
+        const row = document.createElement("div");
+        row.className = "artifact-source-row";
+        const titleLink = document.createElement("a");
+        titleLink.textContent = source.title;
+        titleLink.href = source.paper_url || source.url || "#";
+        if (titleLink.getAttribute("href") !== "#") {
+          titleLink.target = "_blank";
+          titleLink.rel = "noopener noreferrer";
+        }
+        const sourceMeta = document.createElement("small");
+        sourceMeta.textContent = [
+          source.source || source.source_type,
+          source.year || "Undated",
+          source.capture_state,
+        ].filter(Boolean).join(" · ");
+        row.append(titleLink, sourceMeta);
+        sourceList.appendChild(row);
+      });
+      if (!linkedSources.length) {
+        const loading = document.createElement("small");
+        loading.textContent = "Linked Sources are still loading from Library.";
+        sourceList.appendChild(loading);
+      }
+      card.appendChild(sourceList);
+    }
+    artifactListEl.appendChild(card);
+  });
+};
+
+const fetchArtifacts = async () => {
+  try {
+    const response = await fetch("/api/artifacts");
+    if (!response.ok) throw new Error("Could not load Artifacts.");
+    const data = await response.json();
+    artifacts = data.artifacts || [];
+    renderArtifactOptions();
+    renderArtifacts();
+    renderContextPanel();
+    if (companionInboxItems.length) renderCompanionInbox();
+  } catch (error) {
+    artifactStatusEl.textContent = error.message;
+  }
+};
+
+const renderLibrary = () => {
+  updateSelectAllState(
+    librarySelectAllInput, selectedLibrarySourceKeys.size, librarySources.length,
+  );
+  libraryListEl.hidden = Boolean(activeSourceWorkspace);
+  sourceReaderEl.hidden = !activeSourceWorkspace;
+  libraryPanelInnerEl.classList.toggle("is-reader-focused", Boolean(activeSourceWorkspace));
+  libraryPanelInnerEl.classList.toggle(
+    "is-reader-details-expanded",
+    Boolean(activeSourceWorkspace) && readerDetailsExpanded,
+  );
+  if (activeSourceWorkspace) {
+    renderSourceReader();
+    return;
+  }
+  libraryListEl.replaceChildren();
+  libraryListEl.classList.toggle("is-abstract-hidden", libraryAbstractsHidden);
+  if (!librarySources.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = "No Sources saved yet. Select search results, then collect them from the Review workspace.";
+    libraryListEl.appendChild(empty);
+    return;
+  }
+  librarySources.forEach((source) => {
+    const card = document.createElement("article");
+    card.className = "library-card";
+    const key = resultKey(source);
+    const isSelected = selectedLibrarySourceKeys.has(key);
+    card.classList.toggle("is-selected", isSelected);
+
+    const selection = document.createElement("label");
+    selection.className = "library-selection";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = isSelected;
+    checkbox.setAttribute("aria-label", `Select ${source.title || "this Source"}`);
+    const selectionText = document.createElement("span");
+    selectionText.textContent = "Select";
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedLibrarySourceKeys.add(key);
+      } else {
+        selectedLibrarySourceKeys.delete(key);
+      }
+      card.classList.toggle("is-selected", checkbox.checked);
+      updateSelectAllState(
+        librarySelectAllInput, selectedLibrarySourceKeys.size, librarySources.length,
+      );
+      renderReviewWorkspace();
+    });
+    selection.append(checkbox, selectionText);
+
+    const title = document.createElement("h3");
+    const primaryUrl = source.paper_url || source.url;
+    if (primaryUrl) {
+      const link = document.createElement("a");
+      link.href = primaryUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = source.title;
+      title.appendChild(link);
+    } else {
+      title.textContent = source.title;
+    }
+
+    const meta = document.createElement("p");
+    meta.className = "result-meta";
+    const sourceLabel = source.source ? ` · ${source.source}` : "";
+    meta.textContent = `${source.authors || "Unknown"} · ${source.year || "Undated"}${sourceLabel}`;
+
+    const abstract = document.createElement("p");
+    abstract.className = "library-abstract";
+    abstract.textContent = source.abstract || "No abstract or snippet was captured.";
+    const sourceTags = document.createElement("div");
+    renderTagChips(sourceTags, source.tags, {
+      editable: true,
+      onEdit: () => openTagEditor("source", source.id, source.tags || [], async () => {
+        await fetchLibrary();
+      }),
+    });
+
+    const footer = document.createElement("div");
+    footer.className = "library-card-footer";
+    const links = document.createElement("div");
+    links.className = "result-actions";
+    const actionLinks = source.source_type === "web"
+      ? [createResultAction("Web", primaryUrl, "web")]
+      : [
+          createResultAction("Paper", primaryUrl, "paper"),
+          createResultAction("PDF", source.pdf_url, "pdf"),
+          createResultAction("DOI", source.doi_url, "doi"),
+        ];
+    actionLinks.filter(Boolean).forEach((action) => links.appendChild(action));
+
+    const associations = document.createElement("div");
+    associations.className = "library-associations";
+    if (source.artifacts?.length) {
+      source.artifacts.forEach((artifact) => {
+        const chip = document.createElement("span");
+        chip.textContent = artifact.title;
+        associations.appendChild(chip);
+      });
+    } else {
+      const global = document.createElement("span");
+      global.textContent = "Global only";
+      associations.appendChild(global);
+    }
+    const inspect = document.createElement("button");
+    inspect.type = "button";
+    inspect.className = "abstract-toggle source-inspect";
+    inspect.textContent = "Inspect";
+    inspect.addEventListener("click", async () => {
+      inspect.disabled = true;
+      inspect.textContent = "Opening…";
+      const opened = await openSourceReader(source.id);
+      if (!opened) {
+        inspect.disabled = false;
+        inspect.textContent = "Inspect";
+      }
+    });
+    links.appendChild(inspect);
+    footer.append(links, associations);
+    card.append(selection, title, meta, abstract, sourceTags, footer);
+    libraryListEl.appendChild(card);
+  });
+};
+
+const pdfScrollAnchor = () => {
+  const pages = [...sourceReaderSegmentsEl.querySelectorAll(".pdf-page")];
+  if (!pages.length) return null;
+  const scrollTop = sourceReaderSegmentsEl.scrollTop;
+  const page = [...pages].reverse().find((item) => item.offsetTop <= scrollTop + 8)
+    || pages[0];
+  return {
+    page: Number(page.dataset.pageNumber),
+    offset: Math.max(0, scrollTop - page.offsetTop) / Math.max(1, page.offsetHeight),
+  };
+};
+
+const restorePdfScrollAnchor = (anchor) => {
+  if (!anchor) return;
+  const page = sourceReaderSegmentsEl.querySelector(
+    `.pdf-page[data-page-number="${anchor.page}"]`,
+  );
+  if (page) {
+    sourceReaderSegmentsEl.scrollTop = page.offsetTop + anchor.offset * page.offsetHeight;
+  }
+};
+
+const openSourceReader = async (sourceId, { preserveState = false } = {}) => {
+  const scrollAnchor = preserveState ? pdfScrollAnchor() : null;
+  if (scrollAnchor) pendingPdfScrollAnchor = scrollAnchor;
+  libraryStatusEl.textContent = "Opening Source…";
+  try {
+    const response = await fetch(`/api/library/sources/${sourceId}/workspace`);
+    if (response.status === 404) {
+      throw new Error(
+        "Source Reader is not loaded by the running server. Restart Knowte, then try again.",
+      );
+    }
+    let data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not open Source.");
+    if (!data.capture) {
+      libraryStatusEl.textContent = "Preparing Source content…";
+      const captureResponse = await fetch(
+        `/api/library/sources/${sourceId}/capture`,
+        { method: "POST" },
+      );
+      const captured = await captureResponse.json();
+      if (!captureResponse.ok) {
+        throw new Error(captured.message || "Could not prepare Source content.");
+      }
+      data = captured;
+    }
+    activeSourceWorkspace = data;
+    if (!preserveState) {
+      readerDetailsExpanded = false;
+      pendingEvidenceSelection = null;
+      selectedEvidenceIds.clear();
+      annotationTarget = { type: "source", id: sourceId };
+    }
+    libraryStatusEl.textContent = "";
+    renderLibrary();
+    renderReviewWorkspace();
+    if (!scrollAnchor) sourceReaderEl.scrollIntoView({ block: "start", behavior: "smooth" });
+    return true;
+  } catch (error) {
+    libraryStatusEl.textContent = error.message;
+    return false;
+  }
+};
+
+const renderSourceReader = () => {
+  if (!activeSourceWorkspace) return;
+  const source = activeSourceWorkspace.source;
+  sourceReaderTitleEl.textContent = source.title;
+  sourceReaderMetaEl.textContent = [
+    source.source || "Source",
+    source.year || "Undated",
+    activeSourceWorkspace.capture?.media_type === "application/pdf"
+      ? `${activeSourceWorkspace.segments.length} page PDF`
+      : activeSourceWorkspace.capture ? "Webpage content" : "Content unavailable",
+  ].filter(Boolean).join(" · ");
+  sourceCaptureBtn.querySelector(".tool-label").textContent = "Refresh";
+  sourceDetailsToggleBtn.querySelector(".tool-label").textContent = "Details";
+  sourceDetailsToggleBtn.classList.toggle("is-active", readerDetailsExpanded);
+  sourceDetailsToggleBtn.setAttribute(
+    "aria-expanded", String(readerDetailsExpanded),
+  );
+  sourceOpenOriginalEl.href = source.pdf_url || source.paper_url || source.url || "#";
+  sourceOpenOriginalEl.querySelector("span:last-child").textContent = (
+    activeSourceWorkspace.capture?.media_type === "application/pdf"
+      ? "Original PDF" : "Original web"
+  );
+  sourceReaderSegmentsEl.replaceChildren();
+  sourceReaderSegmentsEl.classList.remove("pdf-source-viewer", "is-snapshot-mode");
+  sourceViewerToolbarEl.hidden = false;
+  sourceViewerPdfControlsEl.hidden = true;
+  if (!activeSourceWorkspace.capture) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = "Source content is unavailable. Refresh to try again.";
+    sourceReaderSegmentsEl.appendChild(empty);
+    return;
+  }
+  if (activeSourceWorkspace.capture.media_type === "application/pdf") {
+    sourceViewerPdfControlsEl.hidden = false;
+    renderPdfSource();
+    return;
+  }
+  activeSourceWorkspace.segments.forEach((segment) => {
+    const article = document.createElement("article");
+    const blockType = segment.block_type || "paragraph";
+    article.className = `capture-segment capture-block-${blockType}`;
+    article.dataset.segmentId = segment.id;
+    const label = document.createElement("small");
+    label.textContent = segment.locator;
+    const tagName = blockType === "heading"
+      ? `h${Math.min(6, Math.max(3, Number(segment.metadata?.level || 3) + 2))}`
+      : blockType === "quote" ? "blockquote"
+        : blockType === "code" ? "pre" : "p";
+    const text = document.createElement(tagName);
+    text.className = "capture-segment-text";
+    text.textContent = segment.text;
+    article.append(label, text);
+    sourceReaderSegmentsEl.appendChild(article);
+  });
+};
+
+const ensurePdfJs = async () => {
+  if (!pdfjsLib) {
+    pdfjsLib = await import("./vendor/pdfjs/pdf.mjs");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdfjs/pdf.worker.mjs";
+  }
+  return pdfjsLib;
+};
+
+const destroyPdfDocument = (documentProxy) => {
+  if (!documentProxy || typeof documentProxy.destroy !== "function") return;
+  try {
+    Promise.resolve(documentProxy.destroy()).catch(() => {});
+  } catch (_error) {
+    // A superseded PDF document may already have been torn down.
+  }
+};
+
+const segmentForPage = (pageNumber) => (
+  activeSourceWorkspace?.segments.find((segment) => segment.ordinal === pageNumber)
+);
+
+const setEvidenceTool = (tool) => {
+  evidenceTool = tool;
+  evidenceTextToolBtn.classList.toggle("is-active", tool === "text");
+  evidenceSnapshotToolBtn.classList.toggle("is-active", tool === "snapshot");
+  evidenceTextToolBtn.setAttribute("aria-pressed", String(tool === "text"));
+  evidenceSnapshotToolBtn.setAttribute("aria-pressed", String(tool === "snapshot"));
+  sourceReaderSegmentsEl.classList.toggle("is-snapshot-mode", tool === "snapshot");
+  if (tool === "snapshot") window.getSelection()?.removeAllRanges();
+};
+
+const cancelSnapshotTool = () => {
+  setEvidenceTool("text");
+  sourceReaderSegmentsEl.querySelectorAll(".snapshot-selection-box").forEach(
+    (box) => box.remove(),
+  );
+  if (pendingEvidenceSelection?.evidence_type === "snapshot") {
+    pendingEvidenceSelection = null;
+    renderReviewWorkspace();
+  }
+};
+
+const prepareSnapshotOverlay = (overlay, canvas, pageNumber) => {
+  let start = null;
+  let selectionBox = null;
+  const point = (event) => {
+    const bounds = overlay.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(event.clientX - bounds.left, bounds.width)),
+      y: Math.max(0, Math.min(event.clientY - bounds.top, bounds.height)),
+      width: bounds.width,
+      height: bounds.height,
+    };
+  };
+  overlay.addEventListener("pointerdown", (event) => {
+    if (evidenceTool !== "snapshot") return;
+    event.preventDefault();
+    start = point(event);
+    selectionBox?.remove();
+    selectionBox = document.createElement("div");
+    selectionBox.className = "snapshot-selection-box";
+    overlay.appendChild(selectionBox);
+    overlay.setPointerCapture(event.pointerId);
+  });
+  overlay.addEventListener("pointermove", (event) => {
+    if (!start || !selectionBox) return;
+    const current = point(event);
+    const left = Math.min(start.x, current.x);
+    const top = Math.min(start.y, current.y);
+    const width = Math.abs(current.x - start.x);
+    const height = Math.abs(current.y - start.y);
+    Object.assign(selectionBox.style, {
+      left: `${left}px`, top: `${top}px`,
+      width: `${width}px`, height: `${height}px`,
+    });
+  });
+  overlay.addEventListener("pointerup", (event) => {
+    if (!start || !selectionBox) return;
+    const current = point(event);
+    const left = Math.min(start.x, current.x);
+    const top = Math.min(start.y, current.y);
+    const width = Math.abs(current.x - start.x);
+    const height = Math.abs(current.y - start.y);
+    start = null;
+    if (width < 12 || height < 12) {
+      selectionBox.remove();
+      selectionBox = null;
+      return;
+    }
+    const scaleX = canvas.width / current.width;
+    const scaleY = canvas.height / current.height;
+    const crop = document.createElement("canvas");
+    crop.width = Math.max(1, Math.round(width * scaleX));
+    crop.height = Math.max(1, Math.round(height * scaleY));
+    crop.getContext("2d").drawImage(
+      canvas,
+      Math.round(left * scaleX), Math.round(top * scaleY),
+      crop.width, crop.height,
+      0, 0, crop.width, crop.height,
+    );
+    const segment = segmentForPage(pageNumber);
+    pendingEvidenceSelection = {
+      evidence_type: "snapshot",
+      segment_id: segment?.id,
+      quote: "",
+      locator: `Page ${pageNumber}`,
+      image_data: crop.toDataURL("image/png"),
+      anchor: {
+        page: pageNumber,
+        region: {
+          x: left / current.width,
+          y: top / current.height,
+          width: width / current.width,
+          height: height / current.height,
+        },
+      },
+    };
+    renderReviewWorkspace();
+    openEvidenceQuickEditor({ left: event.clientX, bottom: event.clientY });
+  });
+};
+
+const renderPdfSource = async () => {
+  const scrollAnchor = pdfScrollAnchor() || pendingPdfScrollAnchor;
+  const token = ++pdfRenderToken;
+  sourceReaderStatusEl.textContent = "Loading faithful PDF view…";
+  sourceReaderSegmentsEl.classList.add("pdf-source-viewer");
+  const renderedPages = document.createDocumentFragment();
+  setEvidenceTool(evidenceTool);
+  try {
+    const pdf = await ensurePdfJs();
+    destroyPdfDocument(activePdfDocument);
+    activePdfDocument = null;
+    const sourceId = activeSourceWorkspace.source.id;
+    const loadingTask = pdf.getDocument({
+      url: `/api/library/sources/${sourceId}/content`,
+      cMapUrl: "./vendor/pdfjs/cmaps/",
+      cMapPacked: true,
+      standardFontDataUrl: "./vendor/pdfjs/standard_fonts/",
+    });
+    const documentProxy = await loadingTask.promise;
+    if (token !== pdfRenderToken) {
+      destroyPdfDocument(documentProxy);
+      return;
+    }
+    activePdfDocument = documentProxy;
+    const firstPage = await documentProxy.getPage(1);
+    const baseViewport = firstPage.getViewport({ scale: 1 });
+    const availableWidth = Math.max(320, sourceReaderSegmentsEl.clientWidth - 34);
+    const fitScale = Math.min(1.6, availableWidth / baseViewport.width);
+    const scale = fitScale * pdfZoom;
+    pdfZoomLabelEl.textContent = pdfZoom === 1
+      ? "Fit" : `${Math.round(pdfZoom * 100)}%`;
+
+    for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
+      if (token !== pdfRenderToken) return;
+      const page = pageNumber === 1 ? firstPage : await documentProxy.getPage(pageNumber);
+      const viewport = page.getViewport({ scale });
+      const pageEl = document.createElement("article");
+      pageEl.className = "pdf-page";
+      pageEl.dataset.pageNumber = String(pageNumber);
+      pageEl.style.width = `${viewport.width}px`;
+      pageEl.style.height = `${viewport.height}px`;
+      pageEl.style.setProperty("--total-scale-factor", String(scale));
+
+      const canvas = document.createElement("canvas");
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(viewport.width * pixelRatio);
+      canvas.height = Math.floor(viewport.height * pixelRatio);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      const context = canvas.getContext("2d", { alpha: false });
+      await page.render({
+        canvasContext: context,
+        viewport,
+        transform: pixelRatio === 1 ? null : [pixelRatio, 0, 0, pixelRatio, 0, 0],
+      }).promise;
+
+      const textLayerEl = document.createElement("div");
+      textLayerEl.className = "textLayer";
+      const textLayer = new pdf.TextLayer({
+        textContentSource: await page.getTextContent(),
+        container: textLayerEl,
+        viewport,
+      });
+      await textLayer.render();
+
+      const snapshotOverlay = document.createElement("div");
+      snapshotOverlay.className = "snapshot-overlay";
+      prepareSnapshotOverlay(snapshotOverlay, canvas, pageNumber);
+      const pageLabel = document.createElement("span");
+      pageLabel.className = "pdf-page-label";
+      pageLabel.textContent = `${pageNumber} / ${documentProxy.numPages}`;
+      pageEl.append(canvas, textLayerEl, snapshotOverlay, pageLabel);
+      renderedPages.appendChild(pageEl);
+    }
+    sourceReaderSegmentsEl.replaceChildren(renderedPages);
+    sourceReaderStatusEl.textContent = (
+      `${documentProxy.numPages} pages · Select text or capture a region`
+    );
+    restorePdfScrollAnchor(scrollAnchor);
+    pendingPdfScrollAnchor = null;
+  } catch (error) {
+    sourceReaderStatusEl.textContent = `Could not render PDF: ${error.message}`;
+  }
+};
+
+const renderKnowledgeReview = () => {
+  if (!activeSourceWorkspace || currentReviewContext() !== "library") return;
+  const selectedEvidenceArtifact = evidenceArtifactSelect.value;
+  const isSnapshotDraft = pendingEvidenceSelection?.evidence_type === "snapshot";
+  evidenceSelectionQuoteEl.hidden = !pendingEvidenceSelection || isSnapshotDraft;
+  evidenceSelectionQuoteEl.textContent = pendingEvidenceSelection?.quote || "";
+  evidenceSnapshotPreviewEl.hidden = !isSnapshotDraft;
+  evidenceSnapshotPreviewEl.src = isSnapshotDraft
+    ? pendingEvidenceSelection.image_data : "";
+  evidenceSelectionLocationEl.textContent = pendingEvidenceSelection?.locator
+    || "Select text in the Source reader.";
+  createEvidenceBtn.disabled = !pendingEvidenceSelection;
+  evidenceArtifactSelect.replaceChildren(new Option("Library only", ""));
+  artifacts.forEach((artifact) => {
+    evidenceArtifactSelect.appendChild(new Option(
+      `Library + ${artifact.title}`, artifact.id,
+    ));
+  });
+  evidenceArtifactSelect.value = artifacts.some(
+    (artifact) => artifact.id === selectedEvidenceArtifact,
+  ) ? selectedEvidenceArtifact : "";
+  createEvidenceBtn.textContent = evidenceArtifactSelect.value
+    ? "Create Evidence in Library & Artifact"
+    : "Create Evidence in Library";
+  reviewEvidenceListEl.replaceChildren();
+  updateSelectAllState(
+    evidenceSelectAllInput, selectedEvidenceIds.size, activeSourceWorkspace.evidence.length,
+  );
+  activeSourceWorkspace.evidence.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "review-evidence-item";
+    card.classList.toggle("is-selected", selectedEvidenceIds.has(item.id));
+    const selection = document.createElement("label");
+    selection.className = "evidence-selection";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedEvidenceIds.has(item.id);
+    checkbox.setAttribute("aria-label", `Select Evidence from ${item.locator}`);
+    selection.append(checkbox, document.createTextNode("Select"));
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedEvidenceIds.add(item.id);
+        annotationTarget = { type: "evidence", id: item.id };
+      } else {
+        selectedEvidenceIds.delete(item.id);
+        if (annotationTarget?.type === "evidence" && annotationTarget.id === item.id) {
+          annotationTarget = { type: "source", id: activeSourceWorkspace.source.id };
+        }
+      }
+      renderReviewWorkspace();
+    });
+    card.appendChild(selection);
+    if (item.evidence_type === "snapshot") {
+      const thumbnail = document.createElement("img");
+      thumbnail.src = `/api/evidence/${item.id}/snapshot`;
+      thumbnail.alt = "";
+      const label = document.createElement("span");
+      label.textContent = `Snapshot · ${item.locator}`;
+      card.append(thumbnail, label);
+    } else {
+      const quote = document.createElement("p");
+      quote.textContent = `“${item.quote}”`;
+      const meta = document.createElement("small");
+      meta.textContent = item.locator;
+      card.append(quote, meta);
+    }
+    const tags = document.createElement("div");
+    renderTagChips(tags, item.tags || []);
+    card.appendChild(tags);
+    const footer = document.createElement("div");
+    footer.className = "review-evidence-item-footer";
+    const annotationCount = document.createElement("span");
+    annotationCount.textContent = `${item.annotations.length} Annotation${item.annotations.length === 1 ? "" : "s"}`;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "evidence-icon-action";
+    open.appendChild(createControlIcon("inspect"));
+    open.title = "Open Evidence";
+    open.setAttribute("aria-label", "Open Evidence");
+    open.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openEvidenceDetail(item.id);
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "evidence-icon-action is-danger";
+    remove.appendChild(createControlIcon("delete"));
+    remove.title = "Delete Evidence";
+    remove.setAttribute("aria-label", "Delete Evidence");
+    remove.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await deleteEvidenceItem(item.id);
+    });
+    const actions = document.createElement("div");
+    actions.className = "review-evidence-item-actions";
+    actions.append(open, remove);
+    footer.append(annotationCount, actions);
+    card.appendChild(footer);
+    card.classList.toggle(
+      "is-active",
+      annotationTarget?.type === "evidence" && annotationTarget.id === item.id,
+    );
+    reviewEvidenceListEl.appendChild(card);
+  });
+  if (!activeSourceWorkspace.evidence.length) {
+    reviewEvidenceListEl.textContent = "No Evidence yet.";
+  }
+  if (!annotationTarget) {
+    annotationTarget = { type: "source", id: activeSourceWorkspace.source.id };
+  }
+  const targetEvidence = activeSourceWorkspace.evidence.find(
+    (item) => annotationTarget.type === "evidence" && item.id === annotationTarget.id,
+  );
+  annotationTargetLabelEl.textContent = targetEvidence
+    ? `Evidence · ${targetEvidence.locator}` : "Source";
+  const annotations = targetEvidence?.annotations
+    || activeSourceWorkspace.annotations || [];
+  reviewAnnotationListEl.replaceChildren();
+  const annotationSummary = document.createElement("p");
+  annotationSummary.textContent = `${annotations.length} Annotation${annotations.length === 1 ? "" : "s"} attached`;
+  reviewAnnotationListEl.appendChild(annotationSummary);
+  renderChatContext();
+};
+
+const activeEvidenceDetail = () => activeSourceWorkspace?.evidence.find(
+  (item) => item.id === activeEvidenceDetailId,
+);
+
+const renderEvidenceDetail = () => {
+  const item = activeEvidenceDetail();
+  if (!item) {
+    evidenceDetailDialog.close();
+    return;
+  }
+  evidenceDetailMetaEl.textContent = item.locator;
+  renderTagChips(evidenceDetailTagsEl, item.tags || []);
+  evidenceDetailContentEl.replaceChildren();
+  if (item.evidence_type === "snapshot") {
+    const image = document.createElement("img");
+    image.src = `/api/evidence/${item.id}/snapshot`;
+    image.alt = `Snapshot Evidence from ${item.locator}`;
+    evidenceDetailContentEl.appendChild(image);
+  } else {
+    const quote = document.createElement("blockquote");
+    quote.textContent = item.quote;
+    evidenceDetailContentEl.appendChild(quote);
+  }
+  evidenceDetailAnnotationCountEl.textContent = (
+    `${item.annotations.length} Annotation${item.annotations.length === 1 ? "" : "s"}`
+  );
+  evidenceDetailAnnotationListEl.replaceChildren();
+  item.annotations.forEach((annotation) => {
+    const row = document.createElement("article");
+    const body = document.createElement("p");
+    body.textContent = annotation.body;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", async () => {
+      if (!window.confirm("Delete this Annotation?")) return;
+      const response = await fetch(`/api/annotations/${annotation.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) return;
+      await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+      renderEvidenceDetail();
+    });
+    row.append(body, remove);
+    evidenceDetailAnnotationListEl.appendChild(row);
+  });
+  if (!item.annotations.length) {
+    evidenceDetailAnnotationListEl.textContent = "No Annotations attached.";
+  }
+};
+
+const openEvidenceDetail = (evidenceId) => {
+  activeEvidenceDetailId = evidenceId;
+  renderEvidenceDetail();
+  evidenceDetailDialog.showModal();
+};
+
+evidenceDetailCloseBtn.addEventListener("click", () => evidenceDetailDialog.close());
+evidenceDetailDialog.addEventListener("click", (event) => {
+  if (event.target === evidenceDetailDialog) evidenceDetailDialog.close();
+});
+evidenceDetailEditTagsBtn.addEventListener("click", async () => {
+  const item = activeEvidenceDetail();
+  if (!item) return;
+  openTagEditor("evidence", item.id, item.tags || [], async () => {
+    await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+    renderEvidenceDetail();
+  });
+});
+const deleteEvidenceItem = async (evidenceId, { closeDetail = false } = {}) => {
+  if (!window.confirm("Delete this Evidence and its Annotations?")) return false;
+  const response = await fetch(`/api/evidence/${evidenceId}`, { method: "DELETE" });
+  if (!response.ok) return;
+  if (closeDetail) evidenceDetailDialog.close();
+  if (activeEvidenceDetailId === evidenceId) activeEvidenceDetailId = null;
+  selectedEvidenceIds.delete(evidenceId);
+  chatContextEvidence.delete(evidenceId);
+  if (annotationTarget?.type === "evidence" && annotationTarget.id === evidenceId) {
+    annotationTarget = { type: "source", id: activeSourceWorkspace.source.id };
+  }
+  await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+  return true;
+};
+evidenceDetailDeleteBtn.addEventListener("click", async () => {
+  const item = activeEvidenceDetail();
+  if (item) await deleteEvidenceItem(item.id, { closeDetail: true });
+});
+
+sourceReaderBackBtn.addEventListener("click", () => {
+  pdfRenderToken += 1;
+  const documentToDestroy = activePdfDocument;
+  activePdfDocument = null;
+  activeSourceWorkspace = null;
+  pendingEvidenceSelection = null;
+  selectedEvidenceIds.clear();
+  annotationTarget = null;
+  readerDetailsExpanded = false;
+  renderLibrary();
+  renderReviewWorkspace();
+  destroyPdfDocument(documentToDestroy);
+});
+
+sourceDetailsToggleBtn.addEventListener("click", () => {
+  readerDetailsExpanded = !readerDetailsExpanded;
+  libraryPanelInnerEl.classList.toggle(
+    "is-reader-details-expanded", readerDetailsExpanded,
+  );
+  sourceDetailsToggleBtn.classList.toggle("is-active", readerDetailsExpanded);
+  sourceDetailsToggleBtn.setAttribute(
+    "aria-expanded", String(readerDetailsExpanded),
+  );
+});
+
+sourceCaptureBtn.addEventListener("click", async () => {
+  sourceCaptureBtn.disabled = true;
+  sourceReaderStatusEl.textContent = "Refreshing Source content…";
+  try {
+    const response = await fetch(
+      `/api/library/sources/${activeSourceWorkspace.source.id}/capture`,
+      { method: "POST" },
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Refresh failed.");
+    activeSourceWorkspace = data;
+    sourceReaderStatusEl.textContent = `${data.segments.length} addressable segments refreshed.`;
+    renderLibrary();
+    renderReviewWorkspace();
+  } catch (error) {
+    sourceReaderStatusEl.textContent = error.message;
+  } finally {
+    sourceCaptureBtn.disabled = false;
+  }
+});
+
+const captureCurrentReaderSelection = ({ showEditor = false } = {}) => {
+  if (evidenceTool !== "text") return;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  const origin = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+    ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
+  const pdfPage = origin.closest?.(".pdf-page");
+  if (pdfPage) {
+    if (!pdfPage.contains(range.startContainer) || !pdfPage.contains(range.endContainer)) {
+      return;
+    }
+    const quote = range.toString().trim();
+    if (!quote) return;
+    const pageNumber = Number(pdfPage.dataset.pageNumber);
+    const segment = segmentForPage(pageNumber);
+    pendingEvidenceSelection = {
+      evidence_type: "text",
+      segment_id: segment?.id,
+      quote,
+      locator: `Page ${pageNumber}`,
+      anchor: { page: pageNumber, exact: quote },
+    };
+    renderReviewWorkspace();
+    if (showEditor) openEvidenceQuickEditor(range.getBoundingClientRect());
+    return;
+  }
+  const segmentText = origin.closest?.(".capture-segment-text");
+  if (!segmentText || !segmentText.contains(range.startContainer)
+      || !segmentText.contains(range.endContainer)) return;
+  const prefix = document.createRange();
+  prefix.selectNodeContents(segmentText);
+  prefix.setEnd(range.startContainer, range.startOffset);
+  const quote = range.toString();
+  const startOffset = prefix.toString().length;
+  const segment = segmentText.closest(".capture-segment");
+  pendingEvidenceSelection = {
+    evidence_type: "text",
+    segment_id: segment.dataset.segmentId,
+    quote,
+    start_offset: startOffset,
+    end_offset: startOffset + quote.length,
+    locator: segment.querySelector("small").textContent,
+  };
+  renderReviewWorkspace();
+  if (showEditor) openEvidenceQuickEditor(range.getBoundingClientRect());
+};
+
+sourceReaderSegmentsEl.addEventListener("mouseup", () => captureCurrentReaderSelection());
+
+evidenceTextToolBtn.addEventListener("click", cancelSnapshotTool);
+evidenceSnapshotToolBtn.addEventListener("click", () => {
+  if (evidenceTool === "snapshot") {
+    cancelSnapshotTool();
+  } else {
+    setEvidenceTool("snapshot");
+  }
+});
+evidenceArtifactSelect.addEventListener("change", () => {
+  createEvidenceBtn.textContent = evidenceArtifactSelect.value
+    ? "Create Evidence in Library & Artifact"
+    : "Create Evidence in Library";
+});
+pdfZoomOutBtn.addEventListener("click", () => {
+  pdfZoom = Math.max(0.55, Math.round((pdfZoom - 0.15) * 100) / 100);
+  renderPdfSource();
+});
+pdfZoomInBtn.addEventListener("click", () => {
+  pdfZoom = Math.min(2.2, Math.round((pdfZoom + 0.15) * 100) / 100);
+  renderPdfSource();
+});
+
+const savePendingEvidence = async ({ artifactId = "", tags = [], annotation = "" } = {}) => {
+  if (!pendingEvidenceSelection) throw new Error("No Evidence is selected.");
+  reviewKnowledgeStatusEl.textContent = "Creating Evidence…";
+  const response = await fetch("/api/evidence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...pendingEvidenceSelection, artifact_id: artifactId }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || "Could not create Evidence.");
+  if (tags.length) {
+    const tagResponse = await fetch("/api/tags/entity", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity_type: "evidence", entity_id: data.id, tags }),
+    });
+    if (!tagResponse.ok) throw new Error("Evidence was created, but Tags could not be saved.");
+  }
+  if (annotation) {
+    const annotationResponse = await fetch("/api/annotations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_type: "evidence", target_id: data.id, body: annotation }),
+    });
+    if (!annotationResponse.ok) throw new Error("Evidence was created, but Annotation could not be saved.");
+  }
+  annotationTarget = { type: "evidence", id: data.id };
+  const sourceId = activeSourceWorkspace.source.id;
+  await openSourceReader(sourceId, { preserveState: true });
+  pendingEvidenceSelection = null;
+  renderReviewWorkspace();
+  reviewKnowledgeStatusEl.textContent = "Evidence created.";
+  return data;
+};
+
+createEvidenceBtn.addEventListener("click", async () => {
+  try {
+    await savePendingEvidence({ artifactId: evidenceArtifactSelect.value });
+  } catch (error) {
+    reviewKnowledgeStatusEl.textContent = error.message;
+  }
+});
+
+evidenceQuickDiscardBtn.addEventListener("click", () => {
+  closeEvidenceQuickEditor({ discard: true });
+  cancelSnapshotTool();
+});
+
+evidenceQuickSaveBtn.addEventListener("click", async () => {
+  evidenceQuickSaveBtn.disabled = true;
+  evidenceQuickStatusEl.textContent = "Saving…";
+  try {
+    await savePendingEvidence({
+      artifactId: evidenceQuickArtifactSelect.value,
+      tags: evidenceQuickTagsInput.value.split(",").map((tag) => tag.trim()).filter(Boolean),
+      annotation: evidenceQuickAnnotationInput.value.trim(),
+    });
+    evidenceQuickStatusEl.textContent = "Saved.";
+    window.setTimeout(() => closeEvidenceQuickEditor(), 700);
+  } catch (error) {
+    evidenceQuickStatusEl.textContent = error.message;
+  } finally {
+    evidenceQuickSaveBtn.disabled = false;
+  }
+});
+
+const runInternalCaptureShortcut = (mode) => {
+  if (mode === "text") {
+    captureCurrentReaderSelection({ showEditor: true });
+  }
+  if (mode === "snapshot") {
+    if (!activeSourceWorkspace) return;
+    if (activeSourceWorkspace.capture?.media_type === "application/pdf") {
+      setEvidenceTool("snapshot");
+      sourceReaderStatusEl.textContent = "Drag a region on the PDF. Press Esc to cancel.";
+    } else {
+      sourceReaderStatusEl.textContent = "Region capture is available in Original web through Web Companion.";
+    }
+  }
+};
+
+window.addEventListener("knowte:capture-shortcut", (event) => {
+  runInternalCaptureShortcut(event.detail?.mode);
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.altKey && event.shiftKey && event.code === "KeyK") {
+    event.preventDefault();
+    runInternalCaptureShortcut("text");
+  }
+  if (event.altKey && event.shiftKey && event.code === "KeyX") {
+    event.preventDefault();
+    runInternalCaptureShortcut("snapshot");
+  }
+  if (event.key === "Escape" && !evidenceQuickEditor.hidden) {
+    closeEvidenceQuickEditor({ discard: true });
+    cancelSnapshotTool();
+  }
+});
+
+createAnnotationBtn.addEventListener("click", async () => {
+  const body = annotationBodyEl.value.trim();
+  if (!body || !annotationTarget) return;
+  reviewKnowledgeStatusEl.textContent = "Adding Annotation…";
+  try {
+    const target = { ...annotationTarget };
+    const response = await fetch("/api/annotations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_type: target.type, target_id: target.id, body,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not add Annotation.");
+    annotationBodyEl.value = "";
+    annotationTarget = target;
+    await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+    renderReviewWorkspace();
+    reviewKnowledgeStatusEl.textContent = "Annotation added.";
+  } catch (error) {
+    reviewKnowledgeStatusEl.textContent = error.message;
+  }
+});
+
+const fetchLibrary = async () => {
+  libraryStatusEl.textContent = "Loading Library…";
+  try {
+    const response = await fetch("/api/library/sources");
+    if (!response.ok) throw new Error("Could not load the Library.");
+    const data = await response.json();
+    librarySources = data.sources || [];
+    const availableKeys = new Set(librarySources.map(resultKey));
+    [...selectedLibrarySourceKeys].forEach((key) => {
+      if (!availableKeys.has(key)) selectedLibrarySourceKeys.delete(key);
+    });
+    renderLibrary();
+    renderArtifacts();
+    renderContextPanel();
+    libraryStatusEl.textContent = `${librarySources.length} saved Source${librarySources.length === 1 ? "" : "s"}`;
+  } catch (error) {
+    libraryStatusEl.textContent = error.message;
+  }
+};
+
+artifactForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  artifactCreateBtn.disabled = true;
+  artifactCreateBtn.textContent = "Creating…";
+  artifactStatusEl.textContent = "";
+  try {
+    const response = await fetch("/api/artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: artifactTitleInput.value.trim(),
+        purpose: artifactPurposeInput.value.trim(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || "Could not create the Artifact.");
+    }
+    artifactForm.reset();
+    await fetchArtifacts();
+    collectArtifactSelect.value = data.id;
+    localStorage.setItem("knowte-active-artifact", data.id);
+    renderArtifacts();
+    artifactStatusEl.textContent = `Created “${data.title}”. It is now active in Search.`;
+  } catch (error) {
+    artifactStatusEl.textContent = error.message;
+  } finally {
+    artifactCreateBtn.disabled = false;
+    artifactCreateBtn.textContent = "Create Artifact";
+  }
+});
+
+collectArtifactSelect.addEventListener("change", () => {
+  if (collectArtifactSelect.value) {
+    localStorage.setItem("knowte-active-artifact", collectArtifactSelect.value);
+  } else {
+    localStorage.removeItem("knowte-active-artifact");
+  }
+  renderArtifacts();
+  renderContextPanel();
+});
+
+const collectSelectedResults = async (artifactId = null) => {
+  const selected = selectedResults();
+  if (!selected.length) return;
+  contextCollectSelectedBtn.disabled = true;
+  contextActionStatusEl.textContent = "Collecting selected Sources…";
+  try {
+    const response = await fetch("/api/library/sources/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources: selected, artifact_id: artifactId }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || "Could not collect the selected Sources.");
+    }
+    contextActionStatusEl.textContent = artifactId
+      ? `${data.count} Source(s) are in Library; ${data.artifact_links_created} new Artifact link(s) created.`
+      : `${data.count} Source(s) are in Library; ${data.sources_created} newly added.`;
+    await Promise.all([fetchLibrary(), fetchArtifacts()]);
+  } catch (error) {
+    contextActionStatusEl.textContent = error.message;
+  } finally {
+    renderReviewWorkspace();
+  }
+};
+
+contextCollectSelectedBtn.addEventListener("click", () => {
+  collectSelectedResults(collectArtifactSelect.value || null);
+});
+
+const appendReviewMessage = (
+  text,
+  role,
+  recommendations = [],
+  sources = activeReviewSources(),
+) => {
+  const message = document.createElement("div");
+  message.className = `context-chat-message is-${role}`;
+  const body = document.createElement("p");
+  body.textContent = text;
+  message.appendChild(body);
+  if (recommendations.length) {
+    const list = document.createElement("div");
+    list.className = "context-recommendations";
+    recommendations.slice(0, 12).forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const row = document.createElement("div");
+      const decision = String(item.decision || "inspect").toUpperCase();
+      const index = Number(item.source_index);
+      const source = Number.isInteger(index) ? sources[index - 1] : null;
+      row.textContent = `${decision}${source?.title ? ` · ${source.title}` : ""}: ${item.reason || "No reason provided."}`;
+      list.appendChild(row);
+    });
+    message.appendChild(list);
+  }
+  contextChatEl.appendChild(message);
+  contextChatEl.scrollTop = contextChatEl.scrollHeight;
+};
+
+const renderReviewConversation = () => {
+  contextChatEl.replaceChildren();
+  const conversation = reviewConversations[activeReviewContextKey] || [];
+  conversation.forEach((message) => {
+    appendReviewMessage(
+      message.content,
+      message.role,
+      message.recommendations || [],
+      message.sources || [],
+    );
+  });
+};
+
+contextChatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const question = contextChatInput.value.trim();
+  if (!question) return;
+  const contextKey = activeReviewContextKey;
+  const selected = [...chatContextSources.values()];
+  const evidence = [...chatContextEvidence.values()];
+  const artifact = activeReviewArtifact();
+  const conversation = reviewConversations[contextKey] || [];
+  const recentConversation = conversation.slice(-8).map((message) => ({
+    role: message.role,
+    content: message.content,
+    context_refs: [
+      ...(message.sources || []).map((source) => ({ type: "source", id: source.id || "" })),
+      ...(message.evidence || []).map((item) => ({ type: "evidence", id: item.id || "" })),
+    ],
+  }));
+  appendReviewMessage(question, "user", [], selected);
+  conversation.push({ role: "user", content: question, sources: selected, evidence });
+  contextChatInput.value = "";
+  contextChatSendBtn.disabled = true;
+  contextChatSendBtn.textContent = "Thinking…";
+  try {
+    const response = await fetch("/api/review/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        context: contextKey,
+        sources: selected,
+        evidence,
+        artifact,
+        conversation: recentConversation,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    updateUsage(data.usage);
+    if (!response.ok) {
+      throw new Error(data.message || "The review copilot is unavailable.");
+    }
+    const answer = data.answer || "The model returned no written assessment.";
+    appendReviewMessage(answer, "assistant", data.recommendations || [], selected);
+    conversation.push({
+      role: "assistant",
+      content: answer,
+      recommendations: data.recommendations || [],
+      sources: selected,
+      evidence,
+    });
+  } catch (error) {
+    appendReviewMessage(error.message, "error");
+  } finally {
+    contextChatSendBtn.disabled = false;
+    contextChatSendBtn.textContent = "Send";
+  }
+});
+
+contextPanelToggleBtn.addEventListener("click", () => {
+  const isOpen = contextPanel.classList.toggle("is-open");
+  contextPanelToggleBtn.setAttribute("aria-expanded", String(isOpen));
+});
+
+contextPanelCloseBtn.addEventListener("click", () => {
+  contextPanel.classList.remove("is-open");
+  contextPanelToggleBtn.setAttribute("aria-expanded", "false");
+});
+
+libraryGoSearchBtn.addEventListener("click", () => {
+  showPanel("search-panel");
+  input.focus();
+});
+
+libraryAbstractToggleBtn.addEventListener("click", () => {
+  libraryAbstractsHidden = !libraryAbstractsHidden;
+  libraryListEl.classList.toggle("is-abstract-hidden", libraryAbstractsHidden);
+  libraryAbstractToggleBtn.setAttribute("aria-pressed", String(libraryAbstractsHidden));
+  libraryAbstractToggleBtn.textContent = libraryAbstractsHidden
+    ? "Show abstracts"
+    : "Hide abstracts";
 });
 
 const showPanel = (target) => {
@@ -1522,6 +3758,7 @@ const showPanel = (target) => {
   panels.forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === target);
   });
+  renderReviewWorkspace();
 };
 
 const currentPlanPayload = () => {
@@ -1616,6 +3853,7 @@ const fetchPlans = async () => {
     const data = await response.json();
     savedPlans = data.plans || [];
     renderPlans();
+    renderReviewWorkspace();
     plansStatusEl.textContent = "";
   } catch (error) {
     plansStatusEl.textContent = error.message;
@@ -1742,6 +3980,8 @@ navLinks.forEach((link) => {
     if (!target) return;
     showPanel(target);
     if (target === "plans-panel") fetchPlans();
+    if (target === "library-panel") fetchLibrary();
+    if (target === "create-panel") fetchArtifacts();
   });
 });
 
@@ -1764,6 +4004,9 @@ navLinks.forEach((link) => {
   aiVerifyBatchSizeInput,
   aiVerifyConcurrencyInput,
   aiTimeoutInput,
+  aiCopilotInstructionsInput,
+  aiCopilotTemperatureInput,
+  aiCopilotMaxTokensInput,
 ]
   .filter(Boolean)
   .forEach((control) => {
@@ -1843,6 +4086,11 @@ const initTheme = () => {
     themeToggleBtn.dataset.mode = mode;
     themeToggleBtn.setAttribute("aria-label", `Theme: ${modeLabel}. Switch to ${nextLabel} mode`);
     themeToggleBtn.title = `${modeLabel} mode`;
+    fetch("/api/companion/theme", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme }),
+    }).catch(() => {});
   };
 
   apply(selectedMode);
@@ -1868,6 +4116,10 @@ const initTheme = () => {
 fetchConfig();
 fetchUsage();
 fetchSearxngStatus();
+fetchArtifacts();
+fetchLibrary();
+fetchCompanionInbox();
+window.setInterval(fetchCompanionInbox, 5000);
 renderSelectedAreas();
 renderPresetState();
 initTheme();

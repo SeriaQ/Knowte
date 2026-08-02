@@ -196,9 +196,10 @@ class OpenAICompatibleClient:
     def chat_json(
         self,
         system: str,
-        user: str,
+        user: str | List[Dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        extra_parameters: Dict[str, Any] | None = None,
     ) -> Any:
         if not self.chat_model:
             raise AIError("chat_model_missing", "Language model is not configured.")
@@ -213,6 +214,10 @@ class OpenAICompatibleClient:
             payload["temperature"] = temperature
         if max_tokens is not None:
             payload["max_tokens"] = max(1, int(max_tokens))
+        reserved = {"model", "messages", "temperature", "max_tokens", "stream", "chat_template_kwargs"}
+        for key, value in (extra_parameters or {}).items():
+            if key not in reserved:
+                payload[key] = value
         if not self.enable_thinking:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
         response = _json_request(

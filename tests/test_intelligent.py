@@ -127,6 +127,10 @@ class IntelligentSearchTests(unittest.TestCase):
 
         self.assertEqual(result["count"], 2)
         self.assertEqual(
+            result["source_counts"],
+            {"OpenAlex": 1, "Web": 1},
+        )
+        self.assertEqual(
             result["request_budget"],
             {
                 "retrieval": 3,

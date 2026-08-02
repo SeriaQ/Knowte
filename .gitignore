@@ -1,4 +1,7 @@
 /_cleanup.py
+/_debug.py
+/MEMORY.md
+/PRODUCT_CHARTER.md
 __pycache__/
 *.pyc
 *.pyo

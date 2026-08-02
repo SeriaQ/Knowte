@@ -5,7 +5,62 @@ All notable changes to Knowte will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-02
+
+### Added
+
+- SQLite-backed global Source Library and Purpose-driven Artifacts.
+- Search result collection with global deduplication and optional Artifact
+  linking.
+- Initial Library and Create views forming the first Collect-to-Artifact
+  workflow.
+- Persisted Keyword or Intelligent default-mode selection.
+- Search-side Review panel with current Artifact and Library collection status.
+- Expandable Artifact Source references in the Create view.
+- Offline PDF.js Source Viewer preserving original pages, figures, tables, and
+  multi-column layout.
+- Text Evidence from PDF or captured HTML selections, plus Snapshot Evidence
+  from user-selected PDF regions.
+- Source- and Evidence-level Annotations in the contextual Review workspace.
+- Global free-form Tags for Sources, Evidence, and Artifacts, with
+  controlled entity-type validation and migration from the retired Evidence
+  Group prototype.
+- Content-addressed Source captures and secure same-origin serving of captured
+  files and Evidence snapshots.
+- Clean Reader for captured Web Sources and original-layout PDF inspection.
+- Knowte Web Companion for capturing pages, selected text, and screen regions
+  from original webpages into the Library and optional Artifacts.
+- Context-aware Review Copilot with compact and expanded chat workspaces,
+  selectable Source and Evidence context, multimodal Snapshot Evidence, and
+  configurable instructions and generation parameters.
+
+### Changed
+
+- Artifact selection now describes optional linking instead of presenting the
+  global Library as if it were an Artifact destination.
+- Search-mode controls use clearer grouping, separation, and default markers.
+- Saved Source counts are visible from Search and the Library navigation item.
+- Search result actions consistently save to Library, with optional Artifact
+  linking reported as a secondary effect.
+- Keyword and Intelligent result state is isolated when switching modes.
+- Intelligent results report final source distribution, and non-empty result
+  lists always provide a working return-to-top action.
+- Search, Library, and Source inspection now share a persistent contextual
+  Review workspace for collection, Evidence, Annotation, Tag, and Copilot
+  actions.
+- Config is organized by Search, AI Models, Review Copilot, Source
+  Connections, and Web Companion instead of presenting unrelated settings as
+  one search-backend group.
+
+### Fixed
+
+- Source inspection preserves the current PDF page and zoom position across
+  Evidence and Annotation actions.
+- Review controls remain usable in narrow layouts without clipping or
+  horizontal overflow.
+- Review Copilot resolves saved Sources and Evidence from the knowledge store,
+  attaches Snapshot image content, and no longer duplicates the current user
+  question in recent conversation history.
 
 ## [0.2.0] - 2026-07-30
 
