@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.3.0"
-description = "Local-first research workspace for discovering sources, capturing evidence, and building artifacts with AI."
+version = "0.4.0"
+description = "Local-first knowledge workspace for discovering sources, grounding claims in evidence, and building reusable views with AI."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -39,6 +39,7 @@ exclude = ["tests", "tests.*", "browser-extension", "browser-extension.*"]
 
 [tool.setuptools.package-data]
 knowte = [
+  "prompts/*.md",
   "web/*.html",
   "web/*.css",
   "web/*.js",

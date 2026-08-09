@@ -2,25 +2,304 @@ import tempfile
 import threading
 import unittest
 import base64
+import sqlite3
 from pathlib import Path
 
 from knowte.knowledge import (
+    accept_claim_proposal,
     canonical_source_key,
     create_annotation,
     create_artifact,
+    create_claim,
+    create_claim_relation,
+    create_claim_proposal,
     create_evidence,
+    create_view,
+    delete_view,
     delete_annotation,
     delete_evidence,
     get_source_workspace,
+    get_view,
     list_artifacts,
+    list_claim_proposals,
+    list_claims,
+    list_evidence,
     list_sources,
+    list_views,
+    revise_claim,
     save_source,
     set_entity_tags,
     store_capture,
+    update_view,
 )
 
 
 class KnowledgeStoreTests(unittest.TestCase):
+    def test_legacy_claim_relations_are_removed_instead_of_reinterpreted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            first = create_claim(
+                {"statement": "First Claim.", "basis": "background", "intentionally_ungrounded": True},
+                database,
+            )
+            second = create_claim(
+                {"statement": "Second Claim.", "basis": "background", "intentionally_ungrounded": True},
+                database,
+            )
+            with sqlite3.connect(database) as connection:
+                connection.executescript(
+                    """
+                    DROP TABLE claim_relations;
+                    CREATE TABLE claim_relations (
+                        subject_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                        object_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                        relation_type TEXT NOT NULL CHECK(relation_type IN (
+                            'supports', 'contradicts', 'refines'
+                        )),
+                        rationale TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (subject_claim_id, object_claim_id, relation_type),
+                        CHECK(subject_claim_id <> object_claim_id)
+                    );
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO claim_relations VALUES (?, ?, 'refines', '', '2026-01-01T00:00:00Z')",
+                    (first["id"], second["id"]),
+                )
+            list_claims(database)
+            with sqlite3.connect(database) as connection:
+                rows = connection.execute(
+                    "SELECT relation_type FROM claim_relations"
+                ).fetchall()
+            self.assertEqual(rows, [])
+
+    def test_claim_relations_use_the_reduced_closed_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            first = create_claim(
+                {"statement": "First Claim.", "basis": "background", "intentionally_ungrounded": True},
+                database,
+            )
+            second = create_claim(
+                {"statement": "Second Claim.", "basis": "background", "intentionally_ungrounded": True},
+                database,
+            )
+            relation = create_claim_relation(
+                {
+                    "subject_claim_id": first["id"],
+                    "object_claim_id": second["id"],
+                    "relation_type": "related",
+                },
+                database,
+            )
+            self.assertEqual(relation["relation_type"], "related")
+            with self.assertRaisesRegex(ValueError, "unsupported Claim relation type"):
+                create_claim_relation(
+                    {
+                        "subject_claim_id": first["id"],
+                        "object_claim_id": second["id"],
+                        "relation_type": "refines",
+                    },
+                    database,
+                )
+
+    def test_view_preserves_ordered_claim_handoff(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            first = create_claim(
+                {"statement": "First idea.", "basis": "reported", "intentionally_ungrounded": True},
+                database,
+            )
+            second = create_claim(
+                {"statement": "Second idea.", "basis": "inference", "intentionally_ungrounded": True},
+                database,
+            )
+            project = create_artifact(
+                {"title": "Qwen research", "purpose": "Understand Qwen architecture."},
+                database,
+            )
+
+            created = create_view(
+                {
+                    "title": "Model architecture overview",
+                    "view_type": "wiki",
+                    "purpose": "Explain the architecture clearly.",
+                    "claim_ids": [second["id"], first["id"]],
+                    "artifact_id": project["id"],
+                },
+                database,
+            )
+            loaded = list_views(database)
+
+            self.assertEqual(created["view_type"], "wiki")
+            self.assertEqual(
+                [block["block_type"] for block in created["blocks"]],
+                ["heading", "claim", "claim"],
+            )
+            self.assertEqual(created["artifact"]["title"], "Qwen research")
+            self.assertEqual(
+                [claim["id"] for claim in loaded[0]["claims"]],
+                [second["id"], first["id"]],
+            )
+            updated = update_view(
+                created["id"],
+                {
+                    "title": "Architecture notes",
+                    "view_type": "article",
+                    "purpose": "A concise technical reading view.",
+                    "claim_ids": [first["id"], second["id"]],
+                    "blocks": [
+                        {"block_type": "heading", "content": "Findings"},
+                        {"block_type": "paragraph", "content": "A concise synthesis."},
+                        {"block_type": "claim", "claim_id": first["id"]},
+                    ],
+                },
+                database,
+            )
+            self.assertEqual(updated["title"], "Architecture notes")
+            self.assertEqual(updated["view_type"], "article")
+            self.assertEqual(
+                [claim["id"] for claim in updated["claims"]],
+                [first["id"], second["id"]],
+            )
+            self.assertEqual(updated["blocks"][1]["content"], "A concise synthesis.")
+            self.assertEqual(get_view(created["id"], database)["artifact"]["id"], project["id"])
+            self.assertTrue(delete_view(created["id"], database))
+            self.assertEqual(list_views(database), [])
+
+    def test_claims_preserve_evidence_provenance_and_revision_history(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            source, _, _ = save_source(
+                {"title": "Qwen report", "url": "https://example.test/qwen"},
+                path=database,
+            )
+            workspace = store_capture(
+                source["id"],
+                {
+                    "url": "https://example.test/qwen",
+                    "media_type": "text/html",
+                    "sha256": "claim-source",
+                    "raw_path": str(Path(temp_dir) / "source.html"),
+                    "segments": ["Qwen uses grouped-query attention for efficient inference."],
+                },
+                database,
+            )
+            evidence = create_evidence(
+                {
+                    "segment_id": workspace["segments"][0]["id"],
+                    "quote": "Qwen uses grouped-query attention",
+                    "start_offset": 0,
+                    "end_offset": len("Qwen uses grouped-query attention"),
+                },
+                database,
+            )
+            claim = create_claim(
+                {
+                    "statement": "Qwen uses grouped-query attention.",
+                    "basis": "reported",
+                    "evidence": [{
+                        "evidence_id": evidence["id"],
+                        "stance": "supports",
+                        "rationale": "The report states the mechanism directly.",
+                    }],
+                    "tags": ["Qwen", "Attention"],
+                },
+                database,
+            )
+
+            revised = revise_claim(
+                claim["id"],
+                {"statement": "Qwen models use grouped-query attention.", "basis": "reported"},
+                database,
+            )
+
+            self.assertEqual(len(revised["revisions"]), 2)
+            self.assertEqual(revised["evidence"][0]["source_title"], "Qwen report")
+            self.assertEqual(revised["evidence"][0]["stance"], "supports")
+            self.assertEqual([tag["name"] for tag in revised["tags"]], ["Attention", "Qwen"])
+            self.assertEqual(list_evidence(database)[0]["claim_count"], 1)
+            self.assertEqual(list_claims(database)[0]["statement"], revised["statement"])
+
+    def test_pending_claim_proposal_survives_reads_until_accept_or_discard(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            proposal = create_claim_proposal(
+                {
+                    "statement": "A proposed durable Claim.",
+                    "basis": "inference",
+                    "standing": "unassessed",
+                    "evidence": [],
+                },
+                "claim-proposal-v1",
+                "test-model",
+                {"kind": "selected_evidence"},
+                database,
+            )
+
+            self.assertEqual(list_claim_proposals(database)[0]["id"], proposal["id"])
+            claim = accept_claim_proposal(
+                proposal["id"], {
+                    "statement": "An accepted durable Claim.",
+                    "intentionally_ungrounded": True,
+                }, database
+            )
+
+            self.assertEqual(claim["created_via"], "ai_assisted")
+            self.assertEqual(claim["statement"], "An accepted durable Claim.")
+            self.assertEqual(list_claim_proposals(database), [])
+
+    def test_claim_vocabulary_exposes_background_disputed_and_minimal_stances(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            background = create_claim(
+                {
+                    "statement": "Transformers use attention mechanisms.",
+                    "basis": "background",
+                    "review_state": "disputed",
+                },
+                database,
+            )
+            self.assertEqual(background["basis"], "background")
+            self.assertEqual(background["review_state"], "disputed")
+            self.assertTrue(background["intentionally_ungrounded"])
+
+            source, _, _ = save_source(
+                {"title": "Scoped result", "url": "https://example.test/scoped"},
+                path=database,
+            )
+            workspace = store_capture(
+                source["id"],
+                {
+                    "url": "https://example.test/scoped",
+                    "media_type": "text/html",
+                    "sha256": "scoped-result",
+                    "raw_path": str(Path(temp_dir) / "scoped.html"),
+                    "segments": ["The result holds only for short contexts."],
+                },
+                database,
+            )
+            evidence = create_evidence(
+                {
+                    "segment_id": workspace["segments"][0]["id"],
+                    "quote": "holds only for short contexts",
+                    "start_offset": 11,
+                    "end_offset": 40,
+                },
+                database,
+            )
+            limited = create_claim(
+                {
+                    "statement": "The result generalizes across context lengths.",
+                    "basis": "inference",
+                    "evidence": [{"evidence_id": evidence["id"], "stance": "limits"}],
+                },
+                database,
+            )
+            self.assertEqual(limited["evidence"][0]["stance"], "limits")
+            self.assertEqual(limited["review_state"], "accepted")
+
     def test_artifact_requires_title_and_purpose(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"

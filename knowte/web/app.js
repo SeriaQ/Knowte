@@ -99,10 +99,18 @@ const goToSearchBtn = document.querySelector("#go-to-search");
 const collectArtifactSelect = document.querySelector("#collect-artifact");
 const libraryListEl = document.querySelector("#library-list");
 const libraryStatusEl = document.querySelector("#library-status");
-const libraryGoSearchBtn = document.querySelector("#library-go-search");
 const libraryAbstractToggleBtn = document.querySelector("#library-abstract-toggle");
+const evidenceLibraryListEl = document.querySelector("#evidence-library-list");
+const libraryProposeClaimsBtn = document.querySelector("#library-propose-claims");
+const evidenceCreateClaimBtn = document.querySelector("#evidence-create-claim");
+const evidenceStatusEl = document.querySelector("#evidence-status");
 const resultsSelectAllInput = document.querySelector("#results-select-all");
 const librarySelectAllInput = document.querySelector("#library-select-all");
+const evidenceLibrarySelectAllInput = document.querySelector("#evidence-library-select-all");
+const evidenceTagFilterInput = document.querySelector("#evidence-tag-filter");
+const claimsSelectAllInput = document.querySelector("#claims-select-all");
+const claimsTagFilterInput = document.querySelector("#claims-tag-filter");
+const claimsReviewFilterInput = document.querySelector("#claims-review-filter");
 const evidenceSelectAllInput = document.querySelector("#evidence-select-all");
 const sourceReaderEl = document.querySelector("#source-reader");
 const libraryPanelInnerEl = sourceReaderEl.closest(".panel");
@@ -131,6 +139,15 @@ const contextSelectionLabelEl = document.querySelector("#context-selection-label
 const contextSelectedCountEl = document.querySelector("#context-selected-count");
 const contextSelectionListEl = document.querySelector("#context-selection-list");
 const reviewActionsSection = document.querySelector("#review-actions-section");
+const evidenceSelectionOverviewEl = document.querySelector("#evidence-selection-overview");
+const evidenceProfileSummaryEl = document.querySelector("#evidence-profile-summary");
+const evidenceProfileSourcesEl = document.querySelector("#evidence-profile-sources");
+const evidenceProfileTextEl = document.querySelector("#evidence-profile-text");
+const evidenceProfileSnapshotsEl = document.querySelector("#evidence-profile-snapshots");
+const evidenceProfileLinkedEl = document.querySelector("#evidence-profile-linked");
+const reviewStageActionsSection = document.querySelector("#review-stage-actions");
+const reviewStageAdvanceBtn = document.querySelector("#review-stage-advance");
+const reviewStageStatusEl = document.querySelector("#review-stage-status");
 const reviewCopilotSection = document.querySelector("#review-copilot-section");
 const reviewKnowledgeSection = document.querySelector("#review-knowledge-section");
 const evidenceSelectionLocationEl = document.querySelector("#evidence-selection-location");
@@ -197,6 +214,64 @@ const artifactPurposeInput = document.querySelector("#artifact-purpose");
 const artifactCreateBtn = document.querySelector("#artifact-create");
 const artifactListEl = document.querySelector("#artifact-list");
 const artifactStatusEl = document.querySelector("#artifact-status");
+const claimsListEl = document.querySelector("#claims-list");
+const claimsStatusEl = document.querySelector("#claims-status");
+const claimStatementInput = document.querySelector("#claim-statement");
+const claimBasisInput = document.querySelector("#claim-basis");
+const claimArtifactInput = document.querySelector("#claim-artifact");
+const claimCreateBtn = document.querySelector("#claim-create");
+const claimCreateStatusEl = document.querySelector("#claim-create-status");
+const claimsProposalsToggleBtn = document.querySelector("#claims-proposals-toggle");
+const claimsRelateBtn = document.querySelector("#claims-relate");
+const claimsBuildViewBtn = document.querySelector("#claims-build-view");
+const claimsSelectedCountEl = document.querySelector("#claims-selected-count");
+const claimsRelationTypeInput = document.querySelector("#claims-relation-type");
+const claimProposalBoardEl = document.querySelector("#claim-proposal-board");
+const claimProposalListEl = document.querySelector("#claim-proposal-list");
+const claimIncomingTrayEl = document.querySelector("#claim-incoming-tray");
+const claimIncomingTitleEl = document.querySelector("#claim-incoming-title");
+const claimIncomingItemsEl = document.querySelector("#claim-incoming-items");
+const claimAddEvidenceBtn = document.querySelector("#claim-add-evidence");
+const evidenceHandoffReturnEl = document.querySelector("#evidence-handoff-return");
+const evidenceHandoffCancelBtn = document.querySelector("#evidence-handoff-cancel");
+const evidenceHandoffApplyBtn = document.querySelector("#evidence-handoff-apply");
+const claimsHandoffReturnEl = document.querySelector("#claims-handoff-return");
+const claimsHandoffCancelBtn = document.querySelector("#claims-handoff-cancel");
+const claimsHandoffApplyBtn = document.querySelector("#claims-handoff-apply");
+const viewIncomingTrayEl = document.querySelector("#view-incoming-tray");
+const viewIncomingTitleEl = document.querySelector("#view-incoming-title");
+const viewIncomingItemsEl = document.querySelector("#view-incoming-items");
+const viewAddClaimsBtn = document.querySelector("#view-add-claims");
+const viewForm = document.querySelector("#view-form");
+const viewTitleInput = document.querySelector("#view-title");
+const viewTypeInput = document.querySelector("#view-type");
+const viewProjectInput = document.querySelector("#view-project");
+const viewPurposeInput = document.querySelector("#view-purpose");
+const viewCreateBtn = document.querySelector("#view-create");
+const viewsStatusEl = document.querySelector("#views-status");
+const viewsListEl = document.querySelector("#views-list");
+const viewIndexWorkspaceEl = document.querySelector("#view-index-workspace");
+const viewDetailEl = document.querySelector("#view-detail");
+const viewDetailBackBtn = document.querySelector("#view-detail-back");
+const viewDetailAddClaimsBtn = document.querySelector("#view-detail-add-claims");
+const viewDetailEditBtn = document.querySelector("#view-detail-edit");
+const viewDetailDeleteBtn = document.querySelector("#view-detail-delete");
+const viewDetailTypeEl = document.querySelector("#view-detail-type");
+const viewDetailProjectEl = document.querySelector("#view-detail-project");
+const viewDetailTitleEl = document.querySelector("#view-detail-title");
+const viewDetailPurposeEl = document.querySelector("#view-detail-purpose");
+const viewDetailEditor = document.querySelector("#view-detail-editor");
+const viewEditTitleInput = document.querySelector("#view-edit-title");
+const viewEditProjectInput = document.querySelector("#view-edit-project");
+const viewEditPurposeInput = document.querySelector("#view-edit-purpose");
+const viewEditTypeInput = document.querySelector("#view-edit-type");
+const viewBlockEditorShell = document.querySelector("#view-block-editor-shell");
+const viewBlockEditorEl = document.querySelector("#view-block-editor");
+const viewAddHeadingBtn = document.querySelector("#view-add-heading");
+const viewAddParagraphBtn = document.querySelector("#view-add-paragraph");
+const viewEditCancelBtn = document.querySelector("#view-edit-cancel");
+const viewDetailClaimsEl = document.querySelector("#view-detail-claims");
+const viewDetailStatusEl = document.querySelector("#view-detail-status");
 let currentUsage = {
   last_5_min: 0,
   last_day: 0,
@@ -242,9 +317,24 @@ let planSourceOverride = null;
 let isIntelligentSearching = false;
 let artifacts = [];
 let librarySources = [];
+let libraryEvidence = [];
+let claims = [];
+let claimProposals = [];
+let views = [];
+let activeViewId = "";
+let viewDraftClaimIds = [];
+let viewDraftBlocks = [];
+let viewAddingClaims = false;
+let activeGraphClaimId = "";
 const selectedResultKeys = new Set();
 const selectedLibrarySourceKeys = new Set();
 const selectedEvidenceIds = new Set();
+const selectedClaimIds = new Set();
+const incomingClaimEvidenceIds = new Set();
+const incomingClaimEvidenceStances = new Map();
+const incomingViewClaimIds = new Set();
+let evidenceReturnToClaim = false;
+let claimsReturnToView = false;
 const chatContextSources = new Map();
 const chatContextEvidence = new Map();
 const CHAT_CONTEXT_LIMIT = 12;
@@ -268,6 +358,9 @@ let chatExpanded = false;
 const reviewConversations = {
   search: [],
   library: [],
+  evidence: [],
+  claims: [],
+  views: [],
   artifact: [],
 };
 const expandedArtifactIds = new Set();
@@ -288,9 +381,9 @@ const openEvidenceQuickEditor = (rect = null) => {
   evidenceQuickKindEl.textContent = pendingEvidenceSelection.evidence_type === "snapshot"
     ? "Snapshot Evidence" : "Text Evidence";
   evidenceQuickPreviewEl.textContent = pendingEvidenceSelection.quote || "Selected region";
-  evidenceQuickArtifactSelect.replaceChildren(new Option("Library only", ""));
+  evidenceQuickArtifactSelect.replaceChildren(new Option("Evidence only", ""));
   artifacts.forEach((artifact) => evidenceQuickArtifactSelect.appendChild(
-    new Option(`Library + ${artifact.title}`, artifact.id),
+    new Option(`Evidence + ${artifact.title}`, artifact.id),
   ));
   evidenceQuickTagsInput.value = "";
   evidenceQuickAnnotationInput.value = "";
@@ -332,11 +425,11 @@ const renderCompanionInbox = () => {
     const meta = document.createElement("small");
     meta.textContent = `${item.kind === "text" ? "Text Evidence" : item.kind === "snapshot" ? "Snapshot Evidence" : "Source"} · Original web`;
     const quote = document.createElement("p");
-    quote.textContent = item.quote || "Save this page to the Library.";
+    quote.textContent = item.quote || "Save this page to Sources.";
     const target = document.createElement("select");
-    target.appendChild(new Option("Library only", ""));
+    target.appendChild(new Option("Sources only", ""));
     artifacts.forEach((artifact) => target.appendChild(
-      new Option(`Library + ${artifact.title}`, artifact.id),
+      new Option(`Sources + ${artifact.title}`, artifact.id),
     ));
     const confirm = document.createElement("button");
     confirm.type = "button";
@@ -353,7 +446,7 @@ const renderCompanionInbox = () => {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || "Could not confirm capture.");
-        companionInboxStatusEl.textContent = "Saved to Library.";
+        companionInboxStatusEl.textContent = "Saved to Sources.";
         await Promise.all([fetchCompanionInbox(), fetchLibrary(), fetchArtifacts()]);
       } catch (error) {
         companionInboxStatusEl.textContent = error.message;
@@ -1006,6 +1099,16 @@ const CONTROL_ICONS = {
     ["path", { d: "M4.5 7h15M9 7V4.5h6V7M7 7l.75 13h8.5L17 7" }],
     ["path", { d: "M10 10.5v6M14 10.5v6" }],
   ],
+  accept: [
+    ["path", { d: "m5 12.5 4.2 4.2L19 7" }],
+  ],
+  discard: [
+    ["path", { d: "M7 7l10 10M17 7 7 17" }],
+  ],
+  disputed: [
+    ["path", { d: "M12 4 3.5 19h17L12 4Z" }],
+    ["path", { d: "M12 9v4M12 16.5h.01" }],
+  ],
 };
 
 const createControlIcon = (iconName) => {
@@ -1058,9 +1161,23 @@ const selectedLibrarySources = () => librarySources.filter(
   (source) => selectedLibrarySourceKeys.has(resultKey(source)),
 );
 
+const selectedClaims = () => [...selectedClaimIds]
+  .map((id) => claims.find((claim) => claim.id === id))
+  .filter(Boolean);
+
+const activeView = () => views.find((view) => view.id === activeViewId) || null;
+const viewTypeLabel = (value) => ({
+  wiki: "Wiki",
+  article: "Article",
+  graph: "Claim graph",
+}[value] || value);
+
 const currentReviewContext = () => {
   const panelId = document.querySelector(".panel-view.is-active")?.id;
-  if (panelId === "library-panel") return "library";
+  if (panelId === "sources-panel") return "library";
+  if (panelId === "evidence-panel") return "evidence";
+  if (panelId === "claims-panel") return "claims";
+  if (panelId === "views-panel") return "views";
   if (panelId === "create-panel") return "artifact";
   if (panelId === "plans-panel") return "plans";
   if (panelId === "config-panel") return "config";
@@ -1068,17 +1185,24 @@ const currentReviewContext = () => {
 };
 
 const activeReviewSources = () => (
-  currentReviewContext() === "library" ? selectedLibrarySources() : selectedResults()
+  currentReviewContext() === "library" ? selectedLibrarySources()
+    : currentReviewContext() === "search" ? selectedResults() : []
 );
 
 const activeReviewArtifact = () => (
-  ["search", "artifact"].includes(currentReviewContext())
-    ? artifacts.find((artifact) => artifact.id === collectArtifactSelect.value) || null
-    : null
+  currentReviewContext() === "views" && activeView()?.artifact
+    ? activeView().artifact
+    : ["search", "artifact"].includes(currentReviewContext())
+      ? artifacts.find((artifact) => artifact.id === collectArtifactSelect.value) || null
+      : null
 );
 
 const selectedEvidence = () => (
-  activeSourceWorkspace?.evidence.filter((item) => selectedEvidenceIds.has(item.id)) || []
+  activeSourceWorkspace
+    ? activeSourceWorkspace.evidence.filter((item) => selectedEvidenceIds.has(item.id))
+    : currentReviewContext() === "evidence"
+      ? libraryEvidence.filter((item) => selectedEvidenceIds.has(item.id))
+      : []
 );
 
 const updateSelectAllState = (input, selectedCount, totalCount) => {
@@ -1092,9 +1216,10 @@ const renderChatContext = () => {
   const sourceCount = chatContextSources.size;
   const evidenceCount = chatContextEvidence.size;
   const total = sourceCount + evidenceCount;
+  const currentView = currentReviewContext() === "views" ? activeView() : null;
   chatContextSummaryEl.textContent = total
     ? `${sourceCount} Source${sourceCount === 1 ? "" : "s"} · ${evidenceCount} Evidence`
-    : "No context attached";
+    : currentView ? `Current View included · ${currentView.title}` : "No context attached";
   chatContextTrayEl.replaceChildren();
   const appendChip = (type, key, label, collection) => {
     const chip = document.createElement("div");
@@ -1103,6 +1228,7 @@ const renderChatContext = () => {
     text.textContent = `${type} · ${label}`;
     const remove = document.createElement("button");
     remove.type = "button";
+    remove.className = "semantic-action is-destructive";
     remove.textContent = "×";
     remove.setAttribute("aria-label", `Remove ${label} from chat context`);
     remove.addEventListener("click", () => {
@@ -1155,11 +1281,11 @@ const addSelectionToChatContext = () => {
   newSourceEntries.forEach((source) => chatContextSources.set(resultKey(source), source));
   newEvidenceEntries.forEach((item) => chatContextEvidence.set(item.id, {
     ...item,
-    source_title: activeSourceWorkspace?.source.title || "",
-    source_id: activeSourceWorkspace?.source.id || "",
+    source_title: item.source_title || activeSourceWorkspace?.source.title || "",
+    source_id: item.source_id || activeSourceWorkspace?.source.id || "",
   }));
   chatContextStatusEl.textContent = newSourceEntries.length || newEvidenceEntries.length
-    ? "Selection added to chat context." : "Selection is already in chat context.";
+    ? "Added to chat context." : "This item is already in chat context.";
   renderChatContext();
 };
 
@@ -1188,6 +1314,154 @@ librarySelectAllInput.addEventListener("change", () => {
   });
   renderLibrary();
   renderReviewWorkspace();
+});
+
+evidenceLibrarySelectAllInput.addEventListener("change", () => {
+  visibleEvidence().forEach((item) => {
+    if (evidenceLibrarySelectAllInput.checked) selectedEvidenceIds.add(item.id);
+    else selectedEvidenceIds.delete(item.id);
+  });
+  renderEvidenceLibrary();
+  renderReviewWorkspace();
+});
+
+evidenceTagFilterInput.addEventListener("change", () => {
+  renderEvidenceLibrary();
+  const filtered = visibleEvidence();
+  evidenceStatusEl.textContent = evidenceTagFilterInput.value
+    ? `${filtered.length} of ${libraryEvidence.length} Evidence · Tag: ${evidenceTagFilterInput.value}`
+    : `${libraryEvidence.length} Evidence`;
+});
+
+claimsSelectAllInput.addEventListener("change", () => {
+  visibleClaims().forEach((claim) => {
+    if (viewAddingClaims && viewDraftClaimIds.includes(claim.id)) return;
+    if (claimsSelectAllInput.checked) selectedClaimIds.add(claim.id);
+    else selectedClaimIds.delete(claim.id);
+  });
+  renderClaims();
+  renderReviewWorkspace();
+});
+
+claimsTagFilterInput.addEventListener("change", () => {
+  renderClaims();
+  updateClaimsStatus();
+});
+
+claimsReviewFilterInput.addEventListener("change", () => {
+  renderClaims();
+  updateClaimsStatus();
+});
+
+const copySelectedEvidenceToClaimDraft = () => {
+  libraryEvidence.forEach((item) => {
+    if (selectedEvidenceIds.has(item.id)) {
+      incomingClaimEvidenceIds.add(item.id);
+      if (!incomingClaimEvidenceStances.has(item.id)) {
+        incomingClaimEvidenceStances.set(item.id, "supports");
+      }
+    }
+  });
+  if (incomingClaimEvidenceIds.size && claimBasisInput.value === "background") {
+    claimBasisInput.value = "reported";
+  }
+  renderIncomingTrays();
+};
+
+evidenceCreateClaimBtn.addEventListener("click", () => {
+  if (!selectedEvidenceIds.size) return;
+  copySelectedEvidenceToClaimDraft();
+  evidenceReturnToClaim = false;
+  showPanel("claims-panel");
+  claimStatementInput.focus();
+});
+
+claimAddEvidenceBtn.addEventListener("click", () => {
+  evidenceReturnToClaim = true;
+  renderEvidenceLibrary();
+  showPanel("evidence-panel");
+});
+
+evidenceHandoffApplyBtn.addEventListener("click", () => {
+  copySelectedEvidenceToClaimDraft();
+  evidenceReturnToClaim = false;
+  renderEvidenceLibrary();
+  showPanel("claims-panel");
+});
+
+evidenceHandoffCancelBtn.addEventListener("click", () => {
+  evidenceReturnToClaim = false;
+  renderEvidenceLibrary();
+  showPanel("claims-panel");
+});
+
+claimsBuildViewBtn.addEventListener("click", () => {
+  activeViewId = "";
+  viewAddingClaims = false;
+  setViewDetailMode(false);
+  selectedClaimIds.forEach((id) => incomingViewClaimIds.add(id));
+  claimsReturnToView = false;
+  renderIncomingTrays();
+  showPanel("views-panel");
+  viewTitleInput.focus();
+});
+
+viewAddClaimsBtn.addEventListener("click", () => {
+  incomingViewClaimIds.clear();
+  renderIncomingTrays();
+  viewsStatusEl.textContent = "Incoming Claims cleared.";
+});
+
+claimsHandoffApplyBtn.addEventListener("click", () => {
+  if (viewAddingClaims && activeViewId) {
+    selectedClaimIds.forEach((id) => {
+      if (!viewDraftClaimIds.includes(id)) {
+        viewDraftClaimIds.push(id);
+        if (["wiki", "article"].includes(viewEditTypeInput.value)) {
+          viewDraftBlocks.push({
+            id: crypto.randomUUID().replaceAll("-", ""),
+            block_type: "claim", content: "", claim_id: id,
+          });
+        }
+      }
+    });
+  } else {
+    selectedClaimIds.forEach((id) => incomingViewClaimIds.add(id));
+  }
+  claimsReturnToView = false;
+  viewAddingClaims = false;
+  renderClaims();
+  renderIncomingTrays();
+  showPanel("views-panel");
+  if (activeViewId) {
+    setViewDetailMode(true);
+    renderViewDetail();
+  }
+});
+
+claimsHandoffCancelBtn.addEventListener("click", () => {
+  claimsReturnToView = false;
+  viewAddingClaims = false;
+  renderClaims();
+  showPanel("views-panel");
+  if (activeViewId) {
+    setViewDetailMode(true);
+    renderViewDetail();
+  }
+});
+
+reviewStageAdvanceBtn.addEventListener("click", () => {
+  const context = currentReviewContext();
+  reviewStageStatusEl.textContent = "";
+  if (context === "claims") {
+    if (!selectedClaimIds.size) return;
+    activeViewId = "";
+    setViewDetailMode(false);
+    selectedClaimIds.forEach((id) => incomingViewClaimIds.add(id));
+    renderIncomingTrays();
+    showPanel("views-panel");
+    viewTitleInput.focus();
+  }
 });
 
 evidenceSelectAllInput.addEventListener("change", () => {
@@ -1226,57 +1500,118 @@ chatCollapseBtn.addEventListener("click", () => setChatExpanded(false));
 const renderReviewWorkspace = () => {
   const context = currentReviewContext();
   const selected = activeReviewSources();
+  const evidenceSelection = selectedEvidence();
+  const libraryEvidenceMode = context === "evidence";
   const activeArtifact = activeReviewArtifact();
+  const currentView = activeView();
   const contextNames = {
     search: "Search",
-    library: "Library",
-    artifact: "Artifact",
+    library: "Sources",
+    evidence: "Evidence",
+    claims: "Claims",
+    views: "Views",
+    artifact: "Project",
     plans: "Plans",
     config: "Config",
   };
-  const contextChanged = activeReviewContextKey !== context;
-  activeReviewContextKey = context;
-  const selectionCount = context === "artifact"
-    ? Number(activeArtifact?.source_count || 0)
-    : selected.length;
-  contextModeLabelEl.textContent = context === "library"
-    ? `Library · ${librarySources.length} Source${librarySources.length === 1 ? "" : "s"}`
+  const nextReviewContextKey = context === "views" && currentView
+    ? `views:${currentView.id}` : context;
+  const contextChanged = activeReviewContextKey !== nextReviewContextKey;
+  activeReviewContextKey = nextReviewContextKey;
+  reviewConversations[activeReviewContextKey] ||= [];
+  const selectionCount = libraryEvidenceMode
+    ? evidenceSelection.length
     : context === "artifact"
-      ? `Artifact · ${activeArtifact?.title || "No active Artifact"}`
+    ? Number(activeArtifact?.source_count || 0)
+    : context === "claims" ? selectedClaims().length
+    : context === "views"
+      ? (currentView?.claims?.length || incomingViewClaimIds.size) : selected.length;
+  contextModeLabelEl.textContent = context === "library"
+    ? `Sources · ${librarySources.length} Source${librarySources.length === 1 ? "" : "s"}`
+    : context === "evidence"
+      ? `Evidence · ${libraryEvidence.length} total`
+    : context === "claims"
+      ? `Claims · ${claims.length} total`
+    : context === "views"
+      ? currentView
+        ? `View · ${currentView.title}`
+        : `Views · ${views.length} total`
+    : context === "artifact"
+      ? `Project · ${activeArtifact?.title || "No active Project"}`
       : context === "plans"
         ? `Plans · ${savedPlans.length} saved`
         : context === "config"
           ? "Config · Local settings"
           : `Search · ${selected.length || "No"} selection${selected.length === 1 ? "" : "s"}`;
-  contextSelectionLabelEl.textContent = context === "artifact"
-    ? "Active Artifact"
+  contextSelectionLabelEl.textContent = context === "evidence"
+    ? "Selected Evidence"
+    : context === "artifact"
+    ? "Active Project"
+    : context === "claims"
+      ? "Selected Claims"
+    : context === "views"
+      ? currentView ? "Current View" : "View draft"
     : context === "plans"
       ? "Saved Plans"
       : context === "config"
         ? "Scope"
         : "Selection";
-  contextSelectedCountEl.textContent = context === "artifact"
+  contextSelectedCountEl.textContent = context === "evidence"
+    ? `${evidenceSelection.length} selected`
+    : context === "artifact"
     ? `${selectionCount} linked`
+    : context === "claims"
+      ? `${selectedClaims().length} selected`
+    : context === "views"
+      ? currentView
+        ? `${currentView.claims?.length || 0} Claims`
+        : `${incomingViewClaimIds.size} incoming`
     : context === "plans"
       ? `${savedPlans.length} saved`
       : context === "config"
         ? "Operational"
         : `${selected.length} selected`;
   contextToggleCountEl.textContent = String(
-    ["search", "library"].includes(context) ? selected.length : selectionCount,
+    context === "search" || context === "library"
+      ? selected.length : selectionCount,
   );
   contextPanelToggleBtn.classList.toggle("has-selection", selectionCount > 0);
   reviewActionsSection.hidden = context !== "search";
+  evidenceSelectionOverviewEl.hidden = context !== "evidence";
+  if (context === "evidence") {
+    const sourceCount = new Set(evidenceSelection.map((item) => item.source_id).filter(Boolean)).size;
+    const snapshotCount = evidenceSelection.filter((item) => item.evidence_type === "snapshot").length;
+    const textCount = evidenceSelection.length - snapshotCount;
+    const linkedCount = evidenceSelection.filter((item) => Number(item.claim_count || 0) > 0).length;
+    evidenceProfileSummaryEl.textContent = `${evidenceSelection.length} item${evidenceSelection.length === 1 ? "" : "s"}`;
+    evidenceProfileSourcesEl.textContent = String(sourceCount);
+    evidenceProfileTextEl.textContent = String(textCount);
+    evidenceProfileSnapshotsEl.textContent = String(snapshotCount);
+    evidenceProfileLinkedEl.textContent = String(linkedCount);
+  }
+  reviewStageActionsSection.hidden = context !== "claims";
+  if (context === "claims") {
+    reviewStageAdvanceBtn.disabled = selectedClaims().length === 0;
+    reviewStageAdvanceBtn.textContent = selectedClaims().length
+      ? `Build View from ${selectedClaims().length} Claim${selectedClaims().length === 1 ? "" : "s"}`
+      : "Build View";
+  }
   reviewKnowledgeSection.hidden = context !== "library" || !activeSourceWorkspace;
-  const copilotAvailable = ["search", "library", "artifact"].includes(context);
+  const copilotAvailable = ["search", "library", "evidence", "claims", "views", "artifact"].includes(context);
   if (!copilotAvailable && chatExpanded) setChatExpanded(false);
   reviewCopilotSection.hidden = !copilotAvailable;
   contextChatForm.hidden = !copilotAvailable;
   if (chatExpanded) chatWorkspaceContextEl.textContent = contextModeLabelEl.textContent;
   contextChatInput.placeholder = context === "library"
-    ? "Discuss selected Library Sources…"
+    ? "Discuss selected Sources…"
+    : context === "evidence"
+      ? "Discuss selected Evidence…"
+    : context === "claims"
+      ? "Discuss selected Claims and their Evidence…"
+    : context === "views"
+      ? "Discuss this View and its Claims…"
     : context === "artifact"
-      ? "Discuss this Artifact…"
+      ? "Discuss this Project…"
       : "Discuss this selection with the LLM…";
   contextSelectionListEl.replaceChildren();
 
@@ -1303,11 +1638,26 @@ const renderReviewWorkspace = () => {
     contextSelectionListEl.appendChild(row);
   };
 
-  if (["search", "library"].includes(context) && !selected.length) {
+  if (context === "evidence") {
+    evidenceSelection.forEach((item) => appendContextItem(
+      `${item.source_title || "Untitled Source"} · ${item.locator || "Evidence"}`,
+      () => {
+        selectedEvidenceIds.delete(item.id);
+        renderEvidenceLibrary();
+        renderReviewWorkspace();
+      },
+      () => openEvidenceDetail(item.id),
+    ));
+    if (!evidenceSelection.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No Evidence selected.";
+      contextSelectionListEl.appendChild(empty);
+    }
+  } else if (["search", "library"].includes(context) && !selected.length) {
     const empty = document.createElement("p");
-    empty.textContent = context === "search"
+      empty.textContent = context === "search"
       ? "No search results selected."
-      : "No Library Sources selected.";
+      : "No Sources selected.";
     contextSelectionListEl.appendChild(empty);
   } else if (["search", "library"].includes(context)) {
     selected.forEach((source) => {
@@ -1330,8 +1680,37 @@ const renderReviewWorkspace = () => {
       contextSelectionListEl.appendChild(purpose);
     } else {
       const empty = document.createElement("p");
-      empty.textContent = "No active Artifact.";
+      empty.textContent = "No active Project.";
       contextSelectionListEl.appendChild(empty);
+    }
+  } else if (context === "claims") {
+    const chosenClaims = selectedClaims();
+    chosenClaims.forEach((claim) => appendContextItem(claim.statement, () => {
+      selectedClaimIds.delete(claim.id);
+      renderClaims();
+      renderReviewWorkspace();
+    }));
+    if (!chosenClaims.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No Claims selected.";
+      contextSelectionListEl.appendChild(empty);
+    }
+  } else if (context === "views") {
+    if (currentView) {
+      appendContextItem(currentView.title);
+      const detail = document.createElement("p");
+      detail.textContent = [
+        currentView.artifact?.title ? `Project: ${currentView.artifact.title}` : "Standalone View",
+        currentView.purpose || currentView.artifact?.purpose || "No Purpose added.",
+        `${currentView.claims?.length || 0} Claims`,
+      ].join(" · ");
+      contextSelectionListEl.appendChild(detail);
+    } else {
+      const draft = document.createElement("p");
+      draft.textContent = incomingViewClaimIds.size
+        ? `${incomingViewClaimIds.size} incoming Claim${incomingViewClaimIds.size === 1 ? "" : "s"} ready to organize.`
+        : "Open a saved View or add Claims to a new View draft.";
+      contextSelectionListEl.appendChild(draft);
     }
   } else if (context === "plans") {
     savedPlans.slice(0, 6).forEach((plan) => appendContextItem(plan.name));
@@ -1350,8 +1729,8 @@ const renderReviewWorkspace = () => {
   contextCollectSelectedBtn.textContent = selected.length
     ? (
         collectArtifactSelect.value
-          ? `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Library & Artifact(s)`
-          : `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Library`
+          ? `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Sources & Project(s)`
+          : `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Sources`
       )
     : "Add selected Sources";
   renderKnowledgeReview();
@@ -1918,7 +2297,7 @@ const runSearch = async () => {
       : "";
     const warningHint = warningMessages.length ? ` ${warningMessages.join(" ")}` : "";
     statusEl.textContent = data.debug_replay
-      ? `Debug Replay: loaded ${data.count} saved Source(s) for “${data.query}” from the baseline Artifact. No provider, Web, Embedding, or LLM requests were made; active search filters were not applied.${sourceHint}`
+      ? `Debug Replay: loaded ${data.count} saved Source(s) for “${data.query}” from the baseline Project. No provider, Web, Embedding, or LLM requests were made; active search filters were not applied.${sourceHint}`
       : `Found ${data.count} paper(s) for "${data.query}"${timeHint}.` + sourceHint + cacheHint + warningHint;
     updateUsage(data.usage);
     renderResults();
@@ -2384,17 +2763,38 @@ const renderArtifactOptions = () => {
   collectArtifactSelect.replaceChildren();
   const noArtifactOption = document.createElement("option");
   noArtifactOption.value = "";
-  noArtifactOption.textContent = "Library only";
+  noArtifactOption.textContent = "Sources only";
   collectArtifactSelect.appendChild(noArtifactOption);
   artifacts.forEach((artifact) => {
     const option = document.createElement("option");
     option.value = artifact.id;
-    option.textContent = `Library + ${artifact.title}`;
+    option.textContent = `Sources + ${artifact.title}`;
     collectArtifactSelect.appendChild(option);
   });
   collectArtifactSelect.value = artifacts.some((item) => item.id === preferred)
     ? preferred
     : "";
+  const claimPreferred = claimArtifactInput.value;
+  claimArtifactInput.replaceChildren(new Option("Claims only", ""));
+  artifacts.forEach((artifact) => {
+    claimArtifactInput.appendChild(new Option(`Claims + ${artifact.title}`, artifact.id));
+  });
+  claimArtifactInput.value = artifacts.some((item) => item.id === claimPreferred)
+    ? claimPreferred : "";
+  const activeProjectId = collectArtifactSelect.value
+    || localStorage.getItem("knowte-active-artifact") || "";
+  const viewPreferred = viewProjectInput.value || activeProjectId;
+  const editPreferred = viewEditProjectInput.value;
+  viewProjectInput.replaceChildren(new Option("Standalone View", ""));
+  viewEditProjectInput.replaceChildren(new Option("Standalone View", ""));
+  artifacts.forEach((artifact) => {
+    viewProjectInput.appendChild(new Option(artifact.title, artifact.id));
+    viewEditProjectInput.appendChild(new Option(artifact.title, artifact.id));
+  });
+  viewProjectInput.value = artifacts.some((item) => item.id === viewPreferred)
+    ? viewPreferred : "";
+  viewEditProjectInput.value = artifacts.some((item) => item.id === editPreferred)
+    ? editPreferred : "";
 };
 
 const renderContextPanel = () => {
@@ -2510,7 +2910,7 @@ const renderArtifacts = () => {
   if (!artifacts.length) {
     const empty = document.createElement("div");
     empty.className = "knowledge-empty";
-    empty.textContent = "No Artifacts yet. Create one with a concrete Purpose, then collect Sources for it from Search.";
+    empty.textContent = "No Projects yet. Create one with a concrete Purpose, then collect Sources for it from Search.";
     artifactListEl.appendChild(empty);
     return;
   }
@@ -2602,7 +3002,7 @@ const renderArtifacts = () => {
       });
       if (!linkedSources.length) {
         const loading = document.createElement("small");
-        loading.textContent = "Linked Sources are still loading from Library.";
+        loading.textContent = "Linked Sources are still loading.";
         sourceList.appendChild(loading);
       }
       card.appendChild(sourceList);
@@ -2614,7 +3014,7 @@ const renderArtifacts = () => {
 const fetchArtifacts = async () => {
   try {
     const response = await fetch("/api/artifacts");
-    if (!response.ok) throw new Error("Could not load Artifacts.");
+    if (!response.ok) throw new Error("Could not load Projects.");
     const data = await response.json();
     artifacts = data.artifacts || [];
     renderArtifactOptions();
@@ -2626,12 +3026,960 @@ const fetchArtifacts = async () => {
   }
 };
 
+const syncTagFilterOptions = (select, items) => {
+  const previous = select.value;
+  const names = [...new Set(items.flatMap(
+    (item) => (item.tags || []).map((tag) => tag.name).filter(Boolean),
+  ))].sort((left, right) => left.localeCompare(right));
+  select.replaceChildren(new Option("All Tags", ""));
+  names.forEach((name) => select.appendChild(new Option(name, name)));
+  select.value = names.includes(previous) ? previous : "";
+};
+
+const matchesTagFilter = (item, selectedTag) => (
+  !selectedTag || (item.tags || []).some((tag) => tag.name === selectedTag)
+);
+
+const visibleEvidence = () => libraryEvidence.filter(
+  (item) => matchesTagFilter(item, evidenceTagFilterInput.value),
+);
+
+const visibleClaims = () => claims.filter(
+  (item) => matchesTagFilter(item, claimsTagFilterInput.value)
+    && (!claimsReviewFilterInput.value
+      || item.review_state === claimsReviewFilterInput.value),
+);
+
+const updateClaimsStatus = () => {
+  const filtered = visibleClaims();
+  const filters = [];
+  if (claimsReviewFilterInput.value) filters.push(
+    claimsReviewFilterInput.value === "disputed" ? "Disputed" : "Accepted",
+  );
+  if (claimsTagFilterInput.value) filters.push(`Tag: ${claimsTagFilterInput.value}`);
+  claimsStatusEl.textContent = filters.length
+    ? `${filtered.length} of ${claims.length} Claims · ${filters.join(" · ")}`
+    : `${claims.length} Claim${claims.length === 1 ? "" : "s"}`;
+};
+
+const renderEvidenceLibrary = () => {
+  evidenceLibraryListEl.replaceChildren();
+  syncTagFilterOptions(evidenceTagFilterInput, libraryEvidence);
+  const filteredEvidence = visibleEvidence();
+  const selectedCount = libraryEvidence.filter(
+    (item) => selectedEvidenceIds.has(item.id),
+  ).length;
+  const selectedVisibleCount = filteredEvidence.filter(
+    (item) => selectedEvidenceIds.has(item.id),
+  ).length;
+  updateSelectAllState(
+    evidenceLibrarySelectAllInput, selectedVisibleCount, filteredEvidence.length,
+  );
+  libraryProposeClaimsBtn.disabled = selectedCount === 0;
+  evidenceCreateClaimBtn.disabled = selectedCount === 0;
+  libraryProposeClaimsBtn.textContent = selectedCount
+    ? `Propose Claims via LLM · ${selectedCount}` : "Propose Claims via LLM";
+  evidenceCreateClaimBtn.textContent = selectedCount
+    ? `Propose Claims manually · ${selectedCount}` : "Propose Claims manually";
+  evidenceHandoffReturnEl.hidden = !evidenceReturnToClaim;
+  if (!libraryEvidence.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = "No Evidence yet. Inspect a captured Source to select text or a region.";
+    evidenceLibraryListEl.appendChild(empty);
+    return;
+  }
+  if (!filteredEvidence.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = `No Evidence tagged “${evidenceTagFilterInput.value}”.`;
+    evidenceLibraryListEl.appendChild(empty);
+    return;
+  }
+  filteredEvidence.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "evidence-library-card";
+    card.dataset.evidenceId = item.id;
+    card.classList.toggle("is-selected", selectedEvidenceIds.has(item.id));
+    const selection = document.createElement("label");
+    selection.className = "evidence-selection";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedEvidenceIds.has(item.id);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedEvidenceIds.add(item.id);
+      else selectedEvidenceIds.delete(item.id);
+      renderEvidenceLibrary();
+      renderReviewWorkspace();
+      const selectedCount = libraryEvidence.filter(
+        (evidence) => selectedEvidenceIds.has(evidence.id),
+      ).length;
+      evidenceStatusEl.textContent = `${selectedCount} of ${libraryEvidence.length} Evidence selected`;
+    });
+    selection.append(checkbox, document.createTextNode("Select"));
+    const source = document.createElement("strong");
+    source.textContent = item.source_title;
+    const content = item.evidence_type === "snapshot"
+      ? document.createElement("img") : document.createElement("blockquote");
+    if (item.evidence_type === "snapshot") {
+      content.src = `/api/evidence/${item.id}/snapshot`;
+      content.alt = `Snapshot from ${item.source_title}`;
+    } else {
+      content.textContent = item.quote;
+    }
+    const meta = document.createElement("small");
+    meta.textContent = [item.locator, item.source_provider, `${item.claim_count} Claims`]
+      .filter(Boolean).join(" · ");
+    const tags = document.createElement("div");
+    renderTagChips(tags, item.tags || []);
+    card.append(selection, source, content, meta, tags);
+    evidenceLibraryListEl.appendChild(card);
+  });
+};
+
+const renderIncomingTrays = () => {
+  const incomingEvidence = [...incomingClaimEvidenceIds]
+    .map((id) => libraryEvidence.find((item) => item.id === id))
+    .filter(Boolean);
+  claimIncomingTrayEl.hidden = incomingEvidence.length === 0;
+  claimIncomingTitleEl.textContent = `Incoming Evidence · ${incomingEvidence.length}`;
+  claimIncomingItemsEl.replaceChildren();
+  claimCreateBtn.disabled = incomingEvidence.length === 0
+    && claimBasisInput.value !== "background";
+  incomingEvidence.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "incoming-item";
+    const content = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.source_title || "Untitled Source";
+    const detail = document.createElement("small");
+    detail.textContent = `${item.locator || "Evidence"} · ${item.evidence_type}`;
+    content.append(title, detail);
+    const actions = document.createElement("div");
+    const stance = document.createElement("select");
+    stance.setAttribute("aria-label", `Evidence stance for ${item.locator || item.source_title}`);
+    ["supports", "contradicts", "limits"].forEach((value) => {
+      stance.appendChild(new Option(value, value));
+    });
+    stance.value = incomingClaimEvidenceStances.get(item.id) || "supports";
+    stance.addEventListener("change", () => {
+      incomingClaimEvidenceStances.set(item.id, stance.value);
+    });
+    const preview = document.createElement("button");
+    preview.type = "button";
+    preview.textContent = "Preview";
+    preview.addEventListener("click", () => openEvidenceDetail(item.id));
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "semantic-action is-navigate";
+    open.textContent = "Open in Evidence";
+    open.addEventListener("click", () => {
+      evidenceReturnToClaim = true;
+      renderEvidenceLibrary();
+      showPanel("evidence-panel");
+      window.requestAnimationFrame(() => {
+        evidenceLibraryListEl.querySelector(`[data-evidence-id="${item.id}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "semantic-action is-destructive";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      incomingClaimEvidenceIds.delete(item.id);
+      incomingClaimEvidenceStances.delete(item.id);
+      renderIncomingTrays();
+    });
+    actions.append(stance, preview, open, remove);
+    row.append(content, actions);
+    claimIncomingItemsEl.appendChild(row);
+  });
+
+  const incomingClaims = [...incomingViewClaimIds]
+    .map((id) => claims.find((claim) => claim.id === id))
+    .filter(Boolean);
+  viewIncomingTrayEl.hidden = incomingClaims.length === 0;
+  viewCreateBtn.disabled = incomingClaims.length === 0;
+  viewIncomingTitleEl.textContent = `Incoming Claims · ${incomingClaims.length}`;
+  viewIncomingItemsEl.replaceChildren();
+  incomingClaims.forEach((claim) => {
+    const row = document.createElement("div");
+    row.className = "incoming-item";
+    const content = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = claim.statement;
+    const detail = document.createElement("small");
+    detail.textContent = claim.review_state === "disputed"
+      ? `${claim.basis} · disputed` : claim.basis;
+    content.append(title, detail);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "semantic-action is-destructive";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      incomingViewClaimIds.delete(claim.id);
+      renderIncomingTrays();
+    });
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "semantic-action is-navigate";
+    open.textContent = "Open in Claims";
+    open.addEventListener("click", () => {
+      claimsReturnToView = true;
+      selectedClaimIds.add(claim.id);
+      renderClaims();
+      showPanel("claims-panel");
+      window.requestAnimationFrame(() => {
+        claimsListEl.querySelector(`[data-claim-id="${claim.id}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    const actions = document.createElement("div");
+    actions.className = "incoming-item-actions incoming-view-actions";
+    actions.append(open, remove);
+    row.append(content, actions);
+    viewIncomingItemsEl.appendChild(row);
+  });
+};
+
+const renderClaims = () => {
+  claimsListEl.replaceChildren();
+  syncTagFilterOptions(claimsTagFilterInput, claims);
+  const filteredClaims = visibleClaims();
+  const selectableClaims = viewAddingClaims
+    ? filteredClaims.filter((claim) => !viewDraftClaimIds.includes(claim.id))
+    : filteredClaims;
+  const selectedVisibleCount = selectableClaims.filter(
+    (claim) => selectedClaimIds.has(claim.id),
+  ).length;
+  updateSelectAllState(claimsSelectAllInput, selectedVisibleCount, selectableClaims.length);
+  claimsSelectAllInput.disabled = selectableClaims.length === 0;
+  claimsRelateBtn.disabled = selectedClaimIds.size !== 2;
+  claimsBuildViewBtn.disabled = selectedClaimIds.size === 0;
+  claimsSelectedCountEl.textContent = `${selectedClaimIds.size} selected`;
+  claimsBuildViewBtn.textContent = selectedClaimIds.size
+    ? `Build View · ${selectedClaimIds.size}` : "Build View";
+  claimsHandoffReturnEl.hidden = !claimsReturnToView;
+  claimsHandoffApplyBtn.disabled = claimsReturnToView && selectedClaimIds.size === 0;
+  renderIncomingTrays();
+  const relationSelection = selectedClaims();
+  claimsRelateBtn.title = relationSelection.length === 2
+    ? `First selected → second selected: ${relationSelection[0].statement} → ${relationSelection[1].statement}`
+    : "Select two Claims; the relation runs from the first selected to the second.";
+  claimsProposalsToggleBtn.textContent = `Review proposals · ${claimProposals.length}`;
+  if (!claims.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = "No Claims yet. Select Evidence, then propose Claims manually or via LLM.";
+    claimsListEl.appendChild(empty);
+  } else if (!filteredClaims.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    if (claimsReviewFilterInput.value && claimsTagFilterInput.value) {
+      empty.textContent = "No Claims match the selected Status and Tag.";
+    } else if (claimsReviewFilterInput.value === "disputed") {
+      empty.textContent = "No disputed Claims yet.";
+    } else if (claimsReviewFilterInput.value === "accepted") {
+      empty.textContent = "No accepted Claims yet.";
+    } else {
+      empty.textContent = `No Claims tagged “${claimsTagFilterInput.value}”.`;
+    }
+    claimsListEl.appendChild(empty);
+  }
+  filteredClaims.forEach((claim) => {
+    const card = document.createElement("article");
+    card.className = "claim-card";
+    card.dataset.claimId = claim.id;
+    card.classList.toggle("is-selected", selectedClaimIds.has(claim.id));
+    const selection = document.createElement("label");
+    selection.className = "claim-selection evidence-selection";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    const alreadyInView = viewAddingClaims && viewDraftClaimIds.includes(claim.id);
+    checkbox.disabled = alreadyInView;
+    checkbox.checked = selectedClaimIds.has(claim.id);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedClaimIds.add(claim.id);
+      else selectedClaimIds.delete(claim.id);
+      renderClaims();
+      renderReviewWorkspace();
+    });
+    selection.append(checkbox, document.createTextNode(alreadyInView ? "In View" : "Select"));
+    card.classList.toggle("is-withdrawn", claim.lifecycle !== "active");
+    const statement = document.createElement("p");
+    statement.className = "claim-statement";
+    statement.textContent = claim.statement;
+    const badges = document.createElement("div");
+    badges.className = "claim-badges";
+    [
+      claim.basis,
+      claim.review_state === "disputed" ? "disputed" : null,
+      claim.lifecycle !== "active" ? claim.lifecycle : null,
+    ].filter(Boolean).forEach((value) => {
+      const badge = document.createElement("span");
+      badge.textContent = value.replaceAll("_", " ");
+      badges.appendChild(badge);
+    });
+    const evidence = document.createElement("div");
+    evidence.className = "claim-evidence-list";
+    claim.evidence.forEach((link) => {
+      const row = document.createElement("small");
+      row.textContent = `${link.stance} · ${link.source_title} · ${link.locator}`;
+      evidence.appendChild(row);
+    });
+    if (!claim.evidence.length) {
+      const row = document.createElement("small");
+      row.textContent = claim.intentionally_ungrounded
+        ? "Intentionally ungrounded" : "Missing Evidence";
+      evidence.appendChild(row);
+    }
+    const meta = document.createElement("small");
+    meta.textContent = `${claim.revisions.length} revision${claim.revisions.length === 1 ? "" : "s"} · ${claim.artifacts.length} Project${claim.artifacts.length === 1 ? "" : "s"}`;
+    const tags = document.createElement("div");
+    renderTagChips(tags, claim.tags || [], {
+      editable: true,
+      onEdit: () => openTagEditor("claim", claim.id, claim.tags || [], fetchClaims),
+    });
+    const actions = document.createElement("div");
+    actions.className = "claim-card-actions";
+    const revise = document.createElement("button");
+    revise.type = "button";
+    revise.className = "semantic-action is-edit";
+    revise.textContent = "Revise";
+    revise.addEventListener("click", async () => {
+      const next = window.prompt("Revise Claim", claim.statement);
+      if (!next || next.trim() === claim.statement) return;
+      const response = await fetch(`/api/claims/${claim.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statement: next.trim(), basis: claim.basis }),
+      });
+      if (response.ok) await fetchClaims();
+    });
+    const withdraw = document.createElement("button");
+    withdraw.type = "button";
+    withdraw.className = "semantic-action is-destructive";
+    withdraw.textContent = claim.lifecycle === "withdrawn" ? "Restore" : "Withdraw";
+    withdraw.addEventListener("click", async () => {
+      const lifecycle = claim.lifecycle === "withdrawn" ? "active" : "withdrawn";
+      const response = await fetch(`/api/claims/${claim.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lifecycle }),
+      });
+      if (response.ok) await fetchClaims();
+    });
+    actions.append(revise, withdraw);
+    card.append(selection, badges, statement, evidence, tags, meta, actions);
+    claimsListEl.appendChild(card);
+  });
+};
+
+const renderClaimProposals = () => {
+  claimProposalListEl.replaceChildren();
+  claimProposalBoardEl.hidden = claimProposals.length === 0;
+  claimsProposalsToggleBtn.textContent = `Review proposals · ${claimProposals.length}`;
+  claimProposals.forEach((proposal) => {
+    const payload = proposal.payload || {};
+    const card = document.createElement("article");
+    card.className = "claim-proposal-card";
+    const statement = document.createElement("textarea");
+    statement.rows = 3;
+    statement.value = payload.statement || "";
+    const fields = document.createElement("div");
+    fields.className = "claim-proposal-fields";
+    const basis = document.createElement("select");
+    ["background", "reported", "inference"]
+      .forEach((value) => basis.appendChild(new Option(value, value)));
+    basis.value = payload.basis || "reported";
+    const basisField = document.createElement("label");
+    const basisLabel = document.createElement("span");
+    basisLabel.textContent = "Basis";
+    basisField.append(basisLabel, basis);
+    fields.append(basisField);
+    const evidence = document.createElement("div");
+    evidence.className = "proposal-evidence-list";
+    (payload.evidence || []).forEach((link) => {
+      const sourceItem = libraryEvidence.find((item) => item.id === link.evidence_id);
+      const row = document.createElement("small");
+      row.textContent = `${link.stance || "supports"} · ${sourceItem?.source_title || link.evidence_id} · ${sourceItem?.locator || ""}`;
+      evidence.appendChild(row);
+    });
+    const rationale = document.createElement("section");
+    rationale.className = "proposal-explanation proposal-rationale";
+    const rationaleLabel = document.createElement("strong");
+    rationaleLabel.textContent = "Rationale";
+    const rationaleBody = document.createElement("p");
+    rationaleBody.textContent = payload.rationale || "No rationale supplied.";
+    rationale.append(rationaleLabel, rationaleBody);
+    const caveats = document.createElement("section");
+    caveats.className = "proposal-explanation proposal-caveats";
+    const caveatsLabel = document.createElement("strong");
+    caveatsLabel.textContent = "Caveats";
+    const caveatsBody = document.createElement("p");
+    caveatsBody.textContent = (payload.caveats || []).join(" · ") || "No caveats supplied.";
+    caveats.append(caveatsLabel, caveatsBody);
+    const actions = document.createElement("div");
+    actions.className = "claim-card-actions claim-proposal-actions";
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "proposal-accept";
+    const acceptLabel = document.createElement("span");
+    acceptLabel.textContent = "Accept";
+    accept.append(createControlIcon("accept"), acceptLabel);
+    const resolveProposal = async (reviewState) => {
+      [accept, keepDisputed].forEach((button) => { button.disabled = true; });
+      const artifact = artifacts.find((item) => item.id === collectArtifactSelect.value) || null;
+      const response = await fetch(`/api/claim-proposals/${proposal.id}/accept`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          statement: statement.value.trim(), basis: basis.value, review_state: reviewState,
+          artifact_ids: artifact?.id ? [artifact.id] : [],
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        claimsStatusEl.textContent = data.message || "Could not accept Proposal.";
+        [accept, keepDisputed].forEach((button) => { button.disabled = false; });
+        return;
+      }
+      await Promise.all([fetchClaims(), fetchClaimProposals()]);
+    };
+    accept.addEventListener("click", () => resolveProposal("accepted"));
+    const keepDisputed = document.createElement("button");
+    keepDisputed.type = "button";
+    keepDisputed.className = "proposal-disputed";
+    const disputedLabel = document.createElement("span");
+    disputedLabel.textContent = "Keep disputed";
+    keepDisputed.append(createControlIcon("disputed"), disputedLabel);
+    keepDisputed.addEventListener("click", () => resolveProposal("disputed"));
+    const discard = document.createElement("button");
+    discard.type = "button";
+    discard.className = "proposal-discard";
+    const discardLabel = document.createElement("span");
+    discardLabel.textContent = "Discard";
+    discard.append(createControlIcon("discard"), discardLabel);
+    discard.addEventListener("click", async () => {
+      if (!window.confirm("Discard this Claim proposal?")) return;
+      const response = await fetch(`/api/claim-proposals/${proposal.id}`, { method: "DELETE" });
+      if (response.ok) await fetchClaimProposals();
+    });
+    actions.append(discard, keepDisputed, accept);
+    card.append(statement, fields, evidence, rationale, caveats, actions);
+    claimProposalListEl.appendChild(card);
+  });
+};
+
+const fetchEvidenceLibrary = async () => {
+  const response = await fetch("/api/evidence");
+  if (!response.ok) throw new Error("Could not load Evidence.");
+  libraryEvidence = (await response.json()).evidence || [];
+  const available = new Set(libraryEvidence.map((item) => item.id));
+  [...selectedEvidenceIds].forEach((id) => {
+    if (!available.has(id)) selectedEvidenceIds.delete(id);
+  });
+  renderEvidenceLibrary();
+};
+
+const fetchClaims = async () => {
+  const response = await fetch("/api/claims");
+  if (!response.ok) throw new Error("Could not load Claims.");
+  claims = (await response.json()).claims || [];
+  const available = new Set(claims.map((claim) => claim.id));
+  [...selectedClaimIds].forEach((id) => {
+    if (!available.has(id)) selectedClaimIds.delete(id);
+  });
+  renderClaims();
+  updateClaimsStatus();
+};
+
+const fetchClaimProposals = async () => {
+  const response = await fetch("/api/claim-proposals");
+  if (!response.ok) throw new Error("Could not load Claim proposals.");
+  claimProposals = (await response.json()).proposals || [];
+  renderClaimProposals();
+};
+
+const renderViews = () => {
+  viewsListEl.replaceChildren();
+  renderIncomingTrays();
+  if (!views.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = "No Views yet. Select Claims, then build a Wiki, Comparison, Timeline, Claim graph, or Report.";
+    viewsListEl.appendChild(empty);
+    return;
+  }
+  views.forEach((view) => {
+    const card = document.createElement("article");
+    card.className = "view-card";
+    const head = document.createElement("div");
+    head.className = "view-card-head";
+    const title = document.createElement("strong");
+    title.textContent = view.title;
+    const type = document.createElement("span");
+    type.className = "claim-badge";
+    type.textContent = viewTypeLabel(view.view_type);
+    head.append(title, type);
+    const purpose = document.createElement("p");
+    purpose.textContent = view.purpose || "No Purpose added.";
+    const count = document.createElement("small");
+    count.textContent = `${view.claims?.length || 0} Claim${view.claims?.length === 1 ? "" : "s"}`;
+    const claimList = document.createElement("div");
+    claimList.className = "view-claim-list";
+    (view.claims || []).slice(0, 5).forEach((claim) => {
+      const item = document.createElement("span");
+      item.textContent = claim.statement;
+      claimList.appendChild(item);
+    });
+    const actions = document.createElement("div");
+    actions.className = "view-card-actions";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = "Open View";
+    open.addEventListener("click", () => openView(view.id));
+    actions.appendChild(open);
+    card.append(head, purpose, count, claimList, actions);
+    viewsListEl.appendChild(card);
+  });
+};
+
+const setViewDetailMode = (show) => {
+  viewDetailEl.hidden = !show;
+  viewIndexWorkspaceEl.hidden = show;
+  if (!show) {
+    activeViewId = "";
+    viewDraftClaimIds = [];
+    viewDetailEditor.hidden = true;
+  }
+  renderReviewWorkspace();
+  renderChatContext();
+};
+
+const viewClaimCitation = (evidenceItem) => {
+  const citation = document.createElement("button");
+  citation.type = "button";
+  citation.textContent = `${evidenceItem.stance} · ${evidenceItem.source_title || "Source"} · ${evidenceItem.locator || "Evidence"}`;
+  citation.addEventListener("click", () => openEvidenceDetail(evidenceItem.evidence_id));
+  return citation;
+};
+
+const viewClaimsInDraftOrder = (view) => viewDraftClaimIds.map((claimId) =>
+  view.claims.find((item) => item.id === claimId)
+  || claims.find((item) => item.id === claimId),
+).filter(Boolean);
+
+const renderDocumentView = (view, viewClaims) => {
+  const documentEl = document.createElement("article");
+  documentEl.className = `view-document is-${view.view_type}`;
+  const claimById = new Map(viewClaims.map((claim) => [claim.id, claim]));
+  (view.blocks || []).forEach((block) => {
+    if (block.block_type === "heading") {
+      const heading = document.createElement("h3");
+      heading.textContent = block.content;
+      documentEl.appendChild(heading);
+      return;
+    }
+    if (block.block_type === "paragraph") {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = block.content;
+      documentEl.appendChild(paragraph);
+      return;
+    }
+    const claim = claimById.get(block.claim_id);
+    if (!claim) return;
+    const reference = document.createElement("section");
+    reference.className = "view-document-claim";
+    const label = document.createElement("small");
+    label.textContent = `${claim.basis} · ${claim.review_state}`;
+    const statement = document.createElement("p");
+    statement.textContent = claim.statement;
+    const citations = document.createElement("div");
+    citations.className = "view-claim-citations";
+    (claim.evidence || []).forEach((item) => citations.appendChild(viewClaimCitation(item)));
+    if (!(claim.evidence || []).length) {
+      const missing = document.createElement("small");
+      missing.textContent = "Background knowledge · no local Evidence";
+      citations.appendChild(missing);
+    }
+    reference.append(label, statement, citations);
+    documentEl.appendChild(reference);
+  });
+  viewDetailClaimsEl.appendChild(documentEl);
+};
+
+const renderViewBlockEditor = () => {
+  const documentMode = ["wiki", "article"].includes(viewEditTypeInput.value);
+  viewBlockEditorShell.hidden = !documentMode;
+  viewBlockEditorEl.replaceChildren();
+  if (!documentMode) return;
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]));
+  viewDraftBlocks.forEach((block, index) => {
+    const row = document.createElement("article");
+    row.className = "view-block-editor-row";
+    const kind = document.createElement("span");
+    kind.textContent = block.block_type;
+    const content = block.block_type === "paragraph"
+      ? document.createElement("textarea") : document.createElement("input");
+    if (block.block_type === "claim") {
+      content.value = claimById.get(block.claim_id)?.statement || "Missing Claim";
+      content.disabled = true;
+    } else {
+      content.value = block.content;
+      content.addEventListener("input", () => { block.content = content.value; });
+    }
+    const controls = document.createElement("div");
+    const up = document.createElement("button");
+    up.type = "button"; up.textContent = "↑"; up.disabled = index === 0;
+    up.addEventListener("click", () => {
+      [viewDraftBlocks[index - 1], viewDraftBlocks[index]] = [viewDraftBlocks[index], viewDraftBlocks[index - 1]];
+      renderViewBlockEditor();
+    });
+    const down = document.createElement("button");
+    down.type = "button"; down.textContent = "↓"; down.disabled = index === viewDraftBlocks.length - 1;
+    down.addEventListener("click", () => {
+      [viewDraftBlocks[index], viewDraftBlocks[index + 1]] = [viewDraftBlocks[index + 1], viewDraftBlocks[index]];
+      renderViewBlockEditor();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.textContent = "×";
+    remove.className = "semantic-action is-destructive";
+    remove.addEventListener("click", () => {
+      viewDraftBlocks.splice(index, 1);
+      if (block.block_type === "claim") {
+        viewDraftClaimIds = viewDraftClaimIds.filter((id) => id !== block.claim_id);
+      }
+      renderViewBlockEditor();
+      renderViewDetail();
+    });
+    controls.append(up, down, remove);
+    row.append(kind, content, controls);
+    viewBlockEditorEl.appendChild(row);
+  });
+};
+
+const renderComparisonView = (viewClaims) => {
+  const wrapper = document.createElement("div");
+  wrapper.className = "view-comparison-wrap";
+  const table = document.createElement("table");
+  table.className = "view-comparison";
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  const corner = document.createElement("th");
+  corner.textContent = "Dimension";
+  headRow.appendChild(corner);
+  viewClaims.forEach((claim, index) => {
+    const cell = document.createElement("th");
+    cell.textContent = `Claim ${String(index + 1).padStart(2, "0")}`;
+    headRow.appendChild(cell);
+  });
+  head.appendChild(headRow);
+  const body = document.createElement("tbody");
+  [
+    ["Proposition", (claim) => claim.statement],
+    ["Basis", (claim) => claim.basis],
+    ["Review", (claim) => claim.review_state],
+    ["Evidence", (claim) => `${claim.evidence?.length || 0} linked item${claim.evidence?.length === 1 ? "" : "s"}`],
+    ["Project", (claim) => claim.artifacts?.map((item) => item.title).join(", ") || "Global knowledge"],
+  ].forEach(([label, value]) => {
+    const row = document.createElement("tr");
+    const labelCell = document.createElement("th");
+    labelCell.textContent = label;
+    row.appendChild(labelCell);
+    viewClaims.forEach((claim) => {
+      const cell = document.createElement("td");
+      cell.textContent = value(claim);
+      row.appendChild(cell);
+    });
+    body.appendChild(row);
+  });
+  table.append(head, body);
+  wrapper.appendChild(table);
+  viewDetailClaimsEl.appendChild(wrapper);
+};
+
+const renderTimelineView = (viewClaims) => {
+  const timeline = document.createElement("div");
+  timeline.className = "view-timeline";
+  const dated = viewClaims.map((claim, index) => {
+    const year = claim.statement.match(/\b(?:19|20)\d{2}\b/)?.[0] || "";
+    return { claim, index, year };
+  }).sort((left, right) => (left.year || "9999").localeCompare(right.year || "9999") || left.index - right.index);
+  dated.forEach(({ claim, index, year }) => {
+    const item = document.createElement("article");
+    item.className = "view-timeline-item";
+    const marker = document.createElement("div");
+    marker.className = "view-timeline-marker";
+    marker.textContent = year || String(index + 1).padStart(2, "0");
+    const body = document.createElement("div");
+    const badge = document.createElement("span");
+    badge.className = "claim-badge";
+    badge.textContent = claim.basis;
+    const statement = document.createElement("p");
+    statement.textContent = claim.statement;
+    const citations = document.createElement("div");
+    citations.className = "view-claim-citations";
+    (claim.evidence || []).forEach((item) => citations.appendChild(viewClaimCitation(item)));
+    body.append(badge, statement, citations);
+    item.append(marker, body);
+    timeline.appendChild(item);
+  });
+  viewDetailClaimsEl.appendChild(timeline);
+};
+
+const renderGraphView = (viewClaims) => {
+  const workspace = document.createElement("section");
+  workspace.className = "view-graph-workspace";
+  const canvas = document.createElement("div");
+  canvas.className = "view-claim-graph";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("aria-hidden", "true");
+  const positions = new Map();
+  const count = Math.max(1, viewClaims.length);
+  if (!viewClaims.some((claim) => claim.id === activeGraphClaimId)) {
+    activeGraphClaimId = viewClaims[0]?.id || "";
+  }
+  viewClaims.forEach((claim, index) => {
+    const angle = (-Math.PI / 2) + (index * Math.PI * 2 / count);
+    positions.set(claim.id, { x: 50 + Math.cos(angle) * 35, y: 50 + Math.sin(angle) * 34 });
+  });
+  const relationKeys = new Set();
+  viewClaims.forEach((claim) => (claim.relations || []).forEach((relation) => {
+    if (!positions.has(relation.subject_claim_id) || !positions.has(relation.object_claim_id)) return;
+    const key = `${relation.subject_claim_id}:${relation.object_claim_id}:${relation.relation_type}`;
+    if (relationKeys.has(key)) return;
+    relationKeys.add(key);
+    const start = positions.get(relation.subject_claim_id);
+    const end = positions.get(relation.object_claim_id);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", start.x); line.setAttribute("y1", start.y);
+    line.setAttribute("x2", end.x); line.setAttribute("y2", end.y);
+    line.setAttribute("marker-end", "url(#view-arrow)");
+    svg.appendChild(line);
+  }));
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+  marker.setAttribute("id", "view-arrow"); marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "9"); marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "5"); marker.setAttribute("markerHeight", "5");
+  marker.setAttribute("orient", "auto-start-reverse");
+  const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+  marker.appendChild(arrow); defs.appendChild(marker); svg.prepend(defs);
+  canvas.appendChild(svg);
+  viewClaims.forEach((claim, index) => {
+    const position = positions.get(claim.id);
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = "view-graph-node";
+    node.classList.toggle("is-active", claim.id === activeGraphClaimId);
+    node.style.left = `${position.x}%`; node.style.top = `${position.y}%`;
+    node.textContent = `${String(index + 1).padStart(2, "0")} · ${claim.statement}`;
+    node.addEventListener("click", () => {
+      activeGraphClaimId = claim.id;
+      renderViewDetail();
+    });
+    canvas.appendChild(node);
+  });
+  workspace.appendChild(canvas);
+  const selected = viewClaims.find((claim) => claim.id === activeGraphClaimId) || viewClaims[0];
+  if (selected) {
+    activeGraphClaimId ||= selected.id;
+    const detail = document.createElement("aside");
+    detail.className = "view-graph-detail";
+    const label = document.createElement("small");
+    label.textContent = `${selected.basis} · ${selected.review_state}`;
+    const statement = document.createElement("p"); statement.textContent = selected.statement;
+    const relations = document.createElement("div"); relations.className = "view-graph-relations";
+    (selected.relations || []).forEach((item) => {
+      const chip = document.createElement("span"); chip.textContent = item.relation_type.replaceAll("_", " "); relations.appendChild(chip);
+    });
+    if (!(selected.relations || []).length) {
+      const empty = document.createElement("span");
+      empty.textContent = "No saved relations";
+      relations.appendChild(empty);
+    }
+    detail.append(label, statement, relations);
+    workspace.appendChild(detail);
+  }
+  viewDetailClaimsEl.appendChild(workspace);
+};
+
+const renderReportView = (viewClaims) => {
+  const report = document.createElement("article");
+  report.className = "view-report";
+  const summary = document.createElement("section");
+  const summaryTitle = document.createElement("h3");
+  summaryTitle.textContent = "Executive summary";
+  const summaryBody = document.createElement("p");
+  const evidenceCount = viewClaims.reduce((total, claim) => total + (claim.evidence?.length || 0), 0);
+  summaryBody.textContent = `${viewClaims.length} reviewed Claims compose this report, grounded in ${evidenceCount} Evidence link${evidenceCount === 1 ? "" : "s"}.`;
+  summary.append(summaryTitle, summaryBody);
+  const findings = document.createElement("section");
+  const findingsTitle = document.createElement("h3");
+  findingsTitle.textContent = "Key findings";
+  findings.appendChild(findingsTitle);
+  viewClaims.forEach((claim, index) => {
+    const finding = document.createElement("div");
+    finding.className = "view-report-finding";
+    const title = document.createElement("strong");
+    title.textContent = `${index + 1}. ${claim.statement}`;
+    const citations = document.createElement("div");
+    citations.className = "view-claim-citations";
+    (claim.evidence || []).forEach((item) => citations.appendChild(viewClaimCitation(item)));
+    if (!(claim.evidence || []).length) {
+      const note = document.createElement("small");
+      note.textContent = "Background knowledge · no local Evidence";
+      citations.appendChild(note);
+    }
+    finding.append(title, citations);
+    findings.appendChild(finding);
+  });
+  report.append(summary, findings);
+  viewDetailClaimsEl.appendChild(report);
+};
+
+const renderViewDetail = () => {
+  const view = activeView();
+  if (!view) {
+    setViewDetailMode(false);
+    return;
+  }
+  viewDetailTypeEl.textContent = viewTypeLabel(view.view_type);
+  viewDetailProjectEl.textContent = view.artifact?.title
+    ? `Project · ${view.artifact.title}` : "Standalone View";
+  viewDetailTitleEl.textContent = view.title;
+  viewDetailPurposeEl.textContent = view.purpose
+    || view.artifact?.purpose
+    || "No Purpose added.";
+  viewDetailClaimsEl.replaceChildren();
+  const editing = !viewDetailEditor.hidden;
+  const orderedClaims = viewClaimsInDraftOrder(view);
+  if (!editing && ["wiki", "article"].includes(view.view_type)) {
+    renderDocumentView(view, orderedClaims);
+    return;
+  }
+  if (!editing && view.view_type === "graph") {
+    renderGraphView(orderedClaims);
+    return;
+  }
+  renderViewBlockEditor();
+  if (editing && ["wiki", "article"].includes(viewEditTypeInput.value)) return;
+  viewDraftClaimIds.forEach((claimId, index) => {
+    const claim = view.claims.find((item) => item.id === claimId)
+      || claims.find((item) => item.id === claimId);
+    if (!claim) return;
+    const article = document.createElement("article");
+    article.className = "view-reader-claim";
+    const marker = document.createElement("span");
+    marker.className = "view-claim-number";
+    marker.textContent = String(index + 1).padStart(2, "0");
+    const body = document.createElement("div");
+    const badges = document.createElement("div");
+    badges.className = "claim-badges";
+    [claim.basis, claim.review_state === "disputed" ? "disputed" : null]
+      .filter(Boolean).forEach((value) => {
+        const badge = document.createElement("span");
+        badge.textContent = value;
+        badges.appendChild(badge);
+      });
+    const statement = document.createElement("p");
+    statement.className = "view-reader-statement";
+    statement.textContent = claim.statement;
+    const citations = document.createElement("div");
+    citations.className = "view-claim-citations";
+    (claim.evidence || []).forEach((evidenceItem) => {
+      citations.appendChild(viewClaimCitation(evidenceItem));
+    });
+    if (!(claim.evidence || []).length) {
+      const background = document.createElement("small");
+      background.textContent = "Background Claim · no local Evidence";
+      citations.appendChild(background);
+    }
+    body.append(badges, statement, citations);
+    article.append(marker, body);
+    if (editing) {
+      const controls = document.createElement("div");
+      controls.className = "view-claim-order-actions";
+      const up = document.createElement("button");
+      up.type = "button";
+      up.textContent = "↑";
+      up.title = "Move up";
+      up.disabled = index === 0;
+      up.addEventListener("click", () => {
+        [viewDraftClaimIds[index - 1], viewDraftClaimIds[index]] = [
+          viewDraftClaimIds[index], viewDraftClaimIds[index - 1],
+        ];
+        renderViewDetail();
+      });
+      const down = document.createElement("button");
+      down.type = "button";
+      down.textContent = "↓";
+      down.title = "Move down";
+      down.disabled = index === viewDraftClaimIds.length - 1;
+      down.addEventListener("click", () => {
+        [viewDraftClaimIds[index], viewDraftClaimIds[index + 1]] = [
+          viewDraftClaimIds[index + 1], viewDraftClaimIds[index],
+        ];
+        renderViewDetail();
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.title = "Remove Claim from View";
+      remove.disabled = viewDraftClaimIds.length === 1;
+      remove.addEventListener("click", () => {
+        viewDraftClaimIds.splice(index, 1);
+        renderViewDetail();
+      });
+      controls.append(up, down, remove);
+      article.appendChild(controls);
+    }
+    viewDetailClaimsEl.appendChild(article);
+  });
+};
+
+const openView = (viewId) => {
+  const view = views.find((item) => item.id === viewId);
+  if (!view) return;
+  activeViewId = view.id;
+  viewDraftClaimIds = (view.claims || []).map((claim) => claim.id);
+  viewDraftBlocks = (view.blocks || []).map((block) => ({ ...block }));
+  activeGraphClaimId = "";
+  viewDetailEditor.hidden = true;
+  viewDetailStatusEl.textContent = "";
+  setViewDetailMode(true);
+  renderViewDetail();
+  const panel = viewDetailEl.closest(".panel");
+  if (panel) {
+    panel.scrollTop = 0;
+    panel.scrollLeft = 0;
+  }
+};
+
+const fetchViews = async () => {
+  const response = await fetch("/api/views");
+  if (!response.ok) throw new Error("Could not load Views.");
+  views = (await response.json()).views || [];
+  renderViews();
+  viewsStatusEl.textContent = `${views.length} View${views.length === 1 ? "" : "s"}`;
+  if (activeViewId) {
+    if (activeView()) renderViewDetail();
+    else setViewDetailMode(false);
+  }
+  renderReviewWorkspace();
+  renderChatContext();
+};
+
 const renderLibrary = () => {
   updateSelectAllState(
-    librarySelectAllInput, selectedLibrarySourceKeys.size, librarySources.length,
+    librarySelectAllInput,
+    selectedLibrarySourceKeys.size,
+    librarySources.length,
   );
   libraryListEl.hidden = Boolean(activeSourceWorkspace);
   sourceReaderEl.hidden = !activeSourceWorkspace;
+  libraryAbstractToggleBtn.hidden = Boolean(activeSourceWorkspace);
   libraryPanelInnerEl.classList.toggle("is-reader-focused", Boolean(activeSourceWorkspace));
   libraryPanelInnerEl.classList.toggle(
     "is-reader-details-expanded",
@@ -2805,7 +4153,6 @@ const openSourceReader = async (sourceId, { preserveState = false } = {}) => {
     if (!preserveState) {
       readerDetailsExpanded = false;
       pendingEvidenceSelection = null;
-      selectedEvidenceIds.clear();
       annotationTarget = { type: "source", id: sourceId };
     }
     libraryStatusEl.textContent = "";
@@ -2814,7 +4161,9 @@ const openSourceReader = async (sourceId, { preserveState = false } = {}) => {
     if (!scrollAnchor) sourceReaderEl.scrollIntoView({ block: "start", behavior: "smooth" });
     return true;
   } catch (error) {
-    libraryStatusEl.textContent = error.message;
+    libraryStatusEl.textContent = error instanceof TypeError
+      ? "Connection to Knowte was interrupted. Restart Knowte, then reload this page."
+      : error.message;
     return false;
   }
 };
@@ -3095,21 +4444,23 @@ const renderKnowledgeReview = () => {
   evidenceSelectionLocationEl.textContent = pendingEvidenceSelection?.locator
     || "Select text in the Source reader.";
   createEvidenceBtn.disabled = !pendingEvidenceSelection;
-  evidenceArtifactSelect.replaceChildren(new Option("Library only", ""));
+  evidenceArtifactSelect.replaceChildren(new Option("Evidence only", ""));
   artifacts.forEach((artifact) => {
     evidenceArtifactSelect.appendChild(new Option(
-      `Library + ${artifact.title}`, artifact.id,
+      `Evidence + ${artifact.title}`, artifact.id,
     ));
   });
   evidenceArtifactSelect.value = artifacts.some(
     (artifact) => artifact.id === selectedEvidenceArtifact,
   ) ? selectedEvidenceArtifact : "";
   createEvidenceBtn.textContent = evidenceArtifactSelect.value
-    ? "Create Evidence in Library & Artifact"
-    : "Create Evidence in Library";
+    ? "Create Evidence & link Project"
+    : "Create Evidence";
   reviewEvidenceListEl.replaceChildren();
   updateSelectAllState(
-    evidenceSelectAllInput, selectedEvidenceIds.size, activeSourceWorkspace.evidence.length,
+    evidenceSelectAllInput,
+    activeSourceWorkspace.evidence.filter((item) => selectedEvidenceIds.has(item.id)).length,
+    activeSourceWorkspace.evidence.length,
   );
   activeSourceWorkspace.evidence.forEach((item) => {
     const card = document.createElement("article");
@@ -3207,9 +4558,20 @@ const renderKnowledgeReview = () => {
   renderChatContext();
 };
 
-const activeEvidenceDetail = () => activeSourceWorkspace?.evidence.find(
-  (item) => item.id === activeEvidenceDetailId,
+const activeEvidenceDetail = () => (
+  activeSourceWorkspace?.evidence.find((item) => item.id === activeEvidenceDetailId)
+  || libraryEvidence.find((item) => item.id === activeEvidenceDetailId)
 );
+
+const refreshEvidenceDetailData = async () => {
+  if (activeSourceWorkspace?.source?.id) {
+    await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+  } else {
+    await fetchEvidenceLibrary();
+    renderReviewWorkspace();
+  }
+  renderEvidenceDetail();
+};
 
 const renderEvidenceDetail = () => {
   const item = activeEvidenceDetail();
@@ -3227,14 +4589,15 @@ const renderEvidenceDetail = () => {
     evidenceDetailContentEl.appendChild(image);
   } else {
     const quote = document.createElement("blockquote");
-    quote.textContent = item.quote;
+    quote.textContent = item.quote || "No captured text is available for this Evidence.";
     evidenceDetailContentEl.appendChild(quote);
   }
+  const annotations = item.annotations || [];
   evidenceDetailAnnotationCountEl.textContent = (
-    `${item.annotations.length} Annotation${item.annotations.length === 1 ? "" : "s"}`
+    `${annotations.length} Annotation${annotations.length === 1 ? "" : "s"}`
   );
   evidenceDetailAnnotationListEl.replaceChildren();
-  item.annotations.forEach((annotation) => {
+  annotations.forEach((annotation) => {
     const row = document.createElement("article");
     const body = document.createElement("p");
     body.textContent = annotation.body;
@@ -3247,13 +4610,12 @@ const renderEvidenceDetail = () => {
         method: "DELETE",
       });
       if (!response.ok) return;
-      await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
-      renderEvidenceDetail();
+      await refreshEvidenceDetailData();
     });
     row.append(body, remove);
     evidenceDetailAnnotationListEl.appendChild(row);
   });
-  if (!item.annotations.length) {
+  if (!annotations.length) {
     evidenceDetailAnnotationListEl.textContent = "No Annotations attached.";
   }
 };
@@ -3272,8 +4634,7 @@ evidenceDetailEditTagsBtn.addEventListener("click", async () => {
   const item = activeEvidenceDetail();
   if (!item) return;
   openTagEditor("evidence", item.id, item.tags || [], async () => {
-    await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
-    renderEvidenceDetail();
+    await refreshEvidenceDetailData();
   });
 });
 const deleteEvidenceItem = async (evidenceId, { closeDetail = false } = {}) => {
@@ -3285,9 +4646,16 @@ const deleteEvidenceItem = async (evidenceId, { closeDetail = false } = {}) => {
   selectedEvidenceIds.delete(evidenceId);
   chatContextEvidence.delete(evidenceId);
   if (annotationTarget?.type === "evidence" && annotationTarget.id === evidenceId) {
-    annotationTarget = { type: "source", id: activeSourceWorkspace.source.id };
+    annotationTarget = activeSourceWorkspace?.source?.id
+      ? { type: "source", id: activeSourceWorkspace.source.id }
+      : null;
   }
-  await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+  if (activeSourceWorkspace?.source?.id) {
+    await openSourceReader(activeSourceWorkspace.source.id, { preserveState: true });
+  } else {
+    await fetchEvidenceLibrary();
+    renderReviewWorkspace();
+  }
   return true;
 };
 evidenceDetailDeleteBtn.addEventListener("click", async () => {
@@ -3295,15 +4663,15 @@ evidenceDetailDeleteBtn.addEventListener("click", async () => {
   if (item) await deleteEvidenceItem(item.id, { closeDetail: true });
 });
 
-sourceReaderBackBtn.addEventListener("click", () => {
+sourceReaderBackBtn.addEventListener("click", async () => {
   pdfRenderToken += 1;
   const documentToDestroy = activePdfDocument;
   activePdfDocument = null;
   activeSourceWorkspace = null;
   pendingEvidenceSelection = null;
-  selectedEvidenceIds.clear();
   annotationTarget = null;
   readerDetailsExpanded = false;
+  await fetchEvidenceLibrary();
   renderLibrary();
   renderReviewWorkspace();
   destroyPdfDocument(documentToDestroy);
@@ -3401,8 +4769,8 @@ evidenceSnapshotToolBtn.addEventListener("click", () => {
 });
 evidenceArtifactSelect.addEventListener("change", () => {
   createEvidenceBtn.textContent = evidenceArtifactSelect.value
-    ? "Create Evidence in Library & Artifact"
-    : "Create Evidence in Library";
+    ? "Create Evidence & link Project"
+    : "Create Evidence";
 });
 pdfZoomOutBtn.addEventListener("click", () => {
   pdfZoom = Math.max(0.55, Math.round((pdfZoom - 0.15) * 100) / 100);
@@ -3537,12 +4905,13 @@ createAnnotationBtn.addEventListener("click", async () => {
 });
 
 const fetchLibrary = async () => {
-  libraryStatusEl.textContent = "Loading Library…";
+  libraryStatusEl.textContent = "Loading Sources…";
   try {
     const response = await fetch("/api/library/sources");
-    if (!response.ok) throw new Error("Could not load the Library.");
+    if (!response.ok) throw new Error("Could not load Sources.");
     const data = await response.json();
     librarySources = data.sources || [];
+    await fetchEvidenceLibrary();
     const availableKeys = new Set(librarySources.map(resultKey));
     [...selectedLibrarySourceKeys].forEach((key) => {
       if (!availableKeys.has(key)) selectedLibrarySourceKeys.delete(key);
@@ -3552,9 +4921,263 @@ const fetchLibrary = async () => {
     renderContextPanel();
     libraryStatusEl.textContent = `${librarySources.length} saved Source${librarySources.length === 1 ? "" : "s"}`;
   } catch (error) {
-    libraryStatusEl.textContent = error.message;
+    libraryStatusEl.textContent = error instanceof TypeError
+      ? "Connection to Knowte was interrupted. Restart Knowte, then reload this page."
+      : error.message;
   }
 };
+
+libraryProposeClaimsBtn.addEventListener("click", async () => {
+  if (!selectedEvidenceIds.size) return;
+  if (selectedEvidenceIds.size > 12) {
+    evidenceStatusEl.textContent = "Select at most 12 Evidence items for one Claim proposal run.";
+    return;
+  }
+  libraryProposeClaimsBtn.disabled = true;
+  libraryProposeClaimsBtn.textContent = "Proposing…";
+  copySelectedEvidenceToClaimDraft();
+  evidenceStatusEl.textContent = "The model is developing Claim proposals from selected Evidence…";
+  try {
+    const artifact = artifacts.find(
+      (item) => item.id === collectArtifactSelect.value,
+    ) || null;
+    const response = await fetch("/api/claim-proposals/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ evidence_ids: [...selectedEvidenceIds], artifact }),
+    });
+    const data = await response.json().catch(() => ({}));
+    updateUsage(data.usage);
+    if (!response.ok) throw new Error(data.message || "Could not propose Claims.");
+    await fetchClaimProposals();
+    showPanel("claims-panel");
+    claimProposalBoardEl.hidden = false;
+    evidenceStatusEl.textContent = `${data.proposals.length} Claim proposal${data.proposals.length === 1 ? "" : "s"} awaiting review.`;
+  } catch (error) {
+    evidenceStatusEl.textContent = error instanceof TypeError
+      ? "Connection to Knowte was interrupted before Claims could be proposed. Restart Knowte, then try again."
+      : error.message;
+  } finally {
+    renderEvidenceLibrary();
+  }
+});
+
+claimCreateBtn.addEventListener("click", async () => {
+  const statement = claimStatementInput.value.trim();
+  if (!statement) return;
+  claimCreateBtn.disabled = true;
+  claimCreateStatusEl.textContent = "Creating Claim…";
+  try {
+    const response = await fetch("/api/claims", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        statement,
+        basis: claimBasisInput.value,
+        evidence: [...incomingClaimEvidenceIds].map((evidenceId) => ({
+          evidence_id: evidenceId,
+          stance: incomingClaimEvidenceStances.get(evidenceId) || "supports",
+        })),
+        artifact_ids: claimArtifactInput.value ? [claimArtifactInput.value] : [],
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not create Claim.");
+    claimStatementInput.value = "";
+    incomingClaimEvidenceIds.clear();
+    incomingClaimEvidenceStances.clear();
+    claimBasisInput.value = "background";
+    await Promise.all([fetchClaims(), fetchEvidenceLibrary()]);
+    renderIncomingTrays();
+    claimCreateStatusEl.textContent = "Claim created.";
+  } catch (error) {
+    claimCreateStatusEl.textContent = error.message;
+  } finally {
+    renderIncomingTrays();
+  }
+});
+
+claimBasisInput.addEventListener("change", renderIncomingTrays);
+
+claimsProposalsToggleBtn.addEventListener("click", () => {
+  claimProposalBoardEl.hidden = !claimProposalBoardEl.hidden;
+  if (!claimProposalBoardEl.hidden) {
+    claimProposalBoardEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+
+claimsRelateBtn.addEventListener("click", async () => {
+  const selected = selectedClaims();
+  if (selected.length !== 2) return;
+  const response = await fetch("/api/claim-relations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subject_claim_id: selected[0].id,
+      object_claim_id: selected[1].id,
+      relation_type: claimsRelationTypeInput.value,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    claimsStatusEl.textContent = data.message || "Could not relate Claims.";
+    return;
+  }
+  selectedClaimIds.clear();
+  await fetchClaims();
+  claimsStatusEl.textContent = `Created ${data.relation_type} relation.`;
+});
+
+viewDetailBackBtn.addEventListener("click", () => {
+  if (!viewDetailEditor.hidden && !window.confirm("Leave without saving View changes?")) return;
+  setViewDetailMode(false);
+  renderViews();
+});
+
+viewDetailEditBtn.addEventListener("click", () => {
+  const view = activeView();
+  if (!view) return;
+  viewDraftClaimIds = view.claims.map((claim) => claim.id);
+  viewDraftBlocks = (view.blocks || []).map((block) => ({ ...block }));
+  viewDetailEditor.hidden = false;
+  viewEditTitleInput.value = view.title;
+  viewEditPurposeInput.value = view.purpose || "";
+  viewEditProjectInput.value = view.artifact_id || "";
+  viewEditTypeInput.value = view.view_type;
+  viewDetailStatusEl.textContent = "Editing View structure and metadata.";
+  renderViewDetail();
+  viewEditTitleInput.focus();
+});
+
+viewEditCancelBtn.addEventListener("click", () => {
+  const view = activeView();
+  if (!view) return;
+  viewDraftClaimIds = view.claims.map((claim) => claim.id);
+  viewDraftBlocks = (view.blocks || []).map((block) => ({ ...block }));
+  viewDetailEditor.hidden = true;
+  viewDetailStatusEl.textContent = "Changes discarded.";
+  renderViewDetail();
+});
+
+const appendDraftBlock = (blockType) => {
+  viewDraftBlocks.push({
+    id: crypto.randomUUID().replaceAll("-", ""),
+    block_type: blockType,
+    content: blockType === "heading" ? "New section" : "Write a synthesis paragraph…",
+    claim_id: "",
+  });
+  renderViewBlockEditor();
+};
+
+viewAddHeadingBtn.addEventListener("click", () => appendDraftBlock("heading"));
+viewAddParagraphBtn.addEventListener("click", () => appendDraftBlock("paragraph"));
+viewEditTypeInput.addEventListener("change", () => {
+  if (["wiki", "article"].includes(viewEditTypeInput.value) && !viewDraftBlocks.length) {
+    viewDraftBlocks = [{
+      id: crypto.randomUUID().replaceAll("-", ""),
+      block_type: "heading",
+      content: viewEditTypeInput.value === "wiki" ? "Overview" : "Article",
+      claim_id: "",
+    }, ...viewDraftClaimIds.map((claimId) => ({
+      id: crypto.randomUUID().replaceAll("-", ""),
+      block_type: "claim", content: "", claim_id: claimId,
+    }))];
+  }
+  renderViewBlockEditor();
+  renderViewDetail();
+});
+
+viewDetailAddClaimsBtn.addEventListener("click", () => {
+  const view = activeView();
+  if (!view) return;
+  if (viewDetailEditor.hidden) {
+    viewDraftClaimIds = view.claims.map((claim) => claim.id);
+    viewDraftBlocks = (view.blocks || []).map((block) => ({ ...block }));
+    viewDetailEditor.hidden = false;
+  }
+  viewAddingClaims = true;
+  claimsReturnToView = true;
+  selectedClaimIds.clear();
+  renderClaims();
+  showPanel("claims-panel");
+});
+
+viewDetailEditor.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const view = activeView();
+  if (!view) return;
+  viewDetailStatusEl.textContent = "Saving View…";
+  try {
+    const response = await fetch(`/api/views/${view.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: viewEditTitleInput.value.trim(),
+        purpose: viewEditPurposeInput.value.trim(),
+        artifact_id: viewEditProjectInput.value,
+        view_type: viewEditTypeInput.value,
+        claim_ids: viewDraftClaimIds,
+        blocks: ["wiki", "article"].includes(viewEditTypeInput.value)
+          ? viewDraftBlocks.map(({ id, block_type, content, claim_id }) => ({ id, block_type, content, claim_id }))
+          : [],
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not update View.");
+    viewDetailEditor.hidden = true;
+    await fetchViews();
+    viewDetailStatusEl.textContent = "View saved.";
+  } catch (error) {
+    viewDetailStatusEl.textContent = error.message;
+  }
+});
+
+viewDetailDeleteBtn.addEventListener("click", async () => {
+  const view = activeView();
+  if (!view || !window.confirm(`Delete View “${view.title}”? Claims and Evidence will not be deleted.`)) return;
+  const response = await fetch(`/api/views/${view.id}`, { method: "DELETE" });
+  if (!response.ok) {
+    viewDetailStatusEl.textContent = "Could not delete View.";
+    return;
+  }
+  setViewDetailMode(false);
+  await fetchViews();
+  viewsStatusEl.textContent = "View deleted. Claims and Evidence were preserved.";
+});
+
+viewForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!incomingViewClaimIds.size) {
+    viewsStatusEl.textContent = "Add at least one incoming Claim before creating a View.";
+    return;
+  }
+  viewCreateBtn.disabled = true;
+  viewsStatusEl.textContent = "Creating View…";
+  try {
+    const response = await fetch("/api/views", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: viewTitleInput.value.trim(),
+        view_type: viewTypeInput.value,
+        purpose: viewPurposeInput.value.trim(),
+        artifact_id: viewProjectInput.value,
+        claim_ids: [...incomingViewClaimIds],
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not create View.");
+    viewForm.reset();
+    incomingViewClaimIds.clear();
+    activeViewId = data.id;
+    await fetchViews();
+    openView(data.id);
+    viewDetailStatusEl.textContent = "View created.";
+  } catch (error) {
+    viewsStatusEl.textContent = error.message;
+  } finally {
+    renderIncomingTrays();
+    renderReviewWorkspace();
+  }
+});
 
 artifactForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3572,7 +5195,7 @@ artifactForm.addEventListener("submit", async (event) => {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data.message || "Could not create the Artifact.");
+      throw new Error(data.message || "Could not create the Project.");
     }
     artifactForm.reset();
     await fetchArtifacts();
@@ -3584,7 +5207,7 @@ artifactForm.addEventListener("submit", async (event) => {
     artifactStatusEl.textContent = error.message;
   } finally {
     artifactCreateBtn.disabled = false;
-    artifactCreateBtn.textContent = "Create Artifact";
+    artifactCreateBtn.textContent = "Create Project";
   }
 });
 
@@ -3614,8 +5237,8 @@ const collectSelectedResults = async (artifactId = null) => {
       throw new Error(data.message || "Could not collect the selected Sources.");
     }
     contextActionStatusEl.textContent = artifactId
-      ? `${data.count} Source(s) are in Library; ${data.artifact_links_created} new Artifact link(s) created.`
-      : `${data.count} Source(s) are in Library; ${data.sources_created} newly added.`;
+      ? `${data.count} Source(s) saved; ${data.artifact_links_created} new Project link(s) created.`
+      : `${data.count} Source(s) saved; ${data.sources_created} newly added.`;
     await Promise.all([fetchLibrary(), fetchArtifacts()]);
   } catch (error) {
     contextActionStatusEl.textContent = error.message;
@@ -3677,6 +5300,12 @@ contextChatForm.addEventListener("submit", async (event) => {
   const contextKey = activeReviewContextKey;
   const selected = [...chatContextSources.values()];
   const evidence = [...chatContextEvidence.values()];
+  const selectedClaimContext = currentReviewContext() === "claims"
+    ? selectedClaims()
+    : currentReviewContext() === "views"
+      ? activeView()?.claims || [...incomingViewClaimIds]
+        .map((id) => claims.find((claim) => claim.id === id)).filter(Boolean)
+      : [];
   const artifact = activeReviewArtifact();
   const conversation = reviewConversations[contextKey] || [];
   const recentConversation = conversation.slice(-8).map((message) => ({
@@ -3698,9 +5327,10 @@ contextChatForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         question,
-        context: contextKey,
+        context: currentReviewContext(),
         sources: selected,
         evidence,
+        claims: selectedClaimContext,
         artifact,
         conversation: recentConversation,
       }),
@@ -3735,11 +5365,6 @@ contextPanelToggleBtn.addEventListener("click", () => {
 contextPanelCloseBtn.addEventListener("click", () => {
   contextPanel.classList.remove("is-open");
   contextPanelToggleBtn.setAttribute("aria-expanded", "false");
-});
-
-libraryGoSearchBtn.addEventListener("click", () => {
-  showPanel("search-panel");
-  input.focus();
 });
 
 libraryAbstractToggleBtn.addEventListener("click", () => {
@@ -3980,7 +5605,12 @@ navLinks.forEach((link) => {
     if (!target) return;
     showPanel(target);
     if (target === "plans-panel") fetchPlans();
-    if (target === "library-panel") fetchLibrary();
+    if (target === "sources-panel") fetchLibrary();
+    if (target === "evidence-panel") fetchEvidenceLibrary();
+    if (target === "claims-panel") {
+      Promise.all([fetchClaims(), fetchClaimProposals(), fetchEvidenceLibrary()]);
+    }
+    if (target === "views-panel") Promise.all([fetchViews(), fetchClaims()]);
     if (target === "create-panel") fetchArtifacts();
   });
 });
@@ -4117,6 +5747,9 @@ fetchConfig();
 fetchUsage();
 fetchSearxngStatus();
 fetchArtifacts();
+fetchClaims();
+fetchClaimProposals();
+fetchViews();
 fetchLibrary();
 fetchCompanionInbox();
 window.setInterval(fetchCompanionInbox, 5000);

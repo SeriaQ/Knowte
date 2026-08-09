@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260802b" />
+    <link rel="stylesheet" href="styles.css?v=20260809i" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -27,8 +27,11 @@
         </div>
         <nav class="side-nav">
           <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
-          <button class="side-link" type="button" data-target="library-panel">Library</button>
-          <button class="side-link" type="button" data-target="create-panel">Create</button>
+          <button class="side-link" type="button" data-target="sources-panel">Sources</button>
+          <button class="side-link" type="button" data-target="evidence-panel">Evidence</button>
+          <button class="side-link" type="button" data-target="claims-panel">Claims</button>
+          <button class="side-link" type="button" data-target="views-panel">Views</button>
+          <button class="side-link" type="button" data-target="create-panel">Projects</button>
           <button class="side-link" type="button" data-target="plans-panel">Plans</button>
           <button class="side-link" type="button" data-target="config-panel">Config</button>
         </nav>
@@ -206,17 +209,18 @@
           </div>
         </section>
 
-        <section class="hero panel-view" id="library-panel">
+        <section class="hero panel-view" id="sources-panel">
           <div class="panel">
             <div class="knowledge-panel-head">
               <div>
-                <div class="knowledge-panel-label">Global Library</div>
-                <small>Saved Sources are shared across every Artifact.</small>
+                <div class="knowledge-panel-label">Sources</div>
+                <small>Saved Sources are global, reusable, and ready for inspection.</small>
               </div>
-              <div class="knowledge-panel-actions">
-                <label class="master-select"><input type="checkbox" id="library-select-all" /> Select all</label>
+            </div>
+            <div class="library-toolbar">
+              <div class="library-toolbar-actions">
                 <button type="button" id="library-abstract-toggle" aria-pressed="false">Hide abstracts</button>
-                <button type="button" id="library-go-search">Find Sources</button>
+                <label class="master-select library-master-select"><input type="checkbox" id="library-select-all" /> Select all</label>
               </div>
             </div>
             <div class="knowledge-status" id="library-status" role="status"></div>
@@ -227,7 +231,7 @@
               </div>
               <div class="source-viewer-toolbar" id="source-viewer-toolbar">
                 <div class="source-viewer-tools">
-                  <button type="button" id="source-reader-back"><span class="tool-icon" aria-hidden="true">←</span><span>Library</span></button>
+                  <button type="button" id="source-reader-back"><span class="tool-icon" aria-hidden="true">←</span><span>Sources</span></button>
                   <button type="button" id="source-details-toggle" aria-expanded="false"><span class="tool-icon disclosure-icon" aria-hidden="true">▾</span><span class="tool-label">Details</span></button>
                   <button type="button" id="source-capture"><span class="tool-icon" aria-hidden="true">↻</span><span class="tool-label">Refresh</span></button>
                   <a id="source-open-original" target="_blank" rel="noopener noreferrer"><span class="tool-icon" aria-hidden="true">↗</span><span>Original web</span></a>
@@ -250,12 +254,163 @@
           </div>
         </section>
 
+        <section class="hero panel-view" id="evidence-panel">
+          <div class="panel evidence-workspace">
+            <div class="evidence-workspace-head">
+              <div class="knowledge-panel-head">
+                <div>
+                  <div class="knowledge-panel-label">Evidence</div>
+                  <small>Precise excerpts and snapshots grounded in saved Sources.</small>
+                </div>
+              </div>
+              <section class="handoff-return" id="evidence-handoff-return" hidden>
+                <div><strong>Adding Evidence to a Claim draft</strong><small>Your existing draft and incoming Evidence are preserved.</small></div>
+                <div><button type="button" id="evidence-handoff-cancel">Cancel</button><button type="button" id="evidence-handoff-apply">Add selected and return</button></div>
+              </section>
+              <div class="stage-toolbar">
+                <div class="stage-toolbar-actions">
+                  <button type="button" class="save-plan-btn stage-save-action" id="evidence-create-claim" disabled>Propose Claims manually</button>
+                  <button type="button" class="primary-action" id="library-propose-claims" disabled>Propose Claims via LLM</button>
+                </div>
+                <div class="stage-toolbar-tools">
+                  <label class="tag-filter-control">Tag<select id="evidence-tag-filter" aria-label="Filter Evidence by Tag"><option value="">All Tags</option></select></label>
+                  <label class="master-select" title="Select all visible Evidence"><input type="checkbox" id="evidence-library-select-all" /> Select all</label>
+                </div>
+              </div>
+              <div class="knowledge-status" id="evidence-status" role="status"></div>
+            </div>
+            <div class="evidence-library-list" id="evidence-library-list"></div>
+          </div>
+        </section>
+
+        <section class="hero panel-view" id="claims-panel">
+          <div class="panel claims-workspace">
+            <div class="knowledge-panel-head">
+              <div>
+                <div class="knowledge-panel-label">Claims</div>
+                <small>Distilled propositions remain traceable to Evidence and Sources.</small>
+              </div>
+            </div>
+            <div class="claims-toolbar stage-toolbar">
+              <div class="claim-selection-actions">
+                <span class="toolbar-label" id="claims-selected-count">0 selected</span>
+                <select id="claims-relation-type" aria-label="Relation from the first selected Claim to the second" title="Relation from the first selected Claim to the second">
+                  <option value="supports">supports</option>
+                  <option value="contradicts">contradicts</option>
+                  <option value="related">related</option>
+                </select>
+                <button class="save-plan-btn stage-save-action" type="button" id="claims-relate" disabled>Create relation</button>
+                <button class="primary-action" type="button" id="claims-build-view" disabled>Build View</button>
+              </div>
+              <div class="claims-toolbar-end">
+                <label class="tag-filter-control">Status<select id="claims-review-filter" aria-label="Filter Claims by review status"><option value="">All Claims</option><option value="accepted">Accepted</option><option value="disputed">Disputed</option></select></label>
+                <label class="tag-filter-control">Tag<select id="claims-tag-filter" aria-label="Filter Claims by Tag"><option value="">All Tags</option></select></label>
+                <button class="review-queue-action" type="button" id="claims-proposals-toggle">Review proposals · 0</button>
+                <label class="master-select" title="Select all visible Claims"><input type="checkbox" id="claims-select-all" /> Select all</label>
+              </div>
+            </div>
+            <section class="handoff-return" id="claims-handoff-return" hidden>
+              <div><strong>Adding Claims to a View draft</strong><small>Your existing View draft and incoming Claims are preserved.</small></div>
+              <div><button type="button" id="claims-handoff-cancel">Cancel</button><button type="button" id="claims-handoff-apply">Add selected and return</button></div>
+            </section>
+            <section class="incoming-tray" id="claim-incoming-tray" hidden>
+              <div class="incoming-tray-head"><div><strong id="claim-incoming-title">Incoming Evidence · 0</strong><small>These inputs will ground the manual Claim draft.</small></div><button type="button" id="claim-add-evidence">Add Evidence</button></div>
+              <div class="incoming-items" id="claim-incoming-items"></div>
+            </section>
+            <div class="claim-create-card">
+              <div class="draft-card-head"><div><strong>Manual Claim</strong><small>Write and classify one atomic proposition.</small></div></div>
+              <textarea id="claim-statement" rows="3" placeholder="Write an atomic, independently examinable proposition…"></textarea>
+              <div class="claim-create-fields">
+                <label>Basis
+                  <select id="claim-basis">
+                    <option value="background">Background</option>
+                    <option value="reported">Reported</option>
+                    <option value="inference">Inference</option>
+                  </select>
+                </label>
+                <div class="claim-create-actions">
+                  <button class="primary-action" type="button" id="claim-create">Create Claim</button>
+                </div>
+                <label class="claim-attach-field">Attach to
+                  <select id="claim-artifact"><option value="">Claims only</option></select>
+                </label>
+              </div>
+              <small id="claim-create-status" role="status"></small>
+            </div>
+            <section class="claim-proposal-board" id="claim-proposal-board" hidden>
+              <div class="claim-section-head"><strong>Awaiting review</strong><small>Kept until you Accept, Keep disputed, or Discard.</small></div>
+              <div id="claim-proposal-list"></div>
+            </section>
+            <div class="claims-list" id="claims-list"></div>
+            <small class="knowledge-status" id="claims-status" role="status"></small>
+          </div>
+        </section>
+
+        <section class="hero panel-view" id="views-panel">
+          <div class="panel views-workspace">
+            <div class="knowledge-panel-head">
+              <div>
+                <div class="knowledge-panel-label">Views</div>
+                <small>Organize shared Claims into reusable forms for understanding and expression.</small>
+              </div>
+            </div>
+            <section class="view-detail" id="view-detail" hidden>
+              <div class="view-detail-toolbar">
+                <button type="button" class="reader-toolbar-btn" id="view-detail-back" title="Back to Views">← <span>Views</span></button>
+                <div class="view-detail-toolbar-actions">
+                  <button type="button" class="reader-toolbar-btn" id="view-detail-add-claims">＋ <span>Add Claims</span></button>
+                  <button type="button" class="reader-toolbar-btn" id="view-detail-edit">✎ <span>Edit</span></button>
+                  <button type="button" class="reader-toolbar-btn danger-action" id="view-detail-delete">× <span>Delete</span></button>
+                </div>
+              </div>
+              <header class="view-reader-head">
+                <div><span class="claim-badge" id="view-detail-type">wiki</span><span class="view-project-label" id="view-detail-project"></span></div>
+                <h2 id="view-detail-title"></h2>
+                <p id="view-detail-purpose"></p>
+              </header>
+              <form class="view-detail-editor" id="view-detail-editor" hidden>
+                <label>Title<input id="view-edit-title" maxlength="200" required /></label>
+                <label>Project<select id="view-edit-project"><option value="">Standalone View</option></select></label>
+                <label>Format<select id="view-edit-type"><option value="wiki">Wiki</option><option value="article">Article</option><option value="graph">Claim graph</option></select></label>
+                <label class="view-edit-purpose">Purpose<textarea id="view-edit-purpose" rows="3" maxlength="2000" required></textarea></label>
+                <section class="view-block-editor-shell" id="view-block-editor-shell">
+                  <div class="view-block-editor-head"><strong>Document blocks</strong><div><button type="button" id="view-add-heading">＋ Heading</button><button type="button" id="view-add-paragraph">＋ Paragraph</button></div></div>
+                  <div class="view-block-editor" id="view-block-editor"></div>
+                </section>
+                <div class="view-edit-actions"><button type="button" id="view-edit-cancel">Cancel</button><button class="primary-action" type="submit" id="view-edit-save">Save changes</button></div>
+              </form>
+              <div class="view-reader-claims" id="view-detail-claims"></div>
+              <small class="knowledge-status" id="view-detail-status" role="status"></small>
+            </section>
+            <div id="view-index-workspace">
+            <section class="incoming-tray" id="view-incoming-tray" hidden>
+              <div class="incoming-tray-head"><div><strong id="view-incoming-title">Incoming Claims · 0</strong><small>Claims remain global; this View controls their organization.</small></div><button type="button" class="incoming-clear-action" id="view-add-claims">Clear</button></div>
+              <div class="incoming-items" id="view-incoming-items"></div>
+            </section>
+            <form class="view-create-card" id="view-form">
+              <div class="draft-card-head"><div><strong>Create a View</strong><small>Choose a form, then organize the incoming Claims.</small></div></div>
+              <div class="view-title-field"><label for="view-title">Title</label><input id="view-title" maxlength="200" placeholder="e.g. Qwen architecture evolution" required /></div>
+              <div class="view-type-field"><label for="view-type">Format</label><select id="view-type" aria-label="View type">
+                  <option value="wiki">Wiki</option>
+                  <option value="article">Article</option>
+                  <option value="graph">Claim graph</option>
+                </select></div>
+              <div class="view-project-field"><label for="view-project">Project</label><select id="view-project"><option value="">Standalone View</option></select></div>
+              <div class="view-purpose-field"><label for="view-purpose">Purpose</label><textarea id="view-purpose" rows="2" maxlength="2000" placeholder="What should this View help someone understand?" required></textarea></div>
+              <div class="view-create-actions"><button class="primary-action" type="submit" id="view-create">Create View</button></div>
+            </form>
+            <small class="knowledge-status" id="views-status" role="status"></small>
+            <div class="views-list" id="views-list"></div>
+            </div>
+          </div>
+        </section>
+
         <section class="hero panel-view" id="create-panel">
           <div class="panel">
             <div class="knowledge-panel-head">
               <div>
-                <div class="knowledge-panel-label">Artifacts</div>
-                <small>Each Artifact carries its own Purpose while reusing global knowledge.</small>
+                <div class="knowledge-panel-label">Projects</div>
+                <small>Each Project carries its own Purpose while reusing global knowledge.</small>
               </div>
             </div>
             <form class="artifact-form" id="artifact-form">
@@ -267,7 +422,7 @@
                 <label for="artifact-purpose">Purpose</label>
                 <textarea id="artifact-purpose" maxlength="4000" rows="4" placeholder="What should this work understand, decide, or create?" required></textarea>
               </div>
-              <button type="submit" id="artifact-create">Create Artifact</button>
+              <button type="submit" id="artifact-create">Create Project</button>
             </form>
             <div class="knowledge-status" id="artifact-status" role="status"></div>
             <div class="artifact-list" id="artifact-list"></div>
@@ -542,24 +697,41 @@
               <p>Select results in the main workspace to review them here.</p>
             </div>
           </section>
+          <section class="review-section evidence-selection-overview" id="evidence-selection-overview" hidden>
+            <div class="review-section-head">
+              <span class="context-label">Selection profile</span>
+              <small id="evidence-profile-summary">0 items</small>
+            </div>
+            <div class="context-metrics evidence-profile-metrics">
+              <div><strong id="evidence-profile-sources">0</strong><span>Sources</span></div>
+              <div><strong id="evidence-profile-text">0</strong><span>Text</span></div>
+              <div><strong id="evidence-profile-snapshots">0</strong><span>Snapshots</span></div>
+              <div><strong id="evidence-profile-linked">0</strong><span>In Claims</span></div>
+            </div>
+          </section>
           <section class="review-section review-actions" id="review-actions-section">
             <label class="context-label" for="collect-artifact">Collection target</label>
             <select id="collect-artifact">
-              <option value="">Library only</option>
+              <option value="">Sources only</option>
             </select>
             <div class="context-action-row">
               <button class="context-primary-action" type="button" id="context-collect-selected">Add selected Sources</button>
             </div>
             <small id="context-action-status" role="status" aria-live="polite"></small>
           </section>
+          <section class="review-section" id="review-stage-actions" hidden>
+            <span class="context-label">Next stage</span>
+            <button class="context-primary-action" type="button" id="review-stage-advance" disabled>Continue</button>
+            <small id="review-stage-status" role="status"></small>
+          </section>
           <section class="review-section review-knowledge" id="review-knowledge-section" hidden>
             <div class="review-section-head"><span class="context-label">Evidence</span><label class="master-select"><input type="checkbox" id="evidence-select-all" /> Select all</label></div>
             <small id="evidence-selection-location">Select text in the Source reader.</small>
             <blockquote id="evidence-selection-quote" hidden></blockquote>
             <img id="evidence-snapshot-preview" alt="Selected Source region" hidden />
-            <label class="context-label" for="evidence-artifact">Attach to Artifact</label>
-            <select id="evidence-artifact"><option value="">Library only</option></select>
-            <button class="context-primary-action" type="button" id="create-evidence" disabled>Create Evidence in Library</button>
+            <label class="context-label" for="evidence-artifact">Attach to Project</label>
+            <select id="evidence-artifact"><option value="">Evidence only</option></select>
+            <button class="context-primary-action" type="button" id="create-evidence" disabled>Create Evidence</button>
             <div class="review-evidence-list" id="review-evidence-list"></div>
             <div class="review-section-head"><span class="context-label">Annotation</span><small id="annotation-target-label">Source</small></div>
             <textarea id="annotation-body" rows="3" placeholder="Add a note, question, interpretation, or warning…"></textarea>
@@ -579,10 +751,10 @@
             </div>
             <div class="chat-context-compact">
               <span id="chat-context-summary">No context attached</span>
-              <button type="button" id="chat-context-add">Add selection</button>
+              <button type="button" id="chat-context-add">Add to context</button>
               <button type="button" id="chat-context-clear">Clear</button>
-              <small id="chat-context-status" role="status"></small>
             </div>
+            <small class="chat-context-status" id="chat-context-status" role="status"></small>
             <div class="chat-context-tray" id="chat-context-tray"></div>
             <div class="context-chat" id="context-chat"></div>
           </section>
@@ -630,12 +802,12 @@
     <section class="evidence-quick-editor" id="evidence-quick-editor" hidden>
       <div class="evidence-quick-head"><strong id="evidence-quick-title">Evidence</strong><small id="evidence-quick-kind"></small></div>
       <p id="evidence-quick-preview"></p>
-      <label>Destination<select id="evidence-quick-artifact"><option value="">Library only</option></select></label>
+      <label>Destination<select id="evidence-quick-artifact"><option value="">Evidence only</option></select></label>
       <label>Tags<input id="evidence-quick-tags" placeholder="Comma-separated" /></label>
       <label>Annotation<textarea id="evidence-quick-annotation" rows="2" placeholder="Optional note, question, or warning"></textarea></label>
       <div class="evidence-quick-actions"><button type="button" id="evidence-quick-discard">Discard</button><button type="button" id="evidence-quick-save">Save</button></div>
       <small id="evidence-quick-status" role="status"></small>
     </section>
-    <script src="app.js?v=20260802a"></script>
+    <script src="app.js?v=20260809h"></script>
   </body>
 </html>

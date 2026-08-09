@@ -35,11 +35,73 @@ _TAGGABLE_ENTITY_TABLES = {
     "source": "sources",
     "evidence": "evidence",
     "artifact": "artifacts",
+    "claim": "claims",
 }
+_CLAIM_BASES = {
+    "premise", "observation", "reported", "inference",
+    "hypothesis", "prediction", "judgment",
+}
+_CLAIM_STANDINGS = {"unassessed", "consensus", "disputed"}
+_CLAIM_LIFECYCLES = {"active", "withdrawn", "superseded"}
+_VIEW_TYPES = {"wiki", "article", "graph"}
+_VIEW_BLOCK_TYPES = {"heading", "paragraph", "claim"}
+_EVIDENCE_CLAIM_STANCES = {
+    "supports", "challenges", "qualifies", "contextualizes",
+}
+_CLAIM_BASIS_TO_STORAGE = {
+    "background": "premise",
+    "premise": "premise",
+    "observation": "reported",
+    "reported": "reported",
+    "inference": "inference",
+    "hypothesis": "inference",
+    "prediction": "inference",
+    "judgment": "inference",
+}
+_CLAIM_BASIS_FROM_STORAGE = {
+    "premise": "background",
+    "observation": "reported",
+    "reported": "reported",
+    "inference": "inference",
+    "hypothesis": "inference",
+    "prediction": "inference",
+    "judgment": "inference",
+}
+_EVIDENCE_STANCE_TO_STORAGE = {
+    "supports": "supports",
+    "contradicts": "challenges",
+    "challenges": "challenges",
+    "limits": "qualifies",
+    "qualifies": "qualifies",
+    "contextualizes": "qualifies",
+}
+_EVIDENCE_STANCE_FROM_STORAGE = {
+    "supports": "supports",
+    "challenges": "contradicts",
+    "qualifies": "limits",
+    "contextualizes": "limits",
+}
+_CLAIM_RELATION_TYPES = {"supports", "contradicts", "related"}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _claim_basis_for_storage(value: Any) -> str:
+    basis = str(value or "reported").strip().lower()
+    try:
+        return _CLAIM_BASIS_TO_STORAGE[basis]
+    except KeyError as error:
+        raise ValueError("unsupported Claim basis") from error
+
+
+def _evidence_stance_for_storage(value: Any) -> str:
+    stance = str(value or "supports").strip().lower()
+    try:
+        return _EVIDENCE_STANCE_TO_STORAGE[stance]
+    except KeyError as error:
+        raise ValueError("unsupported Evidence–Claim stance") from error
 
 
 def _quote_matches_capture(quote: str, captured_text: str) -> bool:
@@ -196,6 +258,97 @@ def _connect(path: Path) -> sqlite3.Connection:
                 PRIMARY KEY (entity_type, entity_id, tag_id)
             );
 
+            CREATE TABLE IF NOT EXISTS claims (
+                id TEXT PRIMARY KEY,
+                current_revision_id TEXT NOT NULL,
+                basis TEXT NOT NULL CHECK(basis IN (
+                    'premise', 'observation', 'reported', 'inference',
+                    'hypothesis', 'prediction', 'judgment'
+                )),
+                standing TEXT NOT NULL DEFAULT 'unassessed' CHECK(standing IN (
+                    'unassessed', 'consensus', 'disputed'
+                )),
+                lifecycle TEXT NOT NULL DEFAULT 'active' CHECK(lifecycle IN (
+                    'active', 'withdrawn', 'superseded'
+                )),
+                created_via TEXT NOT NULL DEFAULT 'manual',
+                capability_version TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                intentionally_ungrounded INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS claim_revisions (
+                id TEXT PRIMARY KEY,
+                claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                statement TEXT NOT NULL,
+                change_note TEXT NOT NULL DEFAULT '',
+                created_by TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS evidence_claim_links (
+                evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+                claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                stance TEXT NOT NULL CHECK(stance IN (
+                    'supports', 'challenges', 'qualifies', 'contextualizes'
+                )),
+                rationale TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (evidence_id, claim_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS claim_relations (
+                subject_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                object_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                relation_type TEXT NOT NULL CHECK(relation_type IN (
+                    'supports', 'contradicts', 'related'
+                )),
+                rationale TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (subject_claim_id, object_claim_id, relation_type),
+                CHECK(subject_claim_id <> object_claim_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS artifact_claims (
+                artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+                claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (artifact_id, claim_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS views (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                view_type TEXT NOT NULL CHECK(view_type IN ('wiki', 'article', 'graph')),
+                purpose TEXT NOT NULL DEFAULT '',
+                artifact_id TEXT NOT NULL DEFAULT '',
+                graph_state_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS view_claims (
+                view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
+                claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                ordinal INTEGER NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (view_id, claim_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS review_proposals (
+                id TEXT PRIMARY KEY,
+                proposal_type TEXT NOT NULL DEFAULT 'claim',
+                status TEXT NOT NULL DEFAULT 'awaiting_review',
+                capability_version TEXT NOT NULL,
+                model TEXT NOT NULL DEFAULT '',
+                scope_json TEXT NOT NULL DEFAULT '{}',
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_captures_source
             ON source_captures(source_id, captured_at DESC);
             CREATE INDEX IF NOT EXISTS idx_evidence_source
@@ -204,6 +357,16 @@ def _connect(path: Path) -> sqlite3.Connection:
             ON annotations(target_type, target_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_entity_tags_entity
             ON entity_tags(entity_type, entity_id);
+            CREATE INDEX IF NOT EXISTS idx_claims_updated_at
+            ON claims(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_claim_revisions_claim
+            ON claim_revisions(claim_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_evidence_claim_claim
+            ON evidence_claim_links(claim_id);
+            CREATE INDEX IF NOT EXISTS idx_review_proposals_status
+            ON review_proposals(status, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_view_claims_claim
+            ON view_claims(claim_id);
             """
         )
         evidence_columns = {
@@ -245,17 +408,168 @@ def _connect(path: Path) -> sqlite3.Connection:
                 "ALTER TABLE source_captures ADD COLUMN "
                 "extraction_version INTEGER NOT NULL DEFAULT 1"
             )
+        claim_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(claims)").fetchall()
+        }
+        if "intentionally_ungrounded" not in claim_columns:
+            connection.execute(
+                "ALTER TABLE claims ADD COLUMN "
+                "intentionally_ungrounded INTEGER NOT NULL DEFAULT 0"
+            )
+        claim_relation_schema = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'claim_relations'"
+        ).fetchone()["sql"]
+        if "'related'" not in claim_relation_schema:
+            connection.executescript(
+                """
+                ALTER TABLE claim_relations RENAME TO claim_relations_legacy;
+                CREATE TABLE claim_relations (
+                    subject_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                    object_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                    relation_type TEXT NOT NULL CHECK(
+                        relation_type IN ('supports', 'contradicts', 'related')
+                    ),
+                    rationale TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (subject_claim_id, object_claim_id, relation_type),
+                    CHECK(subject_claim_id <> object_claim_id)
+                );
+                INSERT INTO claim_relations
+                    (subject_claim_id, object_claim_id, relation_type, rationale, created_at)
+                SELECT subject_claim_id, object_claim_id, relation_type,
+                       rationale, created_at
+                FROM claim_relations_legacy
+                WHERE relation_type IN ('supports', 'contradicts');
+                DROP TABLE claim_relations_legacy;
+                """
+            )
+        view_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(views)").fetchall()
+        }
+        if "artifact_id" not in view_columns:
+            connection.execute(
+                "ALTER TABLE views ADD COLUMN artifact_id TEXT NOT NULL DEFAULT ''"
+            )
+        view_schema = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'views'"
+        ).fetchone()["sql"]
+        if "'article'" not in view_schema:
+            connection.executescript(
+                """
+                ALTER TABLE view_claims RENAME TO view_claims_legacy;
+                ALTER TABLE views RENAME TO views_legacy;
+                CREATE TABLE views (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    view_type TEXT NOT NULL CHECK(view_type IN ('wiki', 'article', 'graph')),
+                    purpose TEXT NOT NULL DEFAULT '',
+                    artifact_id TEXT NOT NULL DEFAULT '',
+                    graph_state_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO views
+                    (id, title, view_type, purpose, artifact_id, graph_state_json,
+                     created_at, updated_at)
+                SELECT id, title,
+                       CASE
+                         WHEN view_type = 'graph' THEN 'graph'
+                         WHEN view_type = 'wiki' THEN 'wiki'
+                         ELSE 'article'
+                       END,
+                       purpose, artifact_id, '{}', created_at, updated_at
+                FROM views_legacy;
+                CREATE TABLE view_claims (
+                    view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
+                    claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL,
+                    added_at TEXT NOT NULL,
+                    PRIMARY KEY (view_id, claim_id)
+                );
+                INSERT INTO view_claims (view_id, claim_id, ordinal, added_at)
+                SELECT view_id, claim_id, ordinal, added_at FROM view_claims_legacy;
+                DROP TABLE view_claims_legacy;
+                DROP TABLE views_legacy;
+                CREATE INDEX IF NOT EXISTS idx_view_claims_claim ON view_claims(claim_id);
+                """
+            )
+        else:
+            view_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(views)").fetchall()
+            }
+            if "graph_state_json" not in view_columns:
+                connection.execute(
+                    "ALTER TABLE views ADD COLUMN graph_state_json TEXT NOT NULL DEFAULT '{}'"
+                )
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS view_blocks (
+                id TEXT PRIMARY KEY,
+                view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
+                block_type TEXT NOT NULL CHECK(block_type IN ('heading', 'paragraph', 'claim')),
+                content TEXT NOT NULL DEFAULT '',
+                claim_id TEXT REFERENCES claims(id) ON DELETE SET NULL,
+                ordinal INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_view_blocks_view
+            ON view_blocks(view_id, ordinal);
+            """
+        )
+        document_views = connection.execute(
+            "SELECT id, view_type, purpose FROM views WHERE view_type IN ('wiki', 'article')"
+        ).fetchall()
+        for document_view in document_views:
+            has_blocks = connection.execute(
+                "SELECT 1 FROM view_blocks WHERE view_id = ? LIMIT 1",
+                (document_view["id"],),
+            ).fetchone()
+            if has_blocks:
+                continue
+            now = _now()
+            default_heading = "Overview" if document_view["view_type"] == "wiki" else "Article"
+            connection.execute(
+                "INSERT INTO view_blocks "
+                "(id, view_id, block_type, content, claim_id, ordinal, created_at, updated_at) "
+                "VALUES (?, ?, 'heading', ?, NULL, 0, ?, ?)",
+                (uuid4().hex, document_view["id"], default_heading, now, now),
+            )
+            ordinal = 1
+            if document_view["view_type"] == "article" and document_view["purpose"]:
+                connection.execute(
+                    "INSERT INTO view_blocks "
+                    "(id, view_id, block_type, content, claim_id, ordinal, created_at, updated_at) "
+                    "VALUES (?, ?, 'paragraph', ?, NULL, ?, ?, ?)",
+                    (uuid4().hex, document_view["id"], document_view["purpose"], ordinal, now, now),
+                )
+                ordinal += 1
+            claim_rows = connection.execute(
+                "SELECT claim_id FROM view_claims WHERE view_id = ? ORDER BY ordinal",
+                (document_view["id"],),
+            ).fetchall()
+            for claim_row in claim_rows:
+                connection.execute(
+                    "INSERT INTO view_blocks "
+                    "(id, view_id, block_type, content, claim_id, ordinal, created_at, updated_at) "
+                    "VALUES (?, ?, 'claim', '', ?, ?, ?, ?)",
+                    (uuid4().hex, document_view["id"], claim_row["claim_id"], ordinal, now, now),
+                )
+                ordinal += 1
         annotation_schema = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'annotations'"
         ).fetchone()["sql"]
-        if "'artifact'" not in annotation_schema:
+        if "'claim'" not in annotation_schema:
             connection.executescript(
                 """
                 ALTER TABLE annotations RENAME TO annotations_legacy;
                 CREATE TABLE annotations (
                     id TEXT PRIMARY KEY,
                     target_type TEXT NOT NULL CHECK(
-                        target_type IN ('source', 'evidence', 'artifact')
+                        target_type IN ('source', 'evidence', 'artifact', 'claim')
                     ),
                     target_id TEXT NOT NULL,
                     body TEXT NOT NULL,
@@ -275,13 +589,13 @@ def _connect(path: Path) -> sqlite3.Connection:
         entity_tags_schema = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entity_tags'"
         ).fetchone()["sql"]
-        if "'annotation'" in entity_tags_schema:
+        if "'claim'" not in entity_tags_schema:
             connection.executescript(
                 """
                 ALTER TABLE entity_tags RENAME TO entity_tags_legacy;
                 CREATE TABLE entity_tags (
                     entity_type TEXT NOT NULL CHECK(
-                        entity_type IN ('source', 'evidence', 'artifact')
+                        entity_type IN ('source', 'evidence', 'artifact', 'claim')
                     ),
                     entity_id TEXT NOT NULL,
                     tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
@@ -292,7 +606,7 @@ def _connect(path: Path) -> sqlite3.Connection:
                     (entity_type, entity_id, tag_id, created_at)
                 SELECT entity_type, entity_id, tag_id, created_at
                 FROM entity_tags_legacy
-                WHERE entity_type IN ('source', 'evidence', 'artifact');
+                WHERE entity_type IN ('source', 'evidence', 'artifact', 'claim');
                 DROP TABLE entity_tags_legacy;
                 CREATE INDEX IF NOT EXISTS idx_entity_tags_entity
                 ON entity_tags(entity_type, entity_id);
@@ -322,6 +636,9 @@ def _connect(path: Path) -> sqlite3.Connection:
                 "(entity_type, entity_id, tag_id, created_at) VALUES ('evidence', ?, ?, ?)",
                 (row["id"], tag_id, _now()),
             )
+        connection.execute(
+            "UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'"
+        )
     return connection
 
 
@@ -1059,8 +1376,10 @@ def create_annotation(
     target_type = str(payload.get("target_type") or "").strip().lower()
     target_id = str(payload.get("target_id") or "").strip()
     body = str(payload.get("body") or "").strip()
-    if target_type not in {"source", "evidence", "artifact"}:
-        raise ValueError("annotation target must be a Source, Evidence, or Artifact")
+    if target_type not in {"source", "evidence", "artifact", "claim"}:
+        raise ValueError(
+            "annotation target must be a Source, Evidence, Artifact, or Claim"
+        )
     if not body:
         raise ValueError("annotation body is required")
     table = _TAGGABLE_ENTITY_TABLES[target_type]
@@ -1083,6 +1402,714 @@ def create_annotation(
         "id": annotation_id, "target_type": target_type, "target_id": target_id,
         "body": body, "origin": "user", "created_at": now, "updated_at": now,
     }
+
+
+def list_evidence(path: Path | None = None) -> list[dict[str, Any]]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT evidence.*, sources.title AS source_title,
+                   sources.provider AS source_provider,
+                   COUNT(DISTINCT evidence_claim_links.claim_id) AS claim_count
+            FROM evidence
+            JOIN sources ON sources.id = evidence.source_id
+            LEFT JOIN evidence_claim_links
+              ON evidence_claim_links.evidence_id = evidence.id
+            GROUP BY evidence.id
+            ORDER BY evidence.created_at DESC
+            """
+        ).fetchall()
+        ids = [row["id"] for row in rows]
+        tags = _tags_by_entity(connection, "evidence", ids)
+        annotations = _annotation_rows(connection, "evidence", ids)
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["has_snapshot"] = bool(item.pop("snapshot_path", ""))
+        item.pop("anchor_json", None)
+        item["tags"] = tags.get(item["id"], [])
+        item["annotations"] = annotations.get(item["id"], [])
+        result.append(item)
+    return result
+
+
+def _claim_payload(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    revision = connection.execute(
+        "SELECT * FROM claim_revisions WHERE id = ?", (row["current_revision_id"],)
+    ).fetchone()
+    evidence_rows = connection.execute(
+        """
+        SELECT evidence_claim_links.*, evidence.evidence_type, evidence.quote,
+               evidence.locator, evidence.source_id, sources.title AS source_title
+        FROM evidence_claim_links
+        JOIN evidence ON evidence.id = evidence_claim_links.evidence_id
+        JOIN sources ON sources.id = evidence.source_id
+        WHERE evidence_claim_links.claim_id = ?
+        ORDER BY evidence_claim_links.created_at
+        """,
+        (row["id"],),
+    ).fetchall()
+    artifact_rows = connection.execute(
+        """
+        SELECT artifacts.id, artifacts.title FROM artifact_claims
+        JOIN artifacts ON artifacts.id = artifact_claims.artifact_id
+        WHERE artifact_claims.claim_id = ? ORDER BY artifact_claims.added_at
+        """,
+        (row["id"],),
+    ).fetchall()
+    relations = connection.execute(
+        """
+        SELECT * FROM claim_relations
+        WHERE subject_claim_id = ? OR object_claim_id = ?
+        ORDER BY created_at
+        """,
+        (row["id"], row["id"]),
+    ).fetchall()
+    revisions = connection.execute(
+        "SELECT * FROM claim_revisions WHERE claim_id = ? ORDER BY created_at",
+        (row["id"],),
+    ).fetchall()
+    tags = _tags_by_entity(connection, "claim", [row["id"]]).get(row["id"], [])
+    annotations = _annotation_rows(connection, "claim", [row["id"]]).get(row["id"], [])
+    claim = dict(row)
+    claim["basis"] = _CLAIM_BASIS_FROM_STORAGE.get(claim["basis"], "inference")
+    claim["review_state"] = (
+        "disputed" if claim.get("standing") == "disputed" else "accepted"
+    )
+    evidence_payloads = []
+    for item in evidence_rows:
+        evidence_item = dict(item)
+        evidence_item["stance"] = _EVIDENCE_STANCE_FROM_STORAGE.get(
+            evidence_item["stance"], "limits"
+        )
+        evidence_payloads.append(evidence_item)
+    return {
+        **claim,
+        "statement": revision["statement"],
+        "current_revision": dict(revision),
+        "revisions": [dict(item) for item in revisions],
+        "evidence": evidence_payloads,
+        "artifacts": [dict(item) for item in artifact_rows],
+        "relations": [dict(item) for item in relations],
+        "tags": tags,
+        "annotations": annotations,
+    }
+
+
+def list_claims(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            "SELECT * FROM claims ORDER BY updated_at DESC"
+        ).fetchall()
+        return [_claim_payload(connection, row) for row in rows]
+
+
+def get_claim(claim_id: str, path: Path | None = None) -> dict[str, Any]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        row = connection.execute("SELECT * FROM claims WHERE id = ?", (claim_id,)).fetchone()
+        if row is None:
+            raise ValueError("Claim not found")
+        return _claim_payload(connection, row)
+
+
+def create_claim(payload: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    statement = _clean_text(payload.get("statement"), 4000)
+    if not statement:
+        raise ValueError("Claim statement is required")
+    requested_basis = str(payload.get("basis") or "reported").strip().lower()
+    basis = _claim_basis_for_storage(requested_basis)
+    review_state = str(payload.get("review_state") or "accepted").strip().lower()
+    if review_state not in {"accepted", "disputed"}:
+        raise ValueError("unsupported Claim review state")
+    standing = "disputed" if review_state == "disputed" else "unassessed"
+    if "standing" in payload and "review_state" not in payload:
+        legacy_standing = str(payload.get("standing") or "unassessed").strip().lower()
+        if legacy_standing not in _CLAIM_STANDINGS:
+            raise ValueError("unsupported Claim standing")
+        standing = legacy_standing
+    evidence_links = payload.get("evidence") or []
+    artifact_ids = payload.get("artifact_ids") or []
+    if not isinstance(evidence_links, list) or not isinstance(artifact_ids, list):
+        raise ValueError("Claim links must be lists")
+    intentionally_ungrounded = bool(payload.get("intentionally_ungrounded"))
+    if not evidence_links and requested_basis == "background":
+        intentionally_ungrounded = True
+    if not evidence_links and not intentionally_ungrounded:
+        raise ValueError(
+            "Claim requires Evidence or an explicit intentionally ungrounded decision"
+        )
+    now = _now()
+    claim_id = uuid4().hex
+    revision_id = uuid4().hex
+    with _connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO claims
+                (id, current_revision_id, basis, standing, lifecycle,
+                 created_via, capability_version, model, intentionally_ungrounded,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                claim_id, revision_id, basis, standing,
+                _clean_text(payload.get("created_via") or "manual", 40),
+                _clean_text(payload.get("capability_version"), 100),
+                _clean_text(payload.get("model"), 200),
+                int(intentionally_ungrounded), now, now,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO claim_revisions
+                (id, claim_id, statement, change_note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                revision_id, claim_id, statement,
+                _clean_text(payload.get("change_note"), 1000),
+                _clean_text(payload.get("created_by") or "user", 40), now,
+            ),
+        )
+        for link in evidence_links:
+            if not isinstance(link, dict):
+                continue
+            evidence_id = str(link.get("evidence_id") or "")
+            stance = _evidence_stance_for_storage(link.get("stance"))
+            if connection.execute(
+                "SELECT id FROM evidence WHERE id = ?", (evidence_id,)
+            ).fetchone() is None:
+                raise ValueError("Evidence not found")
+            connection.execute(
+                """
+                INSERT INTO evidence_claim_links
+                    (evidence_id, claim_id, stance, rationale, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    evidence_id, claim_id, stance,
+                    _clean_text(link.get("rationale"), 2000), now,
+                ),
+            )
+        for artifact_id in dict.fromkeys(str(item) for item in artifact_ids if item):
+            if connection.execute(
+                "SELECT id FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone() is None:
+                raise ValueError("Artifact not found")
+            connection.execute(
+                "INSERT INTO artifact_claims (artifact_id, claim_id, added_at) VALUES (?, ?, ?)",
+                (artifact_id, claim_id, now),
+            )
+    tags = payload.get("tags") or []
+    if isinstance(tags, list) and tags:
+        set_entity_tags("claim", claim_id, tags, database_path)
+    return get_claim(claim_id, database_path)
+
+
+def revise_claim(
+    claim_id: str, payload: dict[str, Any], path: Path | None = None
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    statement = _clean_text(payload.get("statement"), 4000)
+    if not statement:
+        raise ValueError("Claim statement is required")
+    now = _now()
+    revision_id = uuid4().hex
+    with _connect(database_path) as connection:
+        if connection.execute(
+            "SELECT id FROM claims WHERE id = ?", (claim_id,)
+        ).fetchone() is None:
+            raise ValueError("Claim not found")
+        connection.execute(
+            """
+            INSERT INTO claim_revisions
+                (id, claim_id, statement, change_note, created_by, created_at)
+            VALUES (?, ?, ?, ?, 'user', ?)
+            """,
+            (revision_id, claim_id, statement, _clean_text(payload.get("change_note"), 1000), now),
+        )
+        updates = ["current_revision_id = ?", "updated_at = ?"]
+        values: list[Any] = [revision_id, now]
+        if "basis" in payload:
+            updates.append("basis = ?")
+            values.append(_claim_basis_for_storage(payload.get("basis")))
+        if "review_state" in payload:
+            review_state = str(payload.get("review_state") or "").strip().lower()
+            if review_state not in {"accepted", "disputed"}:
+                raise ValueError("unsupported Claim review state")
+            updates.append("standing = ?")
+            values.append("disputed" if review_state == "disputed" else "unassessed")
+        elif "standing" in payload:
+            value = str(payload.get("standing") or "").strip().lower()
+            if value not in _CLAIM_STANDINGS:
+                raise ValueError("unsupported Claim standing")
+            updates.append("standing = ?")
+            values.append(value)
+        values.append(claim_id)
+        connection.execute(
+            f"UPDATE claims SET {', '.join(updates)} WHERE id = ?", values
+        )
+    return get_claim(claim_id, database_path)
+
+
+def set_claim_lifecycle(
+    claim_id: str, lifecycle: str, path: Path | None = None
+) -> dict[str, Any]:
+    value = str(lifecycle or "").strip().lower()
+    if value not in _CLAIM_LIFECYCLES:
+        raise ValueError("unsupported Claim lifecycle")
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        cursor = connection.execute(
+            "UPDATE claims SET lifecycle = ?, updated_at = ? WHERE id = ?",
+            (value, _now(), claim_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError("Claim not found")
+    return get_claim(claim_id, database_path)
+
+
+def create_claim_relation(
+    payload: dict[str, Any], path: Path | None = None
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    subject_id = str(payload.get("subject_claim_id") or "").strip()
+    object_id = str(payload.get("object_claim_id") or "").strip()
+    relation_type = str(payload.get("relation_type") or "").strip().lower()
+    if not subject_id or not object_id or subject_id == object_id:
+        raise ValueError("Claim relation requires two different Claims")
+    if relation_type not in _CLAIM_RELATION_TYPES:
+        raise ValueError("unsupported Claim relation type")
+    rationale = _clean_text(payload.get("rationale"), 2000)
+    now = _now()
+    with _connect(database_path) as connection:
+        found = connection.execute(
+            "SELECT COUNT(*) AS count FROM claims WHERE id IN (?, ?)",
+            (subject_id, object_id),
+        ).fetchone()["count"]
+        if found != 2:
+            raise ValueError("Claim not found")
+        connection.execute(
+            """
+            INSERT INTO claim_relations
+                (subject_claim_id, object_claim_id, relation_type, rationale, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(subject_claim_id, object_claim_id, relation_type)
+            DO UPDATE SET rationale = excluded.rationale
+            """,
+            (subject_id, object_id, relation_type, rationale, now),
+        )
+    return {
+        "subject_claim_id": subject_id,
+        "object_claim_id": object_id,
+        "relation_type": relation_type,
+        "rationale": rationale,
+        "created_at": now,
+    }
+
+
+def create_claim_proposal(
+    payload: dict[str, Any], capability_version: str,
+    model: str = "", scope: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    statement = _clean_text(payload.get("statement"), 4000)
+    if not statement:
+        raise ValueError("Proposal statement is required")
+    proposal_payload = {
+        **payload,
+        "statement": statement,
+        "basis": _CLAIM_BASIS_FROM_STORAGE[
+            _claim_basis_for_storage(payload.get("basis"))
+        ],
+    }
+    proposal_payload.pop("standing", None)
+    proposal_payload["evidence"] = [
+        {
+            **link,
+            "stance": _EVIDENCE_STANCE_FROM_STORAGE[
+                _evidence_stance_for_storage(link.get("stance"))
+            ],
+        }
+        for link in (payload.get("evidence") or [])
+        if isinstance(link, dict)
+    ]
+    now = _now()
+    proposal_id = uuid4().hex
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        connection.execute(
+            """
+            INSERT INTO review_proposals
+                (id, capability_version, model, scope_json, payload_json,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                proposal_id, capability_version, _clean_text(model, 200),
+                json.dumps(scope or {}, ensure_ascii=False),
+                json.dumps(proposal_payload, ensure_ascii=False), now, now,
+            ),
+        )
+    return {
+        "id": proposal_id, "status": "awaiting_review",
+        "capability_version": capability_version, "model": model,
+        "scope": scope or {}, "payload": proposal_payload,
+        "created_at": now, "updated_at": now,
+    }
+
+
+def list_claim_proposals(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM review_proposals
+            WHERE proposal_type = 'claim' AND status = 'awaiting_review'
+            ORDER BY updated_at DESC
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["scope"] = json.loads(item.pop("scope_json"))
+            item["payload"] = json.loads(item.pop("payload_json"))
+            payload = item["payload"]
+            payload["basis"] = _CLAIM_BASIS_FROM_STORAGE[
+                _claim_basis_for_storage(payload.get("basis"))
+            ]
+            payload.pop("standing", None)
+            payload["evidence"] = [
+                {
+                    **link,
+                    "stance": _EVIDENCE_STANCE_FROM_STORAGE[
+                        _evidence_stance_for_storage(link.get("stance"))
+                    ],
+                }
+                for link in (payload.get("evidence") or [])
+                if isinstance(link, dict)
+            ]
+        except (TypeError, json.JSONDecodeError):
+            item["scope"], item["payload"] = {}, {}
+        result.append(item)
+    return result
+
+
+def accept_claim_proposal(
+    proposal_id: str, edits: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM review_proposals WHERE id = ? AND status = 'awaiting_review'",
+            (proposal_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError("Proposal not found")
+    try:
+        proposal_payload = json.loads(row["payload_json"])
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError("Proposal payload is invalid") from error
+    accepted_payload = {**proposal_payload, **(edits or {})}
+    accepted_payload.update({
+        "created_via": "ai_assisted",
+        "created_by": "user",
+        "capability_version": row["capability_version"],
+        "model": row["model"],
+    })
+    claim = create_claim(accepted_payload, database_path)
+    discard_claim_proposal(proposal_id, database_path)
+    return claim
+
+
+def discard_claim_proposal(proposal_id: str, path: Path | None = None) -> bool:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        cursor = connection.execute(
+            "DELETE FROM review_proposals WHERE id = ?", (proposal_id,)
+        )
+    return cursor.rowcount > 0
+
+
+def _view_payload(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    claim_rows = connection.execute(
+        """
+        SELECT claims.*, view_claims.ordinal
+        FROM view_claims
+        JOIN claims ON claims.id = view_claims.claim_id
+        WHERE view_claims.view_id = ?
+        ORDER BY view_claims.ordinal
+        """,
+        (row["id"],),
+    ).fetchall()
+    claims = []
+    for claim_row in claim_rows:
+        claim = _claim_payload(connection, claim_row)
+        claim["ordinal"] = claim_row["ordinal"]
+        claims.append(claim)
+    artifact = None
+    artifact_id = str(row["artifact_id"] or "")
+    if artifact_id:
+        artifact_row = connection.execute(
+            "SELECT id, title, purpose FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone()
+        artifact = dict(artifact_row) if artifact_row is not None else None
+    block_rows = connection.execute(
+        "SELECT id, block_type, content, claim_id, ordinal "
+        "FROM view_blocks WHERE view_id = ? ORDER BY ordinal",
+        (row["id"],),
+    ).fetchall()
+    payload = dict(row)
+    graph_state_raw = payload.pop("graph_state_json", "{}")
+    try:
+        graph_state = json.loads(graph_state_raw or "{}")
+    except json.JSONDecodeError:
+        graph_state = {}
+    return {
+        **payload,
+        "artifact": artifact,
+        "claims": claims,
+        "blocks": [dict(item) for item in block_rows],
+        "graph_state": graph_state if isinstance(graph_state, dict) else {},
+    }
+
+
+def _normalize_view_blocks(
+    raw_blocks: Any, claim_ids: list[str], view_type: str, purpose: str
+) -> list[dict[str, str]]:
+    if view_type == "graph":
+        return []
+    if raw_blocks is None:
+        blocks: list[dict[str, str]] = [{
+            "id": uuid4().hex,
+            "block_type": "heading",
+            "content": "Overview" if view_type == "wiki" else "Article",
+            "claim_id": "",
+        }]
+        if view_type == "article" and purpose:
+            blocks.append({
+                "id": uuid4().hex,
+                "block_type": "paragraph",
+                "content": purpose,
+                "claim_id": "",
+            })
+        blocks.extend({
+            "id": uuid4().hex,
+            "block_type": "claim",
+            "content": "",
+            "claim_id": claim_id,
+        } for claim_id in claim_ids)
+        return blocks
+    if not isinstance(raw_blocks, list):
+        raise ValueError("View blocks must be a list")
+    if len(raw_blocks) > 200:
+        raise ValueError("A View can contain at most 200 blocks")
+    normalized = []
+    available_claims = set(claim_ids)
+    for raw in raw_blocks:
+        if not isinstance(raw, dict):
+            raise ValueError("Each View block must be an object")
+        block_type = str(raw.get("block_type") or "").strip().lower()
+        if block_type not in _VIEW_BLOCK_TYPES:
+            raise ValueError("unsupported View block type")
+        content = _clean_text(raw.get("content"), 12000)
+        claim_id = str(raw.get("claim_id") or "").strip()
+        if block_type == "claim":
+            if claim_id not in available_claims:
+                raise ValueError("View block Claim is not linked to this View")
+            content = ""
+        elif not content:
+            raise ValueError("Heading and paragraph blocks require content")
+        normalized.append({
+            "id": str(raw.get("id") or uuid4().hex),
+            "block_type": block_type,
+            "content": content,
+            "claim_id": claim_id if block_type == "claim" else "",
+        })
+    if not normalized:
+        raise ValueError("Wiki and Article Views require at least one block")
+    return normalized
+
+
+def _replace_view_blocks(
+    connection: sqlite3.Connection, view_id: str,
+    blocks: list[dict[str, str]], now: str,
+) -> None:
+    connection.execute("DELETE FROM view_blocks WHERE view_id = ?", (view_id,))
+    connection.executemany(
+        "INSERT INTO view_blocks "
+        "(id, view_id, block_type, content, claim_id, ordinal, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)",
+        [
+            (
+                block["id"], view_id, block["block_type"], block["content"],
+                block["claim_id"], ordinal, now, now,
+            )
+            for ordinal, block in enumerate(blocks)
+        ],
+    )
+
+
+def list_views(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            "SELECT * FROM views ORDER BY updated_at DESC"
+        ).fetchall()
+        return [_view_payload(connection, row) for row in rows]
+
+
+def get_view(view_id: str, path: Path | None = None) -> dict[str, Any]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        row = connection.execute("SELECT * FROM views WHERE id = ?", (view_id,)).fetchone()
+        if row is None:
+            raise ValueError("View not found")
+        return _view_payload(connection, row)
+
+
+def create_view(payload: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    title = _clean_text(payload.get("title"), 200)
+    if not title:
+        raise ValueError("View title is required")
+    view_type = str(payload.get("view_type") or "wiki").strip().lower()
+    if view_type not in _VIEW_TYPES:
+        raise ValueError("unsupported View type")
+    purpose = _clean_text(payload.get("purpose"), 2000)
+    if not purpose:
+        raise ValueError("View purpose is required")
+    claim_ids = payload.get("claim_ids") or []
+    if not isinstance(claim_ids, list):
+        raise ValueError("View Claim links must be a list")
+    claim_ids = list(dict.fromkeys(str(item) for item in claim_ids if item))
+    if not claim_ids:
+        raise ValueError("Select at least one Claim for the View")
+    artifact_id = str(payload.get("artifact_id") or "").strip()
+    graph_state = payload.get("graph_state") or {}
+    if not isinstance(graph_state, dict):
+        raise ValueError("Graph state must be an object")
+    blocks = _normalize_view_blocks(payload.get("blocks"), claim_ids, view_type, purpose)
+    now = _now()
+    view_id = uuid4().hex
+    with _connect(database_path) as connection:
+        found = {
+            row["id"] for row in connection.execute(
+                f"SELECT id FROM claims WHERE id IN ({','.join('?' for _ in claim_ids)})",
+                claim_ids,
+            ).fetchall()
+        }
+        if len(found) != len(claim_ids):
+            raise ValueError("Claim not found")
+        if artifact_id and connection.execute(
+            "SELECT id FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone() is None:
+            raise ValueError("Project not found")
+        connection.execute(
+            """
+            INSERT INTO views
+                (id, title, view_type, purpose, artifact_id, graph_state_json,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                view_id, title, view_type,
+                purpose, artifact_id, json.dumps(graph_state), now, now,
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO view_claims (view_id, claim_id, ordinal, added_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (view_id, claim_id, ordinal, now)
+                for ordinal, claim_id in enumerate(claim_ids)
+            ],
+        )
+        _replace_view_blocks(connection, view_id, blocks, now)
+        row = connection.execute("SELECT * FROM views WHERE id = ?", (view_id,)).fetchone()
+        return _view_payload(connection, row)
+
+
+def update_view(
+    view_id: str, payload: dict[str, Any], path: Path | None = None
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        current = connection.execute(
+            "SELECT * FROM views WHERE id = ?", (view_id,)
+        ).fetchone()
+        if current is None:
+            raise ValueError("View not found")
+        title = _clean_text(payload.get("title", current["title"]), 200)
+        if not title:
+            raise ValueError("View title is required")
+        view_type = str(payload.get("view_type", current["view_type"])).strip().lower()
+        if view_type not in _VIEW_TYPES:
+            raise ValueError("unsupported View type")
+        purpose = _clean_text(payload.get("purpose", current["purpose"]), 2000)
+        if not purpose:
+            raise ValueError("View purpose is required")
+        artifact_id = str(payload.get("artifact_id", current["artifact_id"]) or "").strip()
+        if artifact_id and connection.execute(
+            "SELECT id FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone() is None:
+            raise ValueError("Project not found")
+        claim_ids = payload.get("claim_ids")
+        if claim_ids is not None:
+            if not isinstance(claim_ids, list):
+                raise ValueError("View Claim links must be a list")
+            claim_ids = list(dict.fromkeys(str(item) for item in claim_ids if item))
+            if not claim_ids:
+                raise ValueError("Select at least one Claim for the View")
+            found = {
+                row["id"] for row in connection.execute(
+                    f"SELECT id FROM claims WHERE id IN ({','.join('?' for _ in claim_ids)})",
+                    claim_ids,
+                ).fetchall()
+            }
+            if len(found) != len(claim_ids):
+                raise ValueError("Claim not found")
+            connection.execute("DELETE FROM view_claims WHERE view_id = ?", (view_id,))
+            now = _now()
+            connection.executemany(
+                "INSERT INTO view_claims (view_id, claim_id, ordinal, added_at) "
+                "VALUES (?, ?, ?, ?)",
+                [(view_id, claim_id, ordinal, now) for ordinal, claim_id in enumerate(claim_ids)],
+            )
+        else:
+            claim_ids = [
+                row["claim_id"] for row in connection.execute(
+                    "SELECT claim_id FROM view_claims WHERE view_id = ? ORDER BY ordinal",
+                    (view_id,),
+                ).fetchall()
+            ]
+        if "blocks" in payload or view_type != current["view_type"]:
+            blocks = _normalize_view_blocks(
+                payload.get("blocks"), claim_ids, view_type, purpose
+            )
+            _replace_view_blocks(connection, view_id, blocks, _now())
+        graph_state = payload.get("graph_state")
+        if graph_state is None:
+            try:
+                graph_state = json.loads(current["graph_state_json"] or "{}")
+            except (json.JSONDecodeError, KeyError):
+                graph_state = {}
+        if not isinstance(graph_state, dict):
+            raise ValueError("Graph state must be an object")
+        now = _now()
+        connection.execute(
+            "UPDATE views SET title = ?, view_type = ?, purpose = ?, artifact_id = ?, graph_state_json = ?, "
+            "updated_at = ? WHERE id = ?",
+            (title, view_type, purpose, artifact_id, json.dumps(graph_state), now, view_id),
+        )
+        row = connection.execute("SELECT * FROM views WHERE id = ?", (view_id,)).fetchone()
+        return _view_payload(connection, row)
+
+
+def delete_view(view_id: str, path: Path | None = None) -> bool:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        cursor = connection.execute("DELETE FROM views WHERE id = ?", (view_id,))
+    return cursor.rowcount > 0
 
 
 def list_tags(path: Path | None = None) -> list[dict[str, Any]]:

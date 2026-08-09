@@ -108,8 +108,8 @@ needed.
 
 ## 🌍 Read and Capture Sources
 
-Save search results to the global **Library**, then select **Inspect** to open
-the Source workspace:
+Save search results to **Sources**, then select **Inspect** to open the Source
+workspace:
 
 - PDFs retain their original pages and support text or region Evidence.
 - Web Sources open in a structured **Clean Reader**. Use **Original web** when
@@ -132,9 +132,29 @@ Start Knowte and open **Config → Knowte Web Companion**:
 5. Use the floating editor on the original page to choose a destination, add
    Tags or an Annotation, and Save or Discard without leaving the page.
 
-**Save page** stores the current webpage as a Source in the Library without
+**Save page** stores the current webpage as a Source without
 creating Evidence. It is useful when the page is worth retaining but no exact
 passage or region has been selected yet.
+
+Knowte's knowledge workflow uses separate workspaces:
+
+1. **Search** discovers candidates.
+2. **Sources** preserves and inspects selected material.
+3. **Evidence** reviews precise excerpts and snapshots across Sources.
+4. **Claims** turns selected Evidence into explicit, revisable propositions.
+5. **Views** turns selected Claims into a living Wiki, a composed Article, or
+   an interactive Claim graph. Views remain editable, retain provenance, and
+   can stand alone or belong to a Project.
+
+Moving forward is explicit: selected inputs appear in an **Incoming** tray in
+the next workspace. You can preview or remove them there, or return to their
+own workspace for deeper editing without losing the draft.
+
+Claims use three Bases: **Background** for accepted prior knowledge that may
+lack local Evidence, **Reported** for a proposition stated directly by
+Evidence, and **Inference** for a conclusion derived from Evidence. Evidence
+can Support, Contradict, or Limit a Claim. AI proposals remain pending until
+you Accept, Keep disputed, or Discard them.
 
 Chromium users load the folder from `chrome://extensions` with Developer mode
 enabled. Firefox users can load its `manifest.json` temporarily from
@@ -336,15 +356,14 @@ Node.js is only needed for the optional JavaScript syntax check.
 ## 🧭 Project Status
 
 Knowte is currently an alpha local-first research workspace. It supports
-discovery, a persistent Source Library, Artifact linking, Source inspection,
-Evidence, Annotations, Tags, and contextual AI review. The longer-term
-direction is an end-to-end system for digesting sources, distilling knowledge,
-and creating durable outputs.
+discovery, persistent Sources, Source inspection, Evidence, durable Claims and
+relations, saved Views, Project linking, Annotations, Tags, and contextual AI
+review. The longer-term direction is an end-to-end system for digesting
+sources, distilling knowledge, and creating durable outputs.
 
 Not implemented yet:
 
-- durable Claims and Claim relationships;
-- multi-source synthesis and user-review workflows;
+- generated View content and richer multi-source synthesis editing;
 - scheduled or recurring Plans;
 - authentication or multi-user isolation.
 

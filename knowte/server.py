@@ -6,6 +6,7 @@ from collections import Counter
 import functools
 import hashlib
 from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.resources import files as resource_files
 import json
 import os
 import re
@@ -39,20 +40,35 @@ from .knowledge import (
     KNOWLEDGE_DB_PATH,
     create_annotation,
     create_artifact,
+    accept_claim_proposal,
+    create_claim,
+    create_claim_relation,
+    create_claim_proposal,
+    create_view,
     create_evidence,
     delete_annotation,
+    discard_claim_proposal,
     delete_evidence,
+    delete_view,
     get_capture_file,
     get_snapshot_file,
     get_source,
     get_source_workspace,
+    get_view,
+    list_claim_proposals,
+    list_claims,
+    list_evidence,
     list_artifacts,
     list_tags,
     list_replay_sources,
     list_sources,
+    list_views,
     set_entity_tags,
     save_source,
+    revise_claim,
+    set_claim_lifecycle,
     store_capture,
+    update_view,
 )
 from .plans import PLANS_PATH, create_plan, delete_plan, list_plans, update_plan
 from .search import search_papers
@@ -80,6 +96,14 @@ Knowte distinguishes these objects:
 Use only the supplied context. Clearly distinguish what a Source or Evidence states from your own inference. Refer to supplied items by their type and index when useful. Be critical about relevance, authority, duplication, uncertainty, and missing coverage. Never claim that you changed the Library, an Artifact, or any other data.
 
 Return a JSON object with an `answer` string and a `recommendations` array. The answer may use Markdown. Each recommendation may contain `source_index`, `decision` (`add`, `skip`, or `inspect`), and `reason`."""
+
+_CLAIM_PROPOSAL_CAPABILITY = "claim-proposal-v1"
+
+
+def _claim_proposal_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath("claim_proposal.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _copilot_settings(config: dict[str, str]) -> tuple[str, float, int, dict]:
@@ -696,6 +720,30 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 {"sources": list_sources(self.knowledge_db_path)}
             )
             return
+        if parsed.path.rstrip("/") == "/api/evidence":
+            self._send_json({"evidence": list_evidence(self.knowledge_db_path)})
+            return
+        if parsed.path.rstrip("/") == "/api/claims":
+            self._send_json({"claims": list_claims(self.knowledge_db_path)})
+            return
+        if parsed.path.rstrip("/") == "/api/claim-proposals":
+            self._send_json(
+                {"proposals": list_claim_proposals(self.knowledge_db_path)}
+            )
+            return
+        if parsed.path.rstrip("/") == "/api/views":
+            self._send_json({"views": list_views(self.knowledge_db_path)})
+            return
+        view_match = re.fullmatch(r"/api/views/([0-9a-f]+)", parsed.path.rstrip("/"))
+        if view_match:
+            try:
+                self._send_json(get_view(view_match.group(1), self.knowledge_db_path))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "view_not_found", "message": str(error)},
+                    HTTPStatus.NOT_FOUND,
+                )
+            return
         workspace_match = re.fullmatch(
             r"/api/library/sources/([0-9a-f]+)/workspace",
             parsed.path.rstrip("/"),
@@ -1026,6 +1074,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         capture_match = re.fullmatch(
             r"/api/library/sources/([0-9a-f]+)/capture", route
         )
+        proposal_accept_match = re.fullmatch(
+            r"/api/claim-proposals/([0-9a-f]+)/accept", route
+        )
         if route not in {
             "/api/config",
             "/api/config/default-search-mode",
@@ -1036,6 +1087,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/library/sources/batch",
             "/api/review/chat",
             "/api/evidence",
+            "/api/claims",
+            "/api/claim-relations",
+            "/api/claim-proposals/generate",
+            "/api/views",
             "/api/tags/entity",
             "/api/annotations",
             "/api/companion/pairing",
@@ -1043,7 +1098,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/companion/captures",
             "/api/companion/commit",
             "/api/companion/theme",
-        } and not capture_match and not companion_confirm_match:
+        } and not capture_match and not companion_confirm_match and not proposal_accept_match:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -1052,6 +1107,18 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
         except json.JSONDecodeError:
             payload = {}
+        if proposal_accept_match:
+            try:
+                claim = accept_claim_proposal(
+                    proposal_accept_match.group(1), payload, self.knowledge_db_path
+                )
+                self._send_json(claim, HTTPStatus.CREATED)
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_claim_proposal", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
         if route == "/api/companion/pairing":
             self._send_json(
                 self.companion_store.create_pairing(str(payload.get("theme") or "auto")),
@@ -1192,6 +1259,151 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 self._send_json(
                     {"error": "invalid_annotation", "message": str(error)},
                     HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/claims":
+            try:
+                self._send_json(
+                    create_claim(payload, self.knowledge_db_path),
+                    HTTPStatus.CREATED,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_claim", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/claim-relations":
+            try:
+                self._send_json(
+                    create_claim_relation(payload, self.knowledge_db_path),
+                    HTTPStatus.CREATED,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_claim_relation", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/views":
+            try:
+                self._send_json(
+                    create_view(payload, self.knowledge_db_path),
+                    HTTPStatus.CREATED,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_view", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/claim-proposals/generate":
+            evidence_ids = payload.get("evidence_ids")
+            if not isinstance(evidence_ids, list):
+                evidence_ids = []
+            evidence_ids = list(dict.fromkeys(
+                str(item) for item in evidence_ids[:12] if item
+            ))
+            evidence_items = [
+                item for item in list_evidence(self.knowledge_db_path)
+                if item["id"] in evidence_ids
+            ]
+            if not evidence_items:
+                self._send_json(
+                    {
+                        "error": "evidence_required",
+                        "message": "Select at least one Evidence item.",
+                    },
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                config = load_config(self.config_path)
+                client = _client_from_config(config, require_embedding=False)
+                artifact = payload.get("artifact")
+                artifact = artifact if isinstance(artifact, dict) else {}
+                scope = {
+                    "kind": "selected_evidence",
+                    "evidence_ids": evidence_ids,
+                    "artifact_id": str(artifact.get("id") or ""),
+                    "artifact_title": str(artifact.get("title") or "")[:300],
+                }
+                evidence_context = [
+                    {
+                        "evidence_id": item["id"],
+                        "type": item["evidence_type"],
+                        "source_id": item["source_id"],
+                        "source_title": item["source_title"],
+                        "locator": item["locator"],
+                        "quote": item["quote"][:5000],
+                        "tags": [tag["name"] for tag in item.get("tags", [])],
+                    }
+                    for item in evidence_items
+                ]
+                request_payload = json.dumps(
+                    {
+                        "scope": scope,
+                        "artifact": {
+                            "title": str(artifact.get("title") or "")[:300],
+                            "purpose": str(artifact.get("purpose") or "")[:2000],
+                        },
+                        "evidence": evidence_context,
+                        "instruction": str(payload.get("instruction") or "")[:2000],
+                    },
+                    ensure_ascii=False,
+                )
+                result = client.chat_json(
+                    _claim_proposal_prompt(), request_payload,
+                    temperature=0.1, max_tokens=3000,
+                )
+                candidates = result.get("claims") if isinstance(result, dict) else []
+                if not isinstance(candidates, list):
+                    candidates = []
+                allowed_evidence = set(evidence_ids)
+                proposals = []
+                for candidate in candidates[:20]:
+                    if not isinstance(candidate, dict):
+                        continue
+                    links = []
+                    for link in candidate.get("evidence") or []:
+                        if not isinstance(link, dict):
+                            continue
+                        if str(link.get("evidence_id") or "") not in allowed_evidence:
+                            continue
+                        links.append(link)
+                    candidate = {**candidate, "evidence": links}
+                    try:
+                        proposals.append(create_claim_proposal(
+                            candidate,
+                            _CLAIM_PROPOSAL_CAPABILITY,
+                            config.get("ai_chat_model", ""),
+                            scope,
+                            self.knowledge_db_path,
+                        ))
+                    except ValueError:
+                        continue
+                if not proposals:
+                    raise AIError(
+                        "no_claim_proposals",
+                        "The model returned no valid Claim proposals.",
+                    )
+                snapshot = client.usage_snapshot()
+                latest_usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json(
+                    {
+                        "proposals": proposals,
+                        "summary": str(result.get("summary") or "")[:1000],
+                        "usage": latest_usage,
+                    },
+                    HTTPStatus.CREATED,
+                )
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error)},
+                    HTTPStatus.BAD_GATEWAY,
                 )
             return
         if route == "/api/config/default-search-mode":
@@ -1423,6 +1635,30 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 evidence_context.append(context_item)
             artifact = payload.get("artifact")
             artifact_context = artifact if isinstance(artifact, dict) else {}
+            selected_claims = payload.get("claims")
+            if not isinstance(selected_claims, list):
+                selected_claims = []
+            claim_context = []
+            for item in selected_claims[:12]:
+                if not isinstance(item, dict):
+                    continue
+                claim_context.append({
+                    "id": str(item.get("id") or "")[:80],
+                    "statement": str(item.get("statement") or "")[:4000],
+                    "basis": str(item.get("basis") or "")[:30],
+                    "review_state": str(item.get("review_state") or "accepted")[:30],
+                    "lifecycle": str(item.get("lifecycle") or "")[:30],
+                    "evidence": [
+                        {
+                            "stance": str(link.get("stance") or "")[:30],
+                            "source_title": str(link.get("source_title") or "")[:300],
+                            "locator": str(link.get("locator") or "")[:300],
+                            "quote": str(link.get("quote") or "")[:3000],
+                        }
+                        for link in item.get("evidence", [])[:12]
+                        if isinstance(link, dict)
+                    ],
+                })
             conversation = payload.get("conversation")
             if not isinstance(conversation, list):
                 conversation = []
@@ -1463,6 +1699,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         },
                         "selected_sources": source_context,
                         "selected_evidence": evidence_context,
+                        "selected_claims": claim_context,
                         "recent_conversation": conversation_context,
                     },
                     ensure_ascii=False,
@@ -1748,6 +1985,45 @@ class KnowteHandler(SimpleHTTPRequestHandler):
 
     def do_PUT(self):
         parsed = urlparse(self.path)
+        view_match = re.fullmatch(r"/api/views/([0-9a-f]+)", parsed.path.rstrip("/"))
+        if view_match:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length) if length > 0 else b""
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                self._send_json(
+                    update_view(
+                        view_match.group(1), payload, self.knowledge_db_path
+                    )
+                )
+            except (json.JSONDecodeError, ValueError) as error:
+                self._send_json(
+                    {"error": "invalid_view", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        claim_match = re.fullmatch(r"/api/claims/([0-9a-f]+)", parsed.path.rstrip("/"))
+        if claim_match:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length) if length > 0 else b""
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                if "lifecycle" in payload and "statement" not in payload:
+                    claim = set_claim_lifecycle(
+                        claim_match.group(1), payload.get("lifecycle"),
+                        self.knowledge_db_path,
+                    )
+                else:
+                    claim = revise_claim(
+                        claim_match.group(1), payload, self.knowledge_db_path
+                    )
+                self._send_json(claim)
+            except (json.JSONDecodeError, ValueError) as error:
+                self._send_json(
+                    {"error": "invalid_claim", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
         prefix = "/api/plans/"
         if not parsed.path.startswith(prefix):
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -1776,11 +2052,31 @@ class KnowteHandler(SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
+        view_match = re.fullmatch(r"/api/views/([0-9a-f]+)", parsed.path.rstrip("/"))
+        if view_match:
+            deleted = delete_view(view_match.group(1), self.knowledge_db_path)
+            self._send_json(
+                {"deleted": deleted},
+                HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND,
+            )
+            return
         companion_match = re.fullmatch(
             r"/api/companion/inbox/([0-9a-f]+)", parsed.path.rstrip("/")
         )
         if companion_match:
             deleted = self.companion_store.remove(companion_match.group(1))
+            self._send_json(
+                {"deleted": deleted},
+                HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND,
+            )
+            return
+        proposal_match = re.fullmatch(
+            r"/api/claim-proposals/([0-9a-f]+)", parsed.path.rstrip("/")
+        )
+        if proposal_match:
+            deleted = discard_claim_proposal(
+                proposal_match.group(1), self.knowledge_db_path
+            )
             self._send_json(
                 {"deleted": deleted},
                 HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND,

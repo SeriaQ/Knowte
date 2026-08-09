@@ -10,7 +10,12 @@ from unittest.mock import MagicMock, patch
 from knowte import usage
 from knowte import search as search_module
 from knowte.models import Paper
-from knowte.knowledge import create_artifact, save_source
+from knowte.knowledge import (
+    create_artifact,
+    create_evidence,
+    save_source,
+    store_capture,
+)
 from knowte.server import create_server
 
 
@@ -418,6 +423,107 @@ class SearchApiTests(unittest.TestCase):
         self.assertIn("local-first system", client.chat_json.call_args.args[0])
         self.assertEqual(client.chat_json.call_args.kwargs["temperature"], 0.2)
         self.assertEqual(client.chat_json.call_args.kwargs["extra_parameters"], {"top_p": 0.9})
+
+    def test_claim_proposal_survives_restart_until_accept(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            usage_path = temp_path / "usage.json"
+            source, _, _ = save_source(
+                {
+                    "title": "Qwen report",
+                    "url": "https://example.test/qwen",
+                    "source": "Web",
+                },
+                path=database_path,
+            )
+            workspace = store_capture(
+                source["id"],
+                {
+                    "url": "https://example.test/qwen",
+                    "media_type": "text/html",
+                    "sha256": "claim-proposal-source",
+                    "raw_path": str(temp_path / "source.html"),
+                    "segments": [
+                        "Qwen uses grouped-query attention for efficient inference."
+                    ],
+                    "locators": ["Architecture"],
+                },
+                database_path,
+            )
+            evidence = create_evidence(
+                {
+                    "segment_id": workspace["segments"][0]["id"],
+                    "quote": "Qwen uses grouped-query attention",
+                    "start_offset": 0,
+                    "end_offset": len("Qwen uses grouped-query attention"),
+                },
+                database_path,
+            )
+            client = MagicMock()
+            client.chat_json.return_value = {
+                "claims": [{
+                    "statement": "Qwen uses grouped-query attention.",
+                    "basis": "reported",
+                    "evidence": [{
+                        "evidence_id": evidence["id"],
+                        "stance": "supports",
+                        "rationale": "The report states this directly.",
+                    }],
+                    "tags": ["Qwen"],
+                    "rationale": "Atomic statement grounded in the report.",
+                    "caveats": [],
+                }],
+                "summary": "One grounded Claim proposed.",
+            }
+            client.usage_snapshot.return_value = {
+                "chat_requests": 1,
+                "chat_tokens": 64,
+                "embedding_requests": 0,
+                "embedding_tokens": 0,
+            }
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(
+                usage, "USAGE_DIR", temp_path
+            ), patch.object(usage, "USAGE_PATH", usage_path):
+                generate_server = create_server("127.0.0.1", 0, config_path)
+                generated_status, generated = self._request(
+                    generate_server,
+                    "POST",
+                    "/api/claim-proposals/generate",
+                    json.dumps({"evidence_ids": [evidence["id"]]}),
+                )
+
+                # A new server instance models a page reload or Knowte restart.
+                reload_server = create_server("127.0.0.1", 0, config_path)
+                reload_status, reloaded = self._request(
+                    reload_server, "GET", "/api/claim-proposals"
+                )
+
+                proposal_id = generated["proposals"][0]["id"]
+                accept_server = create_server("127.0.0.1", 0, config_path)
+                accept_status, accepted = self._request(
+                    accept_server,
+                    "POST",
+                    f"/api/claim-proposals/{proposal_id}/accept",
+                    json.dumps({"review_state": "disputed"}),
+                )
+
+                final_server = create_server("127.0.0.1", 0, config_path)
+                final_status, final = self._request(
+                    final_server, "GET", "/api/claim-proposals"
+                )
+
+        self.assertEqual(generated_status, 201)
+        self.assertEqual(reload_status, 200)
+        self.assertEqual(len(reloaded["proposals"]), 1)
+        self.assertEqual(reloaded["proposals"][0]["status"], "awaiting_review")
+        self.assertEqual(accept_status, 201)
+        self.assertEqual(accepted["created_via"], "ai_assisted")
+        self.assertEqual(accepted["review_state"], "disputed")
+        self.assertEqual(accepted["evidence"][0]["evidence_id"], evidence["id"])
+        self.assertEqual(final_status, 200)
+        self.assertEqual(final["proposals"], [])
 
     def test_cached_find_more_does_not_increment_paper_usage(self):
         def papers(prefix, source):
