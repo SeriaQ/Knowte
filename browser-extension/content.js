@@ -3,6 +3,53 @@
   globalThis.__knowteCompanionLoaded = true;
   const ext = globalThis.browser || chrome;
 
+  const isKnowteApp = () => document.documentElement.hasAttribute("data-knowte-app");
+  let selectionBubble = null;
+  let selectionArm = null;
+
+  const clearBrowserSelection = () => getSelection()?.removeAllRanges();
+
+  const removeSelectionBubble = () => {
+    selectionBubble?.remove();
+    selectionBubble = null;
+  };
+
+  const removeSelectionArm = () => {
+    selectionArm?.remove();
+    selectionArm = null;
+  };
+
+  const parsedBackground = (value) => {
+    const match = String(value || "").match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)/i);
+    if (!match) return null;
+    const alpha = match[4] === undefined ? 1 : Number(match[4]);
+    if (!Number.isFinite(alpha) || alpha < 0.18) return null;
+    return match.slice(1, 4).map(Number);
+  };
+
+  const backgroundTheme = (anchor, fallback = "auto") => {
+    const region = anchor || {};
+    const x = Math.max(0, Math.min(innerWidth - 1,
+      Number(region.x || 0) + Number(region.width || 0) / 2));
+    const y = Math.max(0, Math.min(innerHeight - 1,
+      Number(region.y || 0) + Math.max(1, Number(region.height || 0) / 2)));
+    let element = document.elementFromPoint(x, y);
+    while (element) {
+      const rgb = parsedBackground(getComputedStyle(element).backgroundColor);
+      if (rgb) {
+        const linear = rgb.map((channel) => {
+          const value = channel / 255;
+          return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+        return luminance > 0.36 ? "light" : "dark";
+      }
+      element = element.parentElement;
+    }
+    if (["light", "dark"].includes(fallback)) return fallback;
+    return globalThis.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+  };
+
   const visible = (element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
@@ -62,15 +109,111 @@
     };
   };
 
+  const editableSelection = (selection) => {
+    const node = selection?.anchorNode;
+    const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    return Boolean(element?.closest?.("input,textarea,[contenteditable=true],[role=textbox]"));
+  };
+
+  const showSelectionArm = () => {
+    removeSelectionArm();
+    const host = document.createElement("div");
+    host.id = "knowte-companion-selection-arm";
+    host.style.cssText = "all:initial;position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:2147483647;pointer-events:none";
+    const root = host.attachShadow({ mode: "closed" });
+    root.innerHTML = `
+      <style>:host{font:12px system-ui,sans-serif}.hint{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid rgba(84,224,193,.55);border-radius:999px;background:rgba(9,20,37,.94);color:#eef4ff;box-shadow:0 10px 34px rgba(0,0,0,.3);backdrop-filter:blur(14px)}.dot{width:7px;height:7px;border-radius:50%;background:#54e0c1;box-shadow:0 0 0 4px rgba(84,224,193,.13)}small{color:#9eacc0}</style>
+      <div class="hint"><span class="dot"></span><span>Select text</span><small>Esc to cancel</small></div>`;
+    document.documentElement.appendChild(host);
+    selectionArm = host;
+  };
+
+  const waitForTextSelection = () => new Promise((resolve, reject) => {
+    showSelectionArm();
+    const cleanup = () => {
+      removeSelectionArm();
+      document.removeEventListener("mouseup", selected, true);
+      document.removeEventListener("keydown", cancelled, true);
+    };
+    const selected = () => {
+      setTimeout(() => {
+        const selection = getSelection();
+        if (!selection || selection.isCollapsed || editableSelection(selection)) return;
+        try {
+          const payload = selectionPayload();
+          cleanup();
+          removeSelectionBubble();
+          resolve(payload);
+        } catch (_) {}
+      }, 0);
+    };
+    const cancelled = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      cleanup();
+      reject(new Error("Text selection cancelled."));
+    };
+    document.addEventListener("mouseup", selected, true);
+    document.addEventListener("keydown", cancelled, true);
+  });
+
+  const beginPreparedCapture = async (payload) => {
+    removeSelectionBubble();
+    const result = await ext.runtime.sendMessage({
+      type: "KNOWTE_COMPOSE_CAPTURE", payload: { ...payload, blocks: pageBlocks() }
+    });
+    if (!result?.ok) throw new Error(result?.message || "Could not open Knowte capture.");
+  };
+
+  const beginRegionCapture = async () => {
+    removeSelectionBubble();
+    clearBrowserSelection();
+    const result = await ext.runtime.sendMessage({ type: "KNOWTE_RUN_CAPTURE", mode: "snapshot" });
+    if (!result?.ok) throw new Error(result?.message || "Could not start region capture.");
+  };
+
+  const showSelectionBubble = (payload) => {
+    removeSelectionBubble();
+    const anchor = payload.anchor.popup;
+    const host = document.createElement("div");
+    host.id = "knowte-companion-selection-bubble";
+    host.dataset.knowteTheme = backgroundTheme({
+      ...anchor, y: anchor.y - Number(anchor.height || 0),
+    });
+    const left = Math.max(10, Math.min(innerWidth - 154, anchor.x + anchor.width / 2 - 77));
+    const top = Math.max(10, Math.min(innerHeight - 48, anchor.y + 7));
+    host.style.cssText = `all:initial;position:fixed;left:${left}px;top:${top}px;z-index:2147483647`;
+    const root = host.attachShadow({ mode: "closed" });
+    const logoUrl = ext.runtime.getURL("knowte_icon.png");
+    root.innerHTML = `
+      <style>
+        :host{--bubble-bg:rgba(9,20,37,.95);--bubble-text:#eef4ff;--bubble-line:rgba(145,160,184,.3);--bubble-border:rgba(84,224,193,.55);--bubble-hover:rgba(84,224,193,.15);font:12px system-ui,sans-serif}.bar{display:flex;align-items:center;overflow:hidden;border:1px solid var(--bubble-border);border-radius:10px;background:var(--bubble-bg);box-shadow:0 10px 34px rgba(0,0,0,.32);backdrop-filter:blur(14px)}.brand{display:flex;align-items:center;gap:6px;height:34px;padding:0 9px;color:var(--bubble-text);font-size:11px;font-weight:700}.brand img{width:16px;height:16px;object-fit:contain;filter:brightness(0) invert(1);opacity:.82}button{display:flex;align-items:center;gap:3px;height:34px;margin:0;padding:0 9px;border:0;border-left:1px solid var(--bubble-line);background:transparent;color:var(--bubble-text);cursor:pointer;font:700 11px system-ui,sans-serif}button:hover{background:var(--bubble-hover)}svg{width:14px;height:14px;fill:none;stroke:#54e0c1;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.plus{color:#54e0c1;font-size:14px}:host([data-knowte-theme="light"]){--bubble-bg:rgba(248,251,255,.96);--bubble-text:#172642;--bubble-line:rgba(30,55,95,.18);--bubble-border:rgba(31,142,120,.48);--bubble-hover:rgba(84,224,193,.19)}:host([data-knowte-theme="light"]) .bar{box-shadow:0 10px 30px rgba(30,55,90,.2)}:host([data-knowte-theme="light"]) .brand img{filter:none;opacity:.78}
+      </style>
+      <div class="bar">
+        <div class="brand"><img src="${logoUrl}" alt=""><span>Knowte</span></div>
+        <button class="text" type="button" title="Save selected text"><span class="plus">+</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10M8 3v10M5.5 13h5"/></svg></button>
+        <button class="region" type="button" title="Capture a region"><span class="plus">+</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H2v4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button>
+      </div>`;
+    root.querySelector(".text").addEventListener("mousedown", (event) => event.preventDefault());
+    root.querySelector(".text").addEventListener("click", () => beginPreparedCapture(payload).catch(() => {}));
+    root.querySelector(".region").addEventListener("click", () => beginRegionCapture().catch(() => {}));
+    document.documentElement.appendChild(host);
+    selectionBubble = host;
+  };
+
   const showComposer = (payload, options) => {
     document.querySelector("#knowte-companion-composer")?.remove();
     const host = document.createElement("div");
     host.id = "knowte-companion-composer";
-    host.dataset.knowteTheme = ["light", "dark"].includes(options.theme)
-      ? options.theme : "auto";
     const anchor = payload.anchor?.popup || payload.anchor?.region || {
       x: innerWidth / 2 - 170, y: innerHeight / 2 - 120, width: 0, height: 0
     };
+    host.dataset.knowteTheme = backgroundTheme(
+      payload.anchor?.popup
+        ? { ...anchor, y: anchor.y - Number(anchor.height || 0) }
+        : anchor,
+      options.theme,
+    );
     const left = Math.max(12, Math.min(innerWidth - 356, anchor.x));
     const top = Math.max(12, Math.min(innerHeight - 390, anchor.y + 8));
     host.style.cssText = `all:initial;position:fixed;left:${left}px;top:${top}px;z-index:2147483647`;
@@ -176,9 +319,19 @@
 
   ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== "KNOWTE_CAPTURE") return undefined;
+    if (isKnowteApp()) {
+      sendResponse({ __knowte_internal: true });
+      return false;
+    }
     (async () => {
       const payload = { kind: message.mode, source: pageSource(), blocks: pageBlocks() };
-      if (message.mode === "text") Object.assign(payload, selectionPayload());
+      if (message.mode === "text") {
+        try {
+          Object.assign(payload, selectionPayload());
+        } catch (_) {
+          Object.assign(payload, await waitForTextSelection());
+        }
+      }
       if (message.mode === "snapshot") {
         payload.anchor = {
           page_url: location.href,
@@ -193,7 +346,31 @@
 
   ext.runtime.onMessage.addListener((message) => {
     if (message?.type !== "KNOWTE_SHOW_COMPOSER") return undefined;
+    if (isKnowteApp()) {
+      document.querySelector("#knowte-companion-composer")?.remove();
+      return Promise.resolve({ shown: false, internal: true });
+    }
     showComposer(message.payload, message.options || {});
     return Promise.resolve({ shown: true });
   });
+
+  document.addEventListener("mouseup", (event) => {
+    if (isKnowteApp() || selectionArm || event.button !== 0) return;
+    setTimeout(() => {
+      const selection = getSelection();
+      if (!selection || selection.isCollapsed || editableSelection(selection)) {
+        removeSelectionBubble();
+        return;
+      }
+      try {
+        showSelectionBubble({ kind: "text", source: pageSource(), ...selectionPayload() });
+      } catch (_) {
+        removeSelectionBubble();
+      }
+    }, 0);
+  }, true);
+
+  document.addEventListener("mousedown", (event) => {
+    if (selectionBubble && event.target !== selectionBubble) removeSelectionBubble();
+  }, true);
 })();

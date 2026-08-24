@@ -80,6 +80,24 @@ def _clean(payload: dict[str, Any], existing: dict[str, Any] | None = None) -> d
     ]
     if not sources:
         sources = ["arxiv", "openalex", "semanticscholar"]
+    raw_actions = payload.get(
+        "search_actions",
+        existing.get("search_actions", []) if existing else [],
+    )
+    if not isinstance(raw_actions, list):
+        raw_actions = []
+    search_actions = []
+    for item in raw_actions[:5]:
+        if not isinstance(item, dict):
+            continue
+        action_query = str(item.get("query") or "").strip()[:500]
+        target = str(item.get("target") or "both").strip().lower()
+        if action_query and target in {"academic", "web", "both"}:
+            search_actions.append({
+                "query": action_query,
+                "target": target,
+                "purpose": str(item.get("purpose") or "").strip()[:500],
+            })
     created_at = existing.get("created_at", _now()) if existing else _now()
     return {
         "id": existing.get("id", uuid4().hex) if existing else uuid4().hex,
@@ -90,6 +108,7 @@ def _clean(payload: dict[str, Any], existing: dict[str, Any] | None = None) -> d
         "year_from": _year(payload.get("year_from", existing.get("year_from") if existing else None)),
         "year_to": _year(payload.get("year_to", existing.get("year_to") if existing else None)),
         "sources": list(dict.fromkeys(sources)),
+        "search_actions": search_actions if mode == "intelligent" else [],
         "created_at": created_at,
         "updated_at": _now(),
         "last_run_at": payload.get(

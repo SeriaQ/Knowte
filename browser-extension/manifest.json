@@ -1,10 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Knowte Web Companion",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Read on the original web and send Sources and Evidence to local Knowte.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{
+    "resources": ["knowte_icon.png"],
+    "matches": ["http://*/*", "https://*/*"]
+  }],
   "action": {
     "default_title": "Knowte Web Companion",
     "default_popup": "popup.html"

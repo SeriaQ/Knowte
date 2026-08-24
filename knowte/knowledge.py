@@ -82,6 +82,20 @@ _EVIDENCE_STANCE_FROM_STORAGE = {
     "contextualizes": "limits",
 }
 _CLAIM_RELATION_TYPES = {"supports", "contradicts", "related"}
+_CLAIM_SEARCH_STOPWORDS = {
+    "about", "after", "also", "and", "are", "been", "being", "between",
+    "can", "could", "does", "for", "from", "has", "have", "into", "its",
+    "may", "model", "models", "more", "not", "that", "the", "their",
+    "then", "these", "this", "through", "use", "used", "uses", "using",
+    "was", "were", "when", "which", "with", "would",
+}
+
+
+def _claim_search_tokens(value: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[\w.+-]{2,}", str(value or "").casefold())
+        if token not in _CLAIM_SEARCH_STOPWORDS
+    }
 
 
 def _now() -> str:
@@ -367,6 +381,49 @@ def _connect(path: Path) -> sqlite3.Connection:
             ON review_proposals(status, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_view_claims_claim
             ON view_claims(claim_id);
+
+            CREATE TABLE IF NOT EXISTS wiki_pages (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                parent_id TEXT REFERENCES wiki_pages(id) ON DELETE CASCADE,
+                summary TEXT NOT NULL DEFAULT '',
+                ordinal INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS wiki_page_claims (
+                page_id TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
+                claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                ordinal INTEGER NOT NULL DEFAULT 0,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (page_id, claim_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS wiki_revisions (
+                id TEXT PRIMARY KEY,
+                snapshot_json TEXT NOT NULL,
+                capability_version TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS project_documents (
+                id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                goal TEXT NOT NULL DEFAULT '',
+                content_json TEXT NOT NULL,
+                wiki_revision_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_wiki_pages_parent
+            ON wiki_pages(parent_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_wiki_page_claims_claim
+            ON wiki_page_claims(claim_id);
+            CREATE INDEX IF NOT EXISTS idx_project_documents_artifact
+            ON project_documents(artifact_id, updated_at DESC);
             """
         )
         evidence_columns = {
@@ -520,6 +577,40 @@ def _connect(path: Path) -> sqlite3.Connection:
             ON view_blocks(view_id, ordinal);
             """
         )
+        has_wiki = connection.execute(
+            "SELECT 1 FROM wiki_pages LIMIT 1"
+        ).fetchone()
+        if has_wiki is None:
+            legacy_wikis = connection.execute(
+                "SELECT id, title FROM views WHERE view_type = 'wiki' ORDER BY created_at"
+            ).fetchall()
+            now = _now()
+            for legacy_ordinal, legacy in enumerate(legacy_wikis):
+                page_id = uuid4().hex
+                summary_rows = connection.execute(
+                    "SELECT content FROM view_blocks WHERE view_id = ? "
+                    "AND block_type = 'paragraph' ORDER BY ordinal",
+                    (legacy["id"],),
+                ).fetchall()
+                summary = "\n\n".join(
+                    str(row["content"] or "").strip() for row in summary_rows
+                    if str(row["content"] or "").strip()
+                )[:12000]
+                connection.execute(
+                    "INSERT INTO wiki_pages "
+                    "(id, title, parent_id, summary, ordinal, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, ?, ?, ?, ?)",
+                    (page_id, legacy["title"], summary, legacy_ordinal, now, now),
+                )
+                claim_rows = connection.execute(
+                    "SELECT claim_id, ordinal FROM view_claims "
+                    "WHERE view_id = ? ORDER BY ordinal", (legacy["id"],),
+                ).fetchall()
+                connection.executemany(
+                    "INSERT INTO wiki_page_claims "
+                    "(page_id, claim_id, ordinal, added_at) VALUES (?, ?, ?, ?)",
+                    [(page_id, row["claim_id"], row["ordinal"], now) for row in claim_rows],
+                )
         document_views = connection.execute(
             "SELECT id, view_type, purpose FROM views WHERE view_type IN ('wiki', 'article')"
         ).fetchall()
@@ -1709,22 +1800,150 @@ def create_claim_relation(
     }
 
 
+def link_evidence_to_claim(
+    claim_id: str, evidence_links: list[dict[str, Any]],
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Attach reviewed Evidence–Claim stances without creating a duplicate Claim."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    if not claim_id or not evidence_links:
+        raise ValueError("Evidence link proposal requires a Claim and Evidence")
+    now = _now()
+    with _connect(database_path) as connection:
+        if connection.execute(
+            "SELECT id FROM claims WHERE id = ?", (claim_id,)
+        ).fetchone() is None:
+            raise ValueError("Claim not found")
+        for link in evidence_links:
+            if not isinstance(link, dict):
+                continue
+            evidence_id = _clean_text(link.get("evidence_id"), 80)
+            if connection.execute(
+                "SELECT id FROM evidence WHERE id = ?", (evidence_id,)
+            ).fetchone() is None:
+                raise ValueError("Evidence not found")
+            connection.execute(
+                """
+                INSERT INTO evidence_claim_links
+                    (evidence_id, claim_id, stance, rationale, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(evidence_id, claim_id)
+                DO UPDATE SET stance = excluded.stance,
+                              rationale = excluded.rationale
+                """,
+                (
+                    evidence_id, claim_id,
+                    _evidence_stance_for_storage(link.get("stance")),
+                    _clean_text(link.get("rationale"), 2000), now,
+                ),
+            )
+        connection.execute(
+            "UPDATE claims SET updated_at = ? WHERE id = ?", (now, claim_id)
+        )
+    return get_claim(claim_id, database_path)
+
+
+def find_related_claims(
+    text: str, tags: list[str] | None = None, limit: int = 20,
+    path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Bound comparison context locally; embeddings remain an optional index."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    tokens = _claim_search_tokens(text)
+    tag_tokens = {
+        item.casefold() for item in (tags or []) if isinstance(item, str) and item
+    }
+    with _connect(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT claims.id, revisions.statement, claims.basis,
+                   claims.standing, claims.lifecycle
+            FROM claims JOIN claim_revisions AS revisions
+              ON revisions.id = claims.current_revision_id
+            WHERE claims.lifecycle IN ('active', 'withdrawn', 'superseded')
+            """
+        ).fetchall()
+        claim_ids = [row["id"] for row in rows]
+        tags_by_claim = _tags_by_entity(connection, "claim", claim_ids)
+        evidence_rows = connection.execute(
+            """
+            SELECT links.claim_id, links.stance, evidence.source_id
+            FROM evidence_claim_links AS links
+            JOIN evidence ON evidence.id = links.evidence_id
+            """
+        ).fetchall()
+    grounding: dict[str, dict[str, Any]] = {}
+    for row in evidence_rows:
+        item = grounding.setdefault(row["claim_id"], {"sources": set(), "stances": []})
+        item["sources"].add(row["source_id"])
+        item["stances"].append(_EVIDENCE_STANCE_FROM_STORAGE.get(row["stance"], "limits"))
+    ranked = []
+    for row in rows:
+        claim_tags = [tag.get("name", "") for tag in tags_by_claim.get(row["id"], [])]
+        claim_tokens = _claim_search_tokens(
+            f"{row['statement']} {' '.join(claim_tags)}"
+        )
+        overlap = len(tokens & claim_tokens)
+        shared_tags = len(tag_tokens & {tag.casefold() for tag in claim_tags})
+        if overlap == 0 and shared_tags == 0:
+            continue
+        score = overlap + shared_tags * 4
+        if row["lifecycle"] != "active":
+            score *= 0.35
+        ground = grounding.get(row["id"], {"sources": set(), "stances": []})
+        ranked.append((score, {
+            "claim_id": row["id"],
+            "statement": row["statement"],
+            "basis": _CLAIM_BASIS_FROM_STORAGE.get(row["basis"], "inference"),
+            "review_state": "disputed" if row["standing"] == "disputed" else "accepted",
+            "lifecycle": row["lifecycle"],
+            "tags": claim_tags,
+            "grounding_source_count": len(ground["sources"]),
+        }))
+    ranked.sort(key=lambda item: (-item[0], item[1]["statement"].casefold()))
+    return [item for _, item in ranked[:max(1, min(int(limit), 40))]]
+
+
 def create_claim_proposal(
     payload: dict[str, Any], capability_version: str,
     model: str = "", scope: dict[str, Any] | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
-    statement = _clean_text(payload.get("statement"), 4000)
-    if not statement:
-        raise ValueError("Proposal statement is required")
-    proposal_payload = {
-        **payload,
-        "statement": statement,
-        "basis": _CLAIM_BASIS_FROM_STORAGE[
-            _claim_basis_for_storage(payload.get("basis"))
-        ],
-    }
+    operation = str(payload.get("operation") or "create_claim").strip().lower()
+    if operation not in {"create_claim", "link_evidence", "create_relation"}:
+        raise ValueError("Unsupported Claim proposal operation")
+    proposal_payload = {**payload, "operation": operation}
+    if operation == "create_claim":
+        statement = _clean_text(payload.get("statement"), 4000)
+        if not statement:
+            raise ValueError("Proposal statement is required")
+        proposal_payload.update({
+            "statement": statement,
+            "basis": _CLAIM_BASIS_FROM_STORAGE[
+                _claim_basis_for_storage(payload.get("basis"))
+            ],
+        })
+    elif operation == "link_evidence":
+        target_claim_id = _clean_text(payload.get("target_claim_id"), 80)
+        if not target_claim_id:
+            raise ValueError("Evidence link proposal requires a target Claim")
+        proposal_payload["target_claim_id"] = target_claim_id
+    else:
+        relation_type = str(payload.get("relation_type") or "").strip().lower()
+        if relation_type not in _CLAIM_RELATION_TYPES:
+            raise ValueError("unsupported Claim relation type")
+        proposal_payload.update({
+            "subject_claim_id": _clean_text(payload.get("subject_claim_id"), 80),
+            "object_claim_id": _clean_text(payload.get("object_claim_id"), 80),
+            "relation_type": relation_type,
+        })
     proposal_payload.pop("standing", None)
+    caveats = payload.get("caveats")
+    proposal_payload["caveats"] = [
+        _clean_text(caveat, 1000)
+        for caveat in (caveats if isinstance(caveats, list) else [])[:8]
+        if _clean_text(caveat, 1000)
+    ]
     proposal_payload["evidence"] = [
         {
             **link,
@@ -1759,6 +1978,109 @@ def create_claim_proposal(
     }
 
 
+def create_evidence_proposal(
+    payload: dict[str, Any], capability_version: str,
+    model: str = "", scope: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    source_id = _clean_text(payload.get("source_id"), 80)
+    segment_id = _clean_text(payload.get("segment_id"), 80)
+    quote = str(payload.get("quote") or "").strip()[:12000]
+    if not source_id or not segment_id or not quote:
+        raise ValueError("Evidence proposal requires Source, segment, and quote")
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        segment = connection.execute(
+            """
+            SELECT capture_segments.text, capture_segments.locator,
+                   source_captures.source_id
+            FROM capture_segments JOIN source_captures
+              ON source_captures.id = capture_segments.capture_id
+            WHERE capture_segments.id = ?
+            """, (segment_id,),
+        ).fetchone()
+    if segment is None or segment["source_id"] != source_id:
+        raise ValueError("Evidence proposal segment does not belong to Source")
+    if not _quote_matches_capture(quote, segment["text"]):
+        raise ValueError("Evidence proposal quote does not match captured Source")
+    caveats = payload.get("caveats")
+    proposal_payload = {
+        "source_id": source_id, "segment_id": segment_id,
+        "evidence_type": "text", "quote": quote,
+        "locator": _clean_text(payload.get("locator") or segment["locator"], 300),
+        "rationale": _clean_text(payload.get("rationale"), 2000),
+        "caveats": [
+            _clean_text(caveat, 1000)
+            for caveat in (caveats if isinstance(caveats, list) else [])[:8]
+            if _clean_text(caveat, 1000)
+        ],
+        "tags": [
+            _clean_text(tag, 100) for tag in (payload.get("tags") or [])[:12]
+            if _clean_text(tag, 100)
+        ],
+    }
+    now, proposal_id = _now(), uuid4().hex
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        connection.execute(
+            """
+            INSERT INTO review_proposals
+                (id, proposal_type, capability_version, model, scope_json,
+                 payload_json, created_at, updated_at)
+            VALUES (?, 'evidence', ?, ?, ?, ?, ?, ?)
+            """,
+            (proposal_id, capability_version, _clean_text(model, 200),
+             json.dumps(scope or {}, ensure_ascii=False),
+             json.dumps(proposal_payload, ensure_ascii=False), now, now),
+        )
+    return {"id": proposal_id, "proposal_type": "evidence",
+            "status": "awaiting_review", "capability_version": capability_version,
+            "model": model, "scope": scope or {}, "payload": proposal_payload,
+            "created_at": now, "updated_at": now}
+
+
+def list_evidence_proposals(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            """SELECT * FROM review_proposals
+               WHERE proposal_type = 'evidence' AND status = 'awaiting_review'
+               ORDER BY updated_at DESC"""
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["scope"] = json.loads(item.pop("scope_json"))
+            item["payload"] = json.loads(item.pop("payload_json"))
+        except (TypeError, json.JSONDecodeError):
+            item["scope"], item["payload"] = {}, {}
+        result.append(item)
+    return result
+
+
+def accept_evidence_proposal(
+    proposal_id: str, edits: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            """SELECT * FROM review_proposals WHERE id = ?
+               AND proposal_type = 'evidence' AND status = 'awaiting_review'""",
+            (proposal_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError("Evidence proposal not found")
+    payload = json.loads(row["payload_json"])
+    accepted = {**payload, **(edits or {})}
+    evidence = create_evidence(accepted, database_path)
+    tags = accepted.get("tags") or []
+    if tags:
+        evidence["tags"] = set_entity_tags(
+            "evidence", evidence["id"], tags, database_path
+        )
+    discard_claim_proposal(proposal_id, database_path)
+    return evidence
+
+
 def list_claim_proposals(path: Path | None = None) -> list[dict[str, Any]]:
     with _connect(path or KNOWLEDGE_DB_PATH) as connection:
         rows = connection.execute(
@@ -1775,9 +2097,10 @@ def list_claim_proposals(path: Path | None = None) -> list[dict[str, Any]]:
             item["scope"] = json.loads(item.pop("scope_json"))
             item["payload"] = json.loads(item.pop("payload_json"))
             payload = item["payload"]
-            payload["basis"] = _CLAIM_BASIS_FROM_STORAGE[
-                _claim_basis_for_storage(payload.get("basis"))
-            ]
+            if payload.get("operation", "create_claim") == "create_claim":
+                payload["basis"] = _CLAIM_BASIS_FROM_STORAGE[
+                    _claim_basis_for_storage(payload.get("basis"))
+                ]
             payload.pop("standing", None)
             payload["evidence"] = [
                 {
@@ -1812,6 +2135,18 @@ def accept_claim_proposal(
     except (TypeError, json.JSONDecodeError) as error:
         raise ValueError("Proposal payload is invalid") from error
     accepted_payload = {**proposal_payload, **(edits or {})}
+    operation = str(accepted_payload.get("operation") or "create_claim")
+    if operation == "link_evidence":
+        result = link_evidence_to_claim(
+            str(accepted_payload.get("target_claim_id") or ""),
+            accepted_payload.get("evidence") or [], database_path,
+        )
+        discard_claim_proposal(proposal_id, database_path)
+        return result
+    if operation == "create_relation":
+        result = create_claim_relation(accepted_payload, database_path)
+        discard_claim_proposal(proposal_id, database_path)
+        return result
     accepted_payload.update({
         "created_via": "ai_assisted",
         "created_by": "user",
@@ -2110,6 +2445,291 @@ def delete_view(view_id: str, path: Path | None = None) -> bool:
     with _connect(path or KNOWLEDGE_DB_PATH) as connection:
         cursor = connection.execute("DELETE FROM views WHERE id = ?", (view_id,))
     return cursor.rowcount > 0
+
+
+def _decode_review_proposal(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    try:
+        item["scope"] = json.loads(item.pop("scope_json"))
+        item["payload"] = json.loads(item.pop("payload_json"))
+    except (TypeError, json.JSONDecodeError):
+        item["scope"], item["payload"] = {}, {}
+    return item
+
+
+def get_wiki(path: Path | None = None) -> dict[str, Any]:
+    """Return the global Wiki plus its deterministic Claim graph."""
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        page_rows = connection.execute(
+            "SELECT * FROM wiki_pages ORDER BY parent_id, ordinal, title"
+        ).fetchall()
+        pages = []
+        organized_claim_ids: set[str] = set()
+        for row in page_rows:
+            claim_ids = [
+                item["claim_id"] for item in connection.execute(
+                    "SELECT claim_id FROM wiki_page_claims WHERE page_id = ? "
+                    "ORDER BY ordinal", (row["id"],),
+                ).fetchall()
+            ]
+            organized_claim_ids.update(claim_ids)
+            pages.append({**dict(row), "claim_ids": claim_ids})
+        claim_rows = connection.execute(
+            "SELECT * FROM claims ORDER BY updated_at DESC"
+        ).fetchall()
+        claims = [_claim_payload(connection, row) for row in claim_rows]
+        active_ids = {
+            claim["id"] for claim in claims if claim.get("lifecycle") == "active"
+        }
+        relation_rows = connection.execute(
+            "SELECT * FROM claim_relations ORDER BY created_at"
+        ).fetchall()
+        latest = connection.execute(
+            "SELECT * FROM wiki_revisions ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        revision = None
+        stale_claim_ids: list[str] = []
+        if latest is not None:
+            revision = dict(latest)
+            try:
+                snapshot = json.loads(revision.pop("snapshot_json"))
+            except (TypeError, json.JSONDecodeError):
+                snapshot = {}
+            revision["snapshot"] = snapshot
+            recorded = snapshot.get("claim_versions", {}) if isinstance(snapshot, dict) else {}
+            stale_claim_ids = [
+                claim["id"] for claim in claims
+                if claim["id"] in organized_claim_ids
+                and recorded.get(claim["id"]) != claim.get("updated_at")
+            ]
+        awaiting = connection.execute(
+            "SELECT COUNT(*) AS count FROM review_proposals "
+            "WHERE proposal_type = 'wiki_patch' AND status = 'awaiting_review'"
+        ).fetchone()["count"]
+    return {
+        "pages": pages,
+        "claims": claims,
+        "graph": {
+            "nodes": [claim for claim in claims if claim["id"] in active_ids],
+            "edges": [dict(row) for row in relation_rows
+                      if row["subject_claim_id"] in active_ids
+                      and row["object_claim_id"] in active_ids],
+        },
+        "unorganized_claim_ids": sorted(active_ids - organized_claim_ids),
+        "stale_claim_ids": stale_claim_ids,
+        "revision": revision,
+        "awaiting_review": awaiting,
+    }
+
+
+def create_wiki_proposal(
+    payload: dict[str, Any], capability_version: str, model: str = "",
+    scope: dict[str, Any] | None = None, path: Path | None = None,
+) -> dict[str, Any]:
+    raw_pages = payload.get("pages")
+    if not isinstance(raw_pages, list) or not raw_pages:
+        raise ValueError("Wiki proposal requires at least one Page")
+    if len(raw_pages) > 200:
+        raise ValueError("Wiki proposal has too many Pages")
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        valid_claim_ids = {
+            row["id"] for row in connection.execute("SELECT id FROM claims").fetchall()
+        }
+    pages = []
+    keys: set[str] = set()
+    for index, raw in enumerate(raw_pages):
+        if not isinstance(raw, dict):
+            raise ValueError("Each Wiki Page proposal must be an object")
+        key = _clean_text(raw.get("key") or f"page-{index + 1}", 100)
+        title = _clean_text(raw.get("title"), 200)
+        if not key or key in keys or not title:
+            raise ValueError("Wiki Page keys must be unique and titles are required")
+        keys.add(key)
+        claim_ids = list(dict.fromkeys(
+            str(item) for item in (raw.get("claim_ids") or []) if str(item)
+        ))
+        if any(claim_id not in valid_claim_ids for claim_id in claim_ids):
+            raise ValueError("Wiki proposal references an unknown Claim")
+        pages.append({
+            "key": key,
+            "title": title,
+            "parent_key": _clean_text(raw.get("parent_key"), 100),
+            "summary": _clean_text(raw.get("summary"), 12000),
+            "claim_ids": claim_ids,
+        })
+    for page in pages:
+        if page["parent_key"] and page["parent_key"] not in keys:
+            raise ValueError("Wiki proposal references an unknown parent Page")
+        if page["parent_key"] == page["key"]:
+            raise ValueError("Wiki Page cannot be its own parent")
+    parent_by_key = {page["key"]: page["parent_key"] for page in pages}
+    for start_key in keys:
+        visited: set[str] = set()
+        cursor = start_key
+        while cursor:
+            if cursor in visited:
+                raise ValueError("Wiki Page hierarchy contains a cycle")
+            visited.add(cursor)
+            cursor = parent_by_key.get(cursor, "")
+    proposal_payload = {
+        "summary": _clean_text(payload.get("summary"), 3000),
+        "pages": pages,
+        "gaps": [
+            _clean_text(item, 1000) for item in (payload.get("gaps") or [])[:20]
+            if _clean_text(item, 1000)
+        ],
+    }
+    now, proposal_id = _now(), uuid4().hex
+    with _connect(database_path) as connection:
+        connection.execute(
+            "INSERT INTO review_proposals "
+            "(id, proposal_type, capability_version, model, scope_json, payload_json, "
+            "created_at, updated_at) VALUES (?, 'wiki_patch', ?, ?, ?, ?, ?, ?)",
+            (proposal_id, capability_version, _clean_text(model, 200),
+             json.dumps(scope or {}, ensure_ascii=False),
+             json.dumps(proposal_payload, ensure_ascii=False), now, now),
+        )
+    return {
+        "id": proposal_id, "proposal_type": "wiki_patch",
+        "status": "awaiting_review", "capability_version": capability_version,
+        "model": model, "scope": scope or {}, "payload": proposal_payload,
+        "created_at": now, "updated_at": now,
+    }
+
+
+def list_wiki_proposals(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            "SELECT * FROM review_proposals WHERE proposal_type = 'wiki_patch' "
+            "AND status = 'awaiting_review' ORDER BY updated_at DESC"
+        ).fetchall()
+    return [_decode_review_proposal(row) for row in rows]
+
+
+def discard_wiki_proposal(
+    proposal_id: str, path: Path | None = None,
+) -> bool:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        cursor = connection.execute(
+            "DELETE FROM review_proposals WHERE id = ? "
+            "AND proposal_type = 'wiki_patch' AND status = 'awaiting_review'",
+            (proposal_id,),
+        )
+    return cursor.rowcount > 0
+
+
+def accept_wiki_proposal(
+    proposal_id: str, path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM review_proposals WHERE id = ? "
+            "AND proposal_type = 'wiki_patch' AND status = 'awaiting_review'",
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Wiki proposal not found")
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ValueError("Wiki proposal payload is invalid") from error
+        pages = payload.get("pages") or []
+        page_ids = {page["key"]: uuid4().hex for page in pages}
+        now = _now()
+        connection.execute("DELETE FROM wiki_pages")
+        for ordinal, page in enumerate(pages):
+            connection.execute(
+                "INSERT INTO wiki_pages "
+                "(id, title, parent_id, summary, ordinal, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (page_ids[page["key"]], page["title"],
+                 page_ids.get(page.get("parent_key") or ""), page.get("summary") or "",
+                 ordinal, now, now),
+            )
+            connection.executemany(
+                "INSERT INTO wiki_page_claims "
+                "(page_id, claim_id, ordinal, added_at) VALUES (?, ?, ?, ?)",
+                [(page_ids[page["key"]], claim_id, claim_ordinal, now)
+                 for claim_ordinal, claim_id in enumerate(page.get("claim_ids") or [])],
+            )
+        claim_versions = {
+            item["id"]: item["updated_at"] for item in connection.execute(
+                "SELECT id, updated_at FROM claims"
+            ).fetchall()
+        }
+        revision_id = uuid4().hex
+        snapshot = {"pages": pages, "claim_versions": claim_versions}
+        connection.execute(
+            "INSERT INTO wiki_revisions "
+            "(id, snapshot_json, capability_version, model, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (revision_id, json.dumps(snapshot, ensure_ascii=False),
+             row["capability_version"], row["model"], now),
+        )
+        connection.execute("DELETE FROM review_proposals WHERE id = ?", (proposal_id,))
+    return get_wiki(database_path)
+
+
+def save_project_document(
+    payload: dict[str, Any], path: Path | None = None,
+) -> dict[str, Any]:
+    artifact_id = str(payload.get("artifact_id") or "").strip()
+    title = _clean_text(payload.get("title"), 300)
+    content = payload.get("content")
+    if not artifact_id or not title or not isinstance(content, dict):
+        raise ValueError("Project, title, and Reading content are required")
+    now, document_id = _now(), uuid4().hex
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        if connection.execute(
+            "SELECT id FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone() is None:
+            raise ValueError("Project not found")
+        revision = connection.execute(
+            "SELECT id FROM wiki_revisions ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        connection.execute(
+            "INSERT INTO project_documents "
+            "(id, artifact_id, title, goal, content_json, wiki_revision_id, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (document_id, artifact_id, title,
+             _clean_text(payload.get("goal"), 2000),
+             json.dumps(content, ensure_ascii=False),
+             revision["id"] if revision else "", now, now),
+        )
+    return {
+        "id": document_id, "artifact_id": artifact_id, "title": title,
+        "goal": _clean_text(payload.get("goal"), 2000),
+        "content": content,
+        "wiki_revision_id": revision["id"] if revision else "",
+        "created_at": now, "updated_at": now,
+    }
+
+
+def list_project_documents(
+    artifact_id: str = "", path: Path | None = None,
+) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        if artifact_id:
+            rows = connection.execute(
+                "SELECT * FROM project_documents WHERE artifact_id = ? "
+                "ORDER BY updated_at DESC", (artifact_id,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT * FROM project_documents ORDER BY updated_at DESC"
+            ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["content"] = json.loads(item.pop("content_json"))
+        except (TypeError, json.JSONDecodeError):
+            item["content"] = {}
+        result.append(item)
+    return result
 
 
 def list_tags(path: Path | None = None) -> list[dict[str, Any]]:

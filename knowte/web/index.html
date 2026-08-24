@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-knowte-app>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260809i" />
+    <link rel="stylesheet" href="styles.css?v=20260823a" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -53,6 +53,10 @@
                   <button type="button" class="search-mode-option" data-search-mode="smart" aria-pressed="false">Intelligent</button>
                   <button type="button" class="search-mode-default" data-default-search-mode="intelligent" aria-label="Set Intelligent as the default search mode" aria-pressed="false" title="Set as default">☆</button>
                 </div>
+                <div class="search-mode-choice">
+                  <button type="button" class="search-mode-option" data-search-mode="import" aria-pressed="false">Import</button>
+                  <button type="button" class="search-mode-default" data-default-search-mode="import" aria-label="Set Import as the default search mode" aria-pressed="false" title="Set as default">☆</button>
+                </div>
               </div>
               <small id="search-mode-hint">Search providers directly with your keywords.</small>
             </div>
@@ -63,9 +67,44 @@
                 placeholder="Enter keywords, authors, or domains..."
                 aria-label="Enter research keywords"
               />
-              <button type="submit" id="search-submit">Search</button>
-              <button type="button" class="save-plan-btn" id="save-plan">Save Plan</button>
+              <div class="search-run-control">
+                <div class="search-run-actions">
+                  <button type="submit" id="search-submit">Search</button>
+                  <button type="button" class="save-plan-btn" id="discuss-search" hidden>Discuss</button>
+                  <button type="button" class="save-plan-btn" id="save-plan">Save Plan</button>
+                </div>
+                <label class="ai-action-model" id="search-model-control" hidden><span>Model</span><select id="search-model-select" aria-label="Model for Intelligent Search and discussion"></select></label>
+              </div>
             </form>
+            <section class="search-strategy" id="search-strategy" hidden aria-label="Search strategy">
+              <div class="search-strategy-head">
+                <div><strong>Search strategy</strong><small>Rank editable candidates; only the Top 5 run. Filters apply to every action.</small></div>
+                <button type="button" id="search-strategy-add">+ Add a new query</button>
+              </div>
+              <div id="search-strategy-list"></div>
+              <section class="search-strategy-waiting" id="search-strategy-waiting" hidden>
+                <div class="search-strategy-waiting-head"><strong>Waiting list</strong><small>Move candidates into the Top 5 before searching.</small></div>
+                <div id="search-strategy-waiting-list"></div>
+              </section>
+              <small id="search-strategy-status" role="status"></small>
+              <div class="search-strategy-stale" id="search-strategy-stale" hidden>
+                <span>The intent changed after this strategy was created.</span>
+                <div>
+                  <button type="button" id="search-strategy-use-anyway">Use current strategy</button>
+                  <button type="button" id="search-strategy-discuss-again">Discuss again</button>
+                </div>
+              </div>
+            </section>
+            <section class="search-import" id="search-import" hidden aria-label="Import third-party results">
+              <div class="search-import-head">
+                <div><strong>Import third-party results</strong><small>Paste links for a quick import, or structured output from an external LLM.</small></div>
+                <button type="button" id="copy-import-prompt">Copy import prompt</button>
+              </div>
+              <details class="import-prompt-preview"><summary>Preview prompt</summary><pre id="import-prompt-preview"></pre></details>
+              <label for="import-content">URLs, DOI/arXiv IDs, or structured JSON</label>
+              <textarea id="import-content" rows="9" placeholder="One URL, DOI, or arXiv ID per line — or paste the JSON returned by an external LLM."></textarea>
+              <div class="search-import-actions"><small id="import-status" role="status"></small><button type="button" id="parse-import">Parse results</button></div>
+            </section>
             <div class="intelligent-progress" id="intelligent-progress" hidden>
               <div class="intelligent-progress-head">
                 <div>Intelligent discovery</div>
@@ -75,7 +114,6 @@
                 <div class="intelligent-channel">
                   <strong>Academic</strong>
                   <div class="intelligent-stages" id="academic-stages">
-                    <span data-stage="expand">Semantic expansion</span>
                     <span data-stage="recall">Recall</span>
                     <span data-stage="embed">Semantic ranking</span>
                     <span data-stage="verify">LLM verify</span>
@@ -192,6 +230,7 @@
               <div class="results-actions">
                 <button class="find-more-btn" id="find-more" type="button" disabled>Find More</button>
                 <button class="abstract-toggle" id="abstract-toggle" type="button" aria-pressed="false">Hide abstracts</button>
+                <button class="scroll-top-btn" id="scroll-top" type="button" aria-label="Go to top of list">↑ Top</button>
                 <button class="stop-btn" id="stop-search" type="button" aria-label="Stop searching" disabled>Stop</button>
               </div>
               <label class="master-select"><input type="checkbox" id="results-select-all" /> Select all</label>
@@ -203,9 +242,6 @@
             </div>
 
             <div class="results" id="results" aria-live="polite"></div>
-            <div class="results-topline">
-              <button class="scroll-top-btn" id="scroll-top" type="button" aria-label="Go to top of list">↑ Top</button>
-            </div>
           </div>
         </section>
 
@@ -221,6 +257,13 @@
               <div class="library-toolbar-actions">
                 <button type="button" id="library-abstract-toggle" aria-pressed="false">Hide abstracts</button>
                 <label class="master-select library-master-select"><input type="checkbox" id="library-select-all" /> Select all</label>
+              </div>
+            </div>
+            <div class="source-evidence-proposer">
+              <input id="evidence-proposal-focus" type="text" placeholder="Focus for Evidence, e.g. Qwen long-context optimization" />
+              <div class="ai-run-control">
+                <button type="button" class="primary-action" id="propose-evidence" disabled>Propose Evidence via LLM</button>
+                <label class="ai-action-model"><span>Model</span><select id="evidence-model-select" aria-label="Model for Evidence proposals"></select></label>
               </div>
             </div>
             <div class="knowledge-status" id="library-status" role="status"></div>
@@ -262,6 +305,7 @@
                   <div class="knowledge-panel-label">Evidence</div>
                   <small>Precise excerpts and snapshots grounded in saved Sources.</small>
                 </div>
+                <label class="ai-action-model evidence-stage-model"><span>AI model</span><select id="claims-model-select" aria-label="Model for Claim proposals"></select></label>
               </div>
               <section class="handoff-return" id="evidence-handoff-return" hidden>
                 <div><strong>Adding Evidence to a Claim draft</strong><small>Your existing draft and incoming Evidence are preserved.</small></div>
@@ -273,13 +317,19 @@
                   <button type="button" class="primary-action" id="library-propose-claims" disabled>Propose Claims via LLM</button>
                 </div>
                 <div class="stage-toolbar-tools">
+                  <button class="review-queue-action" type="button" id="evidence-proposals-toggle" aria-controls="evidence-proposal-board" aria-expanded="false">Awaiting review · 0</button>
                   <label class="tag-filter-control">Tag<select id="evidence-tag-filter" aria-label="Filter Evidence by Tag"><option value="">All Tags</option></select></label>
                   <label class="master-select" title="Select all visible Evidence"><input type="checkbox" id="evidence-library-select-all" /> Select all</label>
                 </div>
               </div>
+              <label class="claim-proposal-focus"><span>Focus <small>optional</small></span><input id="claim-proposal-focus" type="text" maxlength="2000" placeholder="What should become durable knowledge from the selected Evidence?" /></label>
               <div class="knowledge-status" id="evidence-status" role="status"></div>
             </div>
             <div class="evidence-library-list" id="evidence-library-list"></div>
+            <section class="claim-proposal-board" id="evidence-proposal-board" hidden>
+              <div class="claim-section-head"><strong>Awaiting review</strong><small>AI-proposed quotations remain drafts until accepted.</small></div>
+              <div class="claim-proposal-list" id="evidence-proposal-list"></div>
+            </section>
           </div>
         </section>
 
@@ -300,12 +350,12 @@
                   <option value="related">related</option>
                 </select>
                 <button class="save-plan-btn stage-save-action" type="button" id="claims-relate" disabled>Create relation</button>
-                <button class="primary-action" type="button" id="claims-build-view" disabled>Build View</button>
+                <button class="primary-action" type="button" id="claims-build-view" disabled>Send to Wiki</button>
               </div>
               <div class="claims-toolbar-end">
                 <label class="tag-filter-control">Status<select id="claims-review-filter" aria-label="Filter Claims by review status"><option value="">All Claims</option><option value="accepted">Accepted</option><option value="disputed">Disputed</option></select></label>
                 <label class="tag-filter-control">Tag<select id="claims-tag-filter" aria-label="Filter Claims by Tag"><option value="">All Tags</option></select></label>
-                <button class="review-queue-action" type="button" id="claims-proposals-toggle">Review proposals · 0</button>
+                <button class="review-queue-action" type="button" id="claims-proposals-toggle" aria-controls="claim-proposal-board" aria-expanded="false">Awaiting review · 0</button>
                 <label class="master-select" title="Select all visible Claims"><input type="checkbox" id="claims-select-all" /> Select all</label>
               </div>
             </div>
@@ -337,6 +387,7 @@
               </div>
               <small id="claim-create-status" role="status"></small>
             </div>
+            <details class="claim-proposal-report" id="claim-proposal-report" hidden><summary id="claim-proposal-report-summary">Latest proposal run</summary><div id="claim-proposal-report-body"></div></details>
             <section class="claim-proposal-board" id="claim-proposal-board" hidden>
               <div class="claim-section-head"><strong>Awaiting review</strong><small>Kept until you Accept, Keep disputed, or Discard.</small></div>
               <div id="claim-proposal-list"></div>
@@ -351,10 +402,46 @@
             <div class="knowledge-panel-head">
               <div>
                 <div class="knowledge-panel-label">Views</div>
-                <small>Organize shared Claims into reusable forms for understanding and expression.</small>
+                <small>Maintain one global Wiki, explore its Claim graph, and generate purpose-specific Articles when needed.</small>
               </div>
             </div>
-            <section class="view-detail" id="view-detail" hidden>
+            <section class="wiki-workspace" id="wiki-workspace">
+              <div class="wiki-toolbar stage-toolbar">
+                <div class="wiki-mode-switch" role="group" aria-label="View mode">
+                  <button type="button" class="is-active" id="wiki-mode-wiki" aria-pressed="true">Wiki</button>
+                  <span aria-hidden="true"></span>
+                  <button type="button" id="wiki-mode-graph" aria-pressed="false">Graph</button>
+                </div>
+                <div class="stage-toolbar-tools">
+                  <label class="ai-action-model"><span>Model</span><select id="wiki-model-select" aria-label="Model for Wiki organization"></select></label>
+                  <button type="button" class="save-plan-btn stage-save-action" id="wiki-generate-reading">Generate Article</button>
+                  <button type="button" class="primary-action" id="wiki-organize">Organize with AI</button>
+                  <button type="button" class="review-queue-action" id="wiki-proposals-toggle" aria-expanded="false">Awaiting review · 0</button>
+                </div>
+              </div>
+              <section class="incoming-tray wiki-incoming" id="wiki-incoming-tray" hidden>
+                <div class="incoming-tray-head"><div><strong id="wiki-incoming-title">Incoming Claims · 0</strong><small>These Claims remain global and will be included in the next Wiki proposal.</small></div><button type="button" class="incoming-clear-action" id="wiki-incoming-clear">Clear</button></div>
+                <div class="incoming-items" id="wiki-incoming-items"></div>
+              </section>
+              <div class="wiki-health" id="wiki-health"></div>
+              <section class="wiki-main" id="wiki-main">
+                <nav class="wiki-tree" id="wiki-tree" aria-label="Wiki pages"></nav>
+                <article class="wiki-page" id="wiki-page"></article>
+              </section>
+              <section class="wiki-graph" id="wiki-graph" hidden></section>
+              <section class="wiki-proposal-review" id="wiki-proposal-review" hidden>
+                <div class="wiki-review-head"><div><strong>Awaiting review</strong><small>Compare the proposed complete Wiki structure before applying it.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-proposal-close">× <span>Close</span></button></div>
+                <div id="wiki-proposal-list"></div>
+              </section>
+              <section class="wiki-reading-composer" id="wiki-reading-composer" hidden>
+                <div class="wiki-review-head"><div><strong>Generate an Article</strong><small>The model selects relevant Claims across the global Wiki for one concrete goal.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-reading-close">× <span>Close</span></button></div>
+                <textarea id="wiki-reading-goal" rows="3" placeholder="What should this Article help you understand, decide, or explain?"></textarea>
+                <div class="wiki-reading-actions"><small id="wiki-reading-scope"></small><label class="ai-action-model"><span>Model</span><select id="article-model-select" aria-label="Model for Article generation"></select></label><button type="button" class="primary-action" id="wiki-reading-run">Generate</button></div>
+              </section>
+              <article class="wiki-reading" id="wiki-reading" hidden></article>
+              <small class="knowledge-status" id="wiki-status" role="status"></small>
+            </section>
+            <section class="view-detail legacy-views-compat" id="view-detail" hidden>
               <div class="view-detail-toolbar">
                 <button type="button" class="reader-toolbar-btn" id="view-detail-back" title="Back to Views">← <span>Views</span></button>
                 <div class="view-detail-toolbar-actions">
@@ -382,7 +469,7 @@
               <div class="view-reader-claims" id="view-detail-claims"></div>
               <small class="knowledge-status" id="view-detail-status" role="status"></small>
             </section>
-            <div id="view-index-workspace">
+            <div class="legacy-views-compat" id="view-index-workspace" hidden>
             <section class="incoming-tray" id="view-incoming-tray" hidden>
               <div class="incoming-tray-head"><div><strong id="view-incoming-title">Incoming Claims · 0</strong><small>Claims remain global; this View controls their organization.</small></div><button type="button" class="incoming-clear-action" id="view-add-claims">Clear</button></div>
               <div class="incoming-items" id="view-incoming-items"></div>
@@ -471,53 +558,16 @@
                 </div>
               </fieldset>
               <fieldset class="ai-config">
-                <legend>AI Models · OpenAI-compatible</legend>
-                <div class="config-row">
-                  <label for="ai-base-url">AI Base URL</label>
-                  <input type="text" id="ai-base-url" placeholder="https://provider.example/v1" autocomplete="off" />
-                  <small>Enter the API root ending in <code>/v1</code>, not the full <code>/chat/completions</code> path. Local services work too, for example <code>http://127.0.0.1:11434/v1</code>.</small>
+                <legend>AI Models</legend>
+                <div class="ai-profile-heading">
+                  <div><strong>Model profiles</strong><small>Add each model once, then assign it to the roles below.</small></div>
+                  <button type="button" id="ai-profile-add">+ Add model</button>
                 </div>
-                <div class="config-row">
-                  <label for="ai-api-key">AI API key</label>
-                  <div class="secret-input-row">
-                    <input type="password" id="ai-api-key" placeholder="Optional for local services" autocomplete="new-password" />
-                    <button type="button" class="secret-remove" id="ai-api-key-remove" hidden>Remove</button>
-                  </div>
-                  <small class="secret-remove-note" id="ai-api-key-remove-note" hidden>Removal pending. Select Save to apply.</small>
-                </div>
-                <div class="ai-model-grid">
-                  <div class="config-row">
-                    <label for="ai-chat-model">Language model</label>
-                    <input type="text" id="ai-chat-model" placeholder="Provider model ID" autocomplete="off" />
-                    <small>Used for search-query expansion and final relevance verification.</small>
-                    <label class="config-check">
-                      <input type="checkbox" id="ai-enable-thinking" />
-                      Enable Thinking
-                    </label>
-                  </div>
-                  <div class="config-row">
-                    <label for="ai-embedding-model">Embedding model</label>
-                    <input type="text" id="ai-embedding-model" placeholder="Provider embedding model ID" autocomplete="off" />
-                    <small>Optional but recommended. Used to rank academic titles and abstracts in batches; without it, Intelligent Search continues with LLM verification.</small>
-                  </div>
-                </div>
-                <details class="ai-embedding-details" id="ai-embedding-separate">
-                  <summary>Use a separate connection for embeddings</summary>
-                  <div class="ai-embedding-override" id="ai-embedding-override">
-                    <div class="config-row">
-                      <label for="ai-embedding-base-url">Embedding Base URL</label>
-                      <input type="text" id="ai-embedding-base-url" placeholder="https://embedding-provider.example/v1" autocomplete="off" />
-                    </div>
-                    <div class="config-row">
-                      <label for="ai-embedding-api-key">Embedding API key</label>
-                      <div class="secret-input-row">
-                        <input type="password" id="ai-embedding-api-key" placeholder="Optional for local services" autocomplete="new-password" />
-                        <button type="button" class="secret-remove" id="ai-embedding-api-key-remove" hidden>Remove</button>
-                      </div>
-                      <small class="secret-remove-note" id="ai-embedding-api-key-remove-note" hidden>Removal pending. Select Save to apply.</small>
-                    </div>
-                  </div>
-                </details>
+                <div class="ai-profile-list" id="ai-profile-list"></div>
+                <section class="ai-role-routing">
+                  <div class="ai-profile-heading"><div><strong>AI roles</strong><small>Each role names the exact configured model it will use.</small></div></div>
+                  <div class="ai-role-grid" id="ai-role-grid"></div>
+                </section>
                 <div class="config-subsection ai-search-settings">
                   <h3>Intelligent Search</h3>
                   <div class="ai-limits-grid">
@@ -530,12 +580,30 @@
                       <input type="number" id="ai-verify-concurrency" min="1" max="8" value="1" />
                     </div>
                     <div class="config-row">
-                      <label for="ai-timeout">AI request timeout (seconds)</label>
-                      <input type="number" id="ai-timeout" min="5" max="600" value="45" />
+                      <label for="ai-search-timeout">Search request timeout (seconds)</label>
+                      <input type="number" id="ai-search-timeout" min="5" max="600" value="45" />
                     </div>
                   </div>
                 </div>
-                <small class="ai-config-note">This connection is shared by Intelligent Search and Review Copilot. Keys stay in <code>~/.knowte/config.yml</code>, are exposed only as “configured / not configured”, and are never copied into Plans.</small>
+                <div class="config-subsection ai-stage-settings">
+                  <h3>Knowledge stages</h3>
+                  <div class="ai-stage-settings-grid">
+                    <div class="config-row">
+                      <label for="ai-stage-timeout">Stage request timeout (seconds)</label>
+                      <input type="number" id="ai-stage-timeout" min="5" max="600" value="45" />
+                      <small>Used by Review Copilot, Evidence, Claims, Wiki, and Article generation.</small>
+                    </div>
+                  </div>
+                </div>
+                <small class="ai-config-note">Keys stay in <code>~/.knowte/config.yml</code>, are returned only as configured / not configured, and are never copied into Plans.</small>
+                <div hidden aria-hidden="true">
+                  <select id="ai-provider"><option value="openai_compatible">OpenAI-compatible</option></select>
+                  <input id="ai-base-url" /><input id="ai-api-key" /><button id="ai-api-key-remove"></button><small id="ai-api-key-remove-note"></small>
+                  <input id="ai-chat-model" /><input id="ai-embedding-model" /><details id="ai-embedding-separate"></details>
+                  <input id="ai-enable-thinking" type="checkbox" /><input id="ai-embedding-base-url" /><input id="ai-embedding-api-key" />
+                  <button id="ai-embedding-api-key-remove"></button><small id="ai-embedding-api-key-remove-note"></small>
+                  <div id="ai-custom-recipe-section"></div><textarea id="ai-custom-recipe"></textarea>
+                </div>
               </fieldset>
               <fieldset class="ai-config copilot-config">
                 <legend>Review Copilot</legend>
@@ -543,7 +611,7 @@
                   <div class="config-row">
                     <label for="ai-copilot-instructions">Custom instructions</label>
                     <textarea id="ai-copilot-instructions" rows="3" placeholder="Optional preferences for how the Copilot reviews and responds"></textarea>
-                    <small>Appended to Knowte's core system prompt. It cannot replace Knowte's object definitions or safety boundaries.</small>
+                    <small>Applied to Review Copilot conversations and Search strategy discussion. It cannot replace Knowte's object definitions or safety boundaries.</small>
                   </div>
                   <div class="copilot-common-grid">
                     <div class="config-row">
@@ -562,8 +630,31 @@
                     <small>Values use JSON syntax: numbers and booleans need no quotes; strings do. Reserved request fields cannot be overridden.</small>
                   </details>
                   <details class="ai-embedding-details copilot-prompt-preview">
-                    <summary>View final Copilot system prompt</summary>
+                    <summary>View stage system prompts</summary>
+                    <div class="copilot-prompt-block" id="ai-copilot-prompt-shared-block">
+                      <span class="copilot-prompt-label">Shared Review Copilot prompt</span>
+                      <pre id="ai-copilot-prompt-shared"></pre>
+                      <small>Used by Search discussion, Sources, Evidence, Claims, Views, and Projects. Your Custom instructions are appended after the selected stage addition.</small>
+                    </div>
+                    <label class="copilot-prompt-stage">Stage
+                      <select id="ai-copilot-prompt-stage">
+                        <option value="search_strategy">Search · Initial strategy</option>
+                        <option value="search">Search · Copilot discussion</option>
+                        <option value="library">Sources</option>
+                        <option value="evidence_proposal">Sources · Evidence proposal</option>
+                        <option value="evidence">Evidence</option>
+                        <option value="claim_proposal">Evidence · Claim proposal</option>
+                        <option value="claims">Claims</option>
+                        <option value="wiki_maintenance">Views · Wiki maintenance</option>
+                        <option value="article_selection">Views · Article selection</option>
+                        <option value="article_writing">Views · Article writing</option>
+                        <option value="views">Views</option>
+                        <option value="artifact">Projects</option>
+                      </select>
+                    </label>
+                    <span class="copilot-prompt-label" id="ai-copilot-prompt-stage-label">Dedicated capability prompt</span>
                     <pre id="ai-copilot-prompt-preview"></pre>
+                    <small id="ai-copilot-prompt-note">Initial Search strategy and proposal generation use dedicated prompts rather than the shared Review Copilot prompt.</small>
                   </details>
                 </section>
               </fieldset>
@@ -677,6 +768,9 @@
             <span>Review workspace</span>
             <small id="context-mode-label">Search · No selection</small>
           </div>
+          <select id="context-model-select" aria-label="Copilot model" title="Copilot model">
+            <option value="">Select a Copilot model</option>
+          </select>
           <button class="context-panel-close" id="context-panel-close" type="button" aria-label="Close review workspace">×</button>
         </div>
         <div class="context-panel-body">
@@ -761,7 +855,7 @@
         </div>
         <form class="context-chat-form" id="context-chat-form">
           <textarea id="context-chat-input" rows="2" placeholder="Discuss this selection with the LLM…" aria-label="Message review copilot"></textarea>
-          <button type="submit" id="context-chat-send">Send</button>
+          <button type="submit" id="context-chat-send" title="Send (Command/Ctrl + Enter)">Send</button>
         </form>
       </aside>
     </div>
@@ -808,6 +902,6 @@
       <div class="evidence-quick-actions"><button type="button" id="evidence-quick-discard">Discard</button><button type="button" id="evidence-quick-save">Save</button></div>
       <small id="evidence-quick-status" role="status"></small>
     </section>
-    <script src="app.js?v=20260809h"></script>
+    <script src="app.js?v=20260823b"></script>
   </body>
 </html>

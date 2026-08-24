@@ -5,6 +5,84 @@ All notable changes to Knowte will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-25
+
+### Added
+
+- Search strategy discussion with up to five editable, source-specific
+  Academic/Web retrieval actions.
+- Third-party Source import for human-curated links, DOI/arXiv identifiers, and
+  structured external-LLM results, plus a dynamic copyable import prompt.
+- One purpose-neutral global Wiki over accepted Claims, with persistent,
+  reviewable AI Wiki Patches and legacy Wiki migration.
+- Deterministic Claim Graph rendering from accepted Claim relations, without
+  model-authored graph structure.
+- Goal-driven temporary Articles for which the model selects and organizes
+  relevant Claims across the global Wiki, with an explicit option to save the
+  result as Project content.
+- Reusable AI model Profiles with per-stage model assignment, independent
+  proxy routing, write-only credentials, and distinct adapters for OpenAI,
+  Gemini, Anthropic, DeepSeek, Qwen, Kimi, generic OpenAI-compatible APIs, and
+  custom JSON request recipes.
+- Focus-guided AI Evidence proposals grounded in one or more selected Sources,
+  with persistent awaiting-review queues shared by Evidence and Claims.
+- Provider-aware document paths covering native PDF input, hosted file
+  extraction, URL context, and native Web Search where the configured service,
+  model, and endpoint have a documented Knowte adapter.
+- Web Companion quick capture with an adaptive floating control, text-first and
+  region-first capture modes, keyboard shortcuts, inline Tag and Annotation
+  editing, and theme-aware presentation on external pages.
+
+### Changed
+
+- Intelligent Search now uses the user's query directly by default instead of
+  silently generating retrieval expansions.
+- Search strategy editing uses compact source-specific cards, and follow-up
+  Copilot discussion can propose a complete replacement for explicit review.
+- Search strategy generation now separates provider-ready queries from their
+  retrieval purpose and adds domain examples selected for the active Area
+  filters, with dedicated guidance across major AI subfields.
+- Review Copilot now uses distinct system prompts for Search, Sources,
+  Evidence, Claims, Views, and Projects, all visible by stage in Config.
+- Copilot Search suggestions are previewed and appended as editable waiting
+  candidates; only the ordered Top 5 actions are executed or saved to a Plan.
+- Copilot stage prompts now include exact JSON response contracts; common local
+  model JSON deviations are repaired, with a text-only fallback for chat.
+- Copilot chat supports Command/Ctrl+Enter sending and per-workspace input
+  history; Search candidates move directly between the active list and waiting
+  list with a guarded five-item active limit.
+- Multi-line Copilot drafts reserve arrow keys for text navigation, while
+  Search-list transfers use directional icons and a two-pulse full-list alert.
+- Import can be selected as the persisted default Search mode, and the manual
+  strategy control is labeled as adding a new query.
+- Views now separates durable Wiki organization, deterministic relationship
+  exploration, and transient purpose-specific synthesis instead of treating
+  Wiki, Article, and Graph as peer saved formats.
+- AI Evidence and Claim generation now shows the active model at the point of
+  use and preserves malformed structured responses as visible model output
+  instead of silently issuing a second paid request.
+- Claim proposals synthesize across the selected Evidence set, can relate new
+  Evidence to existing Claims, and keep Rationale and optional Caveats visible
+  throughout review.
+- Model capabilities are split into Chat, Embeddings, Native PDF, File
+  extraction, Web Search, and URL fetch. Unsupported combinations are locked
+  from both the interface and configuration API instead of trusting arbitrary
+  capability checkboxes.
+- Review queues now open as focused list states with consistent awaiting-review
+  controls, and accepted entities return to their normal workspace lists.
+
+### Fixed
+
+- Evidence proposals navigate to the awaiting-review list after completion and
+  preserve the raw response when required JSON cannot be parsed.
+- Source inspection, Evidence review, and model selection controls retain
+  usable dimensions and consistent visual hierarchy across light and dark
+  themes.
+- Qwen multi-PDF handling no longer assumes an undocumented request contract;
+  unsupported multi-document combinations fall back to captured Source text.
+- Temporary Kimi file-extraction uploads are deleted after their content is
+  retrieved so they do not accumulate against the user's file quota.
+
 ## [0.4.0] - 2026-08-09
 
 ### Added

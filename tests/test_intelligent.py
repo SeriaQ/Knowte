@@ -22,9 +22,6 @@ class IntelligentSearchTests(unittest.TestCase):
             "knowte.intelligent._client_from_config",
             return_value=client,
         ), patch(
-            "knowte.intelligent._expand_queries",
-            return_value=[],
-        ), patch(
             "knowte.intelligent._verify",
             side_effect=lambda _client, _query, _areas, batch: batch,
         ) as verify, patch(
@@ -52,7 +49,7 @@ class IntelligentSearchTests(unittest.TestCase):
         self.assertEqual(verify.call_count, 1)
         self.assertEqual(result["stages"]["verify"]["requests"], 1)
 
-    def test_academic_expands_ranks_and_verifies_while_web_skips_embedding(self):
+    def test_direct_intelligent_search_ranks_academic_and_verifies_both_channels(self):
         academic = {
             "id": "paper-1",
             "title": "Planning transfer",
@@ -98,9 +95,6 @@ class IntelligentSearchTests(unittest.TestCase):
             "knowte.intelligent._client_from_config",
             return_value=MagicMock(),
         ), patch(
-            "knowte.intelligent._expand_queries",
-            return_value=["planning transfer robotics"],
-        ), patch(
             "knowte.intelligent._rank_academic",
             return_value=(ranked, 1, 0),
         ) as rank, patch(
@@ -133,14 +127,14 @@ class IntelligentSearchTests(unittest.TestCase):
         self.assertEqual(
             result["request_budget"],
             {
-                "retrieval": 3,
-                "academic_retrieval": 2,
+                "retrieval": 2,
+                "academic_retrieval": 1,
                 "web_retrieval": 1,
-                "chat": 2,
+                "chat": 1,
                 "embedding": 1,
             },
         )
-        self.assertEqual(retrieve.call_count, 3)
+        self.assertEqual(retrieve.call_count, 2)
         self.assertTrue(
             all(call.kwargs["strict_match"] is False for call in retrieve.call_args_list)
         )
@@ -153,6 +147,27 @@ class IntelligentSearchTests(unittest.TestCase):
             {candidate["result_type"] for candidate in verified_candidates},
             {"paper", "web"},
         )
+
+    def test_discussed_strategy_routes_queries_to_the_selected_channel(self):
+        client = MagicMock()
+        with patch("knowte.intelligent._client_from_config", return_value=client), patch(
+            "knowte.intelligent.search_papers", return_value=[]
+        ) as retrieve:
+            result = intelligent_search(
+                "understand Qwen long context",
+                {"ai_base_url": "https://ai.test/v1", "ai_chat_model": "chat", "searxng_url": "http://127.0.0.1:8888/search"},
+                20, ["openalex", "websearch"], [], None, None,
+                search_actions=[
+                    {"query": "Qwen2.5 Technical Report", "target": "academic"},
+                    {"query": "Qwen long context optimization", "target": "web"},
+                ],
+            )
+
+        self.assertEqual(retrieve.call_count, 2)
+        self.assertEqual(retrieve.call_args_list[0].args[0], "Qwen2.5 Technical Report")
+        self.assertEqual(retrieve.call_args_list[1].args[0], "Qwen long context optimization")
+        self.assertEqual(result["request_budget"]["academic_retrieval"], 1)
+        self.assertEqual(result["request_budget"]["web_retrieval"], 1)
 
     def test_web_only_requires_chat_but_not_embedding_configuration(self):
         web = {
@@ -225,9 +240,6 @@ class IntelligentSearchTests(unittest.TestCase):
             "knowte.intelligent._client_from_config",
             return_value=client,
         ), patch(
-            "knowte.intelligent._expand_queries",
-            return_value=[],
-        ), patch(
             "knowte.intelligent._rank_academic",
         ) as rank, patch(
             "knowte.intelligent._verify",
@@ -277,9 +289,6 @@ class IntelligentSearchTests(unittest.TestCase):
         with patch(
             "knowte.intelligent._client_from_config",
             return_value=client,
-        ), patch(
-            "knowte.intelligent._expand_queries",
-            return_value=[],
         ), patch(
             "knowte.intelligent._verify",
             side_effect=AIError("timeout", "AI service did not respond within 45 seconds."),
@@ -342,9 +351,6 @@ class IntelligentSearchTests(unittest.TestCase):
         with patch(
             "knowte.intelligent._client_from_config",
             return_value=client,
-        ), patch(
-            "knowte.intelligent._expand_queries",
-            return_value=[],
         ), patch(
             "knowte.intelligent._verify",
             side_effect=verify,

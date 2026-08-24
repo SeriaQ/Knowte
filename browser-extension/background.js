@@ -66,6 +66,16 @@ const prepareCaptureFromTab = async (mode) => {
   } catch (_) {}
   await ext.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
   const payload = await ext.tabs.sendMessage(tab.id, { type: "KNOWTE_CAPTURE", mode });
+  if (payload?.__knowte_internal) {
+    await ext.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (captureMode) => window.dispatchEvent(new CustomEvent(
+        "knowte:capture-shortcut", { detail: { mode: captureMode } }
+      )),
+      args: [mode]
+    });
+    return { prepared: true, internal: true };
+  }
   if (payload?.__error) throw new Error(payload.__error);
   if (mode === "snapshot") {
     const screenshot = await ext.tabs.captureVisibleTab(tab.windowId, { format: "png" });
@@ -86,6 +96,18 @@ ext.runtime.onMessage.addListener((message) => {
     (item) => ({ ok: true, item }),
     (error) => ({ ok: false, message: error.message })
   );
+});
+
+ext.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type !== "KNOWTE_COMPOSE_CAPTURE") return undefined;
+  return (async () => {
+    if (!sender.tab?.id) throw new Error("Could not identify the current page.");
+    const options = await getCompanionOptions();
+    await ext.tabs.sendMessage(sender.tab.id, {
+      type: "KNOWTE_SHOW_COMPOSER", payload: message.payload, options
+    });
+    return { ok: true };
+  })().catch((error) => ({ ok: false, message: error.message }));
 });
 
 ext.runtime.onMessage.addListener((message) => {

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from knowte.knowledge import (
     accept_claim_proposal,
+    accept_evidence_proposal,
     canonical_source_key,
     create_annotation,
     create_artifact,
@@ -14,27 +15,133 @@ from knowte.knowledge import (
     create_claim_relation,
     create_claim_proposal,
     create_evidence,
+    create_evidence_proposal,
     create_view,
+    create_wiki_proposal,
     delete_view,
     delete_annotation,
     delete_evidence,
+    find_related_claims,
     get_source_workspace,
     get_view,
+    get_wiki,
     list_artifacts,
     list_claim_proposals,
     list_claims,
     list_evidence,
+    list_evidence_proposals,
     list_sources,
     list_views,
+    link_evidence_to_claim,
     revise_claim,
     save_source,
     set_entity_tags,
     store_capture,
     update_view,
+    accept_wiki_proposal,
+    list_wiki_proposals,
+    save_project_document,
+    list_project_documents,
 )
 
 
 class KnowledgeStoreTests(unittest.TestCase):
+    def test_global_wiki_patch_organizes_claims_and_graph_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            first = create_claim(
+                {"statement": "Qwen uses grouped-query attention.", "basis": "background", "intentionally_ungrounded": True},
+                database,
+            )
+            second = create_claim(
+                {"statement": "Grouped-query attention reduces KV-cache cost.", "basis": "inference", "intentionally_ungrounded": True},
+                database,
+            )
+            create_claim_relation({
+                "subject_claim_id": first["id"],
+                "object_claim_id": second["id"],
+                "relation_type": "supports",
+            }, database)
+            initial = get_wiki(database)
+            self.assertEqual(set(initial["unorganized_claim_ids"]), {first["id"], second["id"]})
+            proposal = create_wiki_proposal({
+                "summary": "Organize model architecture knowledge.",
+                "pages": [
+                    {"key": "models", "title": "Models", "parent_key": "", "claim_ids": []},
+                    {"key": "qwen", "title": "Qwen", "parent_key": "models", "claim_ids": [first["id"], second["id"]]},
+                ],
+            }, "wiki-maintainer-v1", "test-model", path=database)
+            self.assertEqual(list_wiki_proposals(database)[0]["id"], proposal["id"])
+            accepted = accept_wiki_proposal(proposal["id"], database)
+            self.assertEqual(accepted["unorganized_claim_ids"], [])
+            self.assertEqual(len(accepted["pages"]), 2)
+            self.assertEqual(accepted["graph"]["edges"][0]["relation_type"], "supports")
+            self.assertEqual(list_wiki_proposals(database), [])
+
+    def test_wiki_proposal_rejects_hierarchy_cycles(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            create_claim(
+                {"statement": "A Claim.", "basis": "background", "intentionally_ungrounded": True},
+                database,
+            )
+            with self.assertRaisesRegex(ValueError, "cycle"):
+                create_wiki_proposal({"pages": [
+                    {"key": "a", "title": "A", "parent_key": "b"},
+                    {"key": "b", "title": "B", "parent_key": "a"},
+                ]}, "wiki-maintainer-v1", path=database)
+
+    def test_temporary_reading_can_be_saved_into_a_project(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            project = create_artifact(
+                {"title": "Qwen briefing", "purpose": "Prepare a technical briefing."},
+                database,
+            )
+            document = save_project_document({
+                "artifact_id": project["id"],
+                "title": "Qwen architecture reading",
+                "goal": "Explain the architecture changes.",
+                "content": {"sections": [{"heading": "Architecture", "paragraphs": []}]},
+            }, database)
+            loaded = list_project_documents(project["id"], database)
+            self.assertEqual(loaded[0]["id"], document["id"])
+            self.assertEqual(loaded[0]["content"]["sections"][0]["heading"], "Architecture")
+
+    def test_evidence_proposal_persists_and_requires_verified_quote(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            source, _, _ = save_source(
+                {"title": "Source", "url": "https://example.test"}, path=database
+            )
+            workspace = store_capture(source["id"], {
+                "url": source["url"], "media_type": "text/html", "sha256": "proposal",
+                "raw_path": str(Path(temp_dir) / "source.html"),
+                "segments": ["Qwen uses grouped query attention for efficient inference."],
+                "locators": ["Section 2"],
+            }, database)
+            segment = workspace["segments"][0]
+            proposal = create_evidence_proposal({
+                "source_id": source["id"], "segment_id": segment["id"],
+                "quote": "Qwen uses grouped query attention for efficient inference.",
+                "rationale": "Directly addresses architecture.",
+                "caveats": ["The excerpt does not quantify the efficiency gain."],
+                "tags": ["Qwen"],
+            }, "evidence-proposal-v1", "model", {"focus": "architecture"}, database)
+            self.assertEqual(list_evidence_proposals(database)[0]["id"], proposal["id"])
+            self.assertEqual(
+                proposal["payload"]["caveats"],
+                ["The excerpt does not quantify the efficiency gain."],
+            )
+            accepted = accept_evidence_proposal(proposal["id"], {}, database)
+            self.assertEqual(accepted["quote"], proposal["payload"]["quote"])
+            self.assertEqual(list_evidence_proposals(database), [])
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                create_evidence_proposal({
+                    "source_id": source["id"], "segment_id": segment["id"],
+                    "quote": "Invented quotation.",
+                }, "evidence-proposal-v1", path=database)
+
     def test_legacy_claim_relations_are_removed_instead_of_reinterpreted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"
@@ -248,6 +355,70 @@ class KnowledgeStoreTests(unittest.TestCase):
 
             self.assertEqual(claim["created_via"], "ai_assisted")
             self.assertEqual(claim["statement"], "An accepted durable Claim.")
+            self.assertEqual(list_claim_proposals(database), [])
+
+    def test_claim_change_proposals_can_link_evidence_and_create_relations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            source, _, _ = save_source(
+                {"title": "Qwen report", "url": "https://example.test/qwen"},
+                path=database,
+            )
+            workspace = store_capture(
+                source["id"],
+                {
+                    "url": source["url"], "media_type": "text/html",
+                    "sha256": "claim-change-source",
+                    "raw_path": str(Path(temp_dir) / "source.html"),
+                    "segments": [
+                        "Qwen uses grouped-query attention.",
+                        "Independent evaluation confirms grouped-query attention.",
+                    ],
+                }, database,
+            )
+            evidence = [
+                create_evidence({
+                    "segment_id": segment["id"], "quote": segment["text"],
+                    "start_offset": 0, "end_offset": len(segment["text"]),
+                }, database)
+                for segment in workspace["segments"]
+            ]
+            first = create_claim({
+                "statement": "Qwen uses grouped-query attention.",
+                "basis": "reported",
+                "evidence": [{"evidence_id": evidence[0]["id"], "stance": "supports"}],
+                "tags": ["Qwen"],
+            }, database)
+            second = create_claim({
+                "statement": "Grouped-query attention reduces KV-cache costs.",
+                "basis": "background", "intentionally_ungrounded": True,
+            }, database)
+
+            related = find_related_claims(
+                "Qwen grouped-query attention", ["Qwen"], 10, database,
+            )
+            self.assertEqual(related[0]["claim_id"], first["id"])
+
+            link_proposal = create_claim_proposal({
+                "operation": "link_evidence", "target_claim_id": first["id"],
+                "target_statement": first["statement"],
+                "evidence": [{
+                    "evidence_id": evidence[1]["id"], "stance": "supports",
+                    "rationale": "Independent confirmation.",
+                }],
+            }, "claim-proposal-v3", "test-model", {}, database)
+            linked = accept_claim_proposal(link_proposal["id"], {}, database)
+            self.assertEqual(len(linked["evidence"]), 2)
+
+            relation_proposal = create_claim_proposal({
+                "operation": "create_relation",
+                "subject_claim_id": first["id"],
+                "object_claim_id": second["id"],
+                "relation_type": "supports",
+                "rationale": "The mechanism supports the efficiency Claim.",
+            }, "claim-proposal-v3", "test-model", {}, database)
+            relation = accept_claim_proposal(relation_proposal["id"], {}, database)
+            self.assertEqual(relation["relation_type"], "supports")
             self.assertEqual(list_claim_proposals(database), [])
 
     def test_claim_vocabulary_exposes_background_disputed_and_minimal_stances(self):

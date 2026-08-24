@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.4.0"
-description = "Local-first knowledge workspace for discovering sources, grounding claims in evidence, and building reusable views with AI."
+version = "0.5.0"
+description = "Local-first knowledge workspace for discovering sources, grounding claims in evidence, and organizing reusable knowledge with AI."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -58,5 +58,6 @@ knowte = [
   "browser-extension/popup.html",
   "browser-extension/popup.js",
   "browser-extension/popup.css",
+  "browser-extension/knowte_icon.png",
   "browser-extension/README.md",
 ]

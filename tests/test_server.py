@@ -11,15 +11,99 @@ from knowte import usage
 from knowte import search as search_module
 from knowte.models import Paper
 from knowte.knowledge import (
+    accept_wiki_proposal,
     create_artifact,
+    create_claim,
     create_evidence,
+    create_wiki_proposal,
     save_source,
     store_capture,
 )
-from knowte.server import create_server
+from knowte.server import _import_candidates, create_server
 
 
 class SearchApiTests(unittest.TestCase):
+    def test_article_generation_selects_from_the_complete_global_wiki(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            usage_path = temp_path / "usage.json"
+            first = create_claim(
+                {"statement": "Qwen uses grouped-query attention.", "basis": "background", "intentionally_ungrounded": True},
+                database_path,
+            )
+            second = create_claim(
+                {"statement": "Qwen uses RMSNorm.", "basis": "background", "intentionally_ungrounded": True},
+                database_path,
+            )
+            proposal = create_wiki_proposal({"pages": [
+                {"key": "architecture", "title": "Architecture", "parent_key": "", "claim_ids": [first["id"]]},
+                {"key": "normalization", "title": "Normalization", "parent_key": "architecture", "claim_ids": [second["id"]]},
+            ]}, "wiki-maintainer-v1", path=database_path)
+            accept_wiki_proposal(proposal["id"], database_path)
+            client = MagicMock()
+            article_result = {
+                "title": "Qwen architecture",
+                "introduction": "A focused explanation.",
+                "sections": [{"heading": "Design", "paragraphs": [{
+                    "text": "Qwen combines two architectural choices.",
+                    "claim_ids": [first["id"], second["id"]],
+                }]}],
+                "gaps": [],
+            }
+            client.chat_json.side_effect = [
+                {
+                    "claim_ids": [first["id"], second["id"]],
+                    "outline": [{
+                        "heading": "Design",
+                        "claim_ids": [first["id"], second["id"]],
+                    }],
+                    "rationale": "Both Claims address the requested architecture.",
+                },
+                article_result,
+            ]
+            client.usage_snapshot.return_value = {
+                "chat_requests": 1, "chat_tokens": 64,
+                "embedding_requests": 0, "embedding_tokens": 0,
+            }
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(
+                usage, "USAGE_DIR", temp_path
+            ), patch.object(usage, "USAGE_PATH", usage_path):
+                server = create_server("127.0.0.1", 0, config_path)
+                status, payload = self._request(
+                    server, "POST", "/api/wiki/articles/generate",
+                    json.dumps({"goal": "Explain Qwen architecture."}),
+                )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["article"]["capability_version"], "wiki-article-v1")
+        selection_input = client.chat_json.call_args_list[0].args[1]
+        article_input = client.chat_json.call_args_list[1].args[1]
+        self.assertIn("Architecture", selection_input)
+        self.assertIn("Normalization", selection_input)
+        self.assertIn(first["statement"], selection_input)
+        self.assertIn(second["statement"], selection_input)
+        self.assertIn(first["id"], article_input)
+        self.assertIn(second["id"], article_input)
+
+    def test_import_parser_accepts_human_links_and_structured_llm_output(self):
+        human = _import_candidates(
+            "https://example.test/article\narXiv: 2412.15115\ndoi: 10.1000/example"
+        )
+        self.assertEqual(len(human), 3)
+        self.assertTrue(all(item["import_status"] == "partial" for item in human))
+        structured = _import_candidates(json.dumps({"sources": [{
+            "title": "Qwen2.5 Technical Report",
+            "source_type": "report",
+            "url": "https://arxiv.org/abs/2412.15115",
+            "year": 2024,
+            "why_relevant": "Primary report.",
+        }]}))
+        self.assertEqual(structured[0]["title"], "Qwen2.5 Technical Report")
+        self.assertEqual(structured[0]["match_reason"], "Primary report.")
+        self.assertNotEqual(structured[0]["abstract"], "Primary report.")
+
     def _request(self, server, method, path, body=None):
         thread = threading.Thread(target=server.serve_forever)
         thread.start()
@@ -402,6 +486,7 @@ class SearchApiTests(unittest.TestCase):
                     json.dumps(
                         {
                             "question": "Should this be collected?",
+                            "context": "library",
                             "sources": [{"title": "Qwen report", "abstract": "Technical details."}],
                             "evidence": [{
                                 "id": "evidence-1",
@@ -491,7 +576,10 @@ class SearchApiTests(unittest.TestCase):
                     generate_server,
                     "POST",
                     "/api/claim-proposals/generate",
-                    json.dumps({"evidence_ids": [evidence["id"]]}),
+                    json.dumps({
+                        "evidence_ids": [evidence["id"]],
+                        "focus": "Qwen inference architecture",
+                    }),
                 )
 
                 # A new server instance models a page reload or Knowte restart.
@@ -515,6 +603,10 @@ class SearchApiTests(unittest.TestCase):
                 )
 
         self.assertEqual(generated_status, 201)
+        proposal_input = json.loads(client.chat_json.call_args.args[1])
+        self.assertEqual(proposal_input["focus"], "Qwen inference architecture")
+        self.assertIn("existing_claims", proposal_input)
+        self.assertEqual(generated["comparison_claim_count"], 0)
         self.assertEqual(reload_status, 200)
         self.assertEqual(len(reloaded["proposals"]), 1)
         self.assertEqual(reloaded["proposals"][0]["status"], "awaiting_review")
@@ -524,6 +616,74 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(accepted["evidence"][0]["evidence_id"], evidence["id"])
         self.assertEqual(final_status, 200)
         self.assertEqual(final["proposals"], [])
+
+    def test_claim_proposal_can_attach_new_evidence_to_related_existing_claim(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            usage_path = temp_path / "usage.json"
+            source, _, _ = save_source({
+                "title": "Qwen evaluation", "url": "https://example.test/qwen-eval",
+            }, path=database_path)
+            workspace = store_capture(source["id"], {
+                "url": source["url"], "media_type": "text/html",
+                "sha256": "claim-update-source",
+                "raw_path": str(temp_path / "source.html"),
+                "segments": [
+                    "Qwen uses grouped-query attention.",
+                    "The evaluation confirms Qwen grouped-query attention.",
+                ],
+            }, database_path)
+            evidence = [create_evidence({
+                "segment_id": segment["id"], "quote": segment["text"],
+                "start_offset": 0, "end_offset": len(segment["text"]),
+            }, database_path) for segment in workspace["segments"]]
+            existing = create_claim({
+                "statement": "Qwen uses grouped-query attention.",
+                "basis": "reported",
+                "evidence": [{"evidence_id": evidence[0]["id"], "stance": "supports"}],
+                "tags": ["Qwen"],
+            }, database_path)
+            client = MagicMock()
+            client.chat_json.return_value = {
+                "summary": "The selected Evidence reinforces an existing Claim.",
+                "claims": [],
+                "existing_claim_updates": [{
+                    "claim_id": existing["id"],
+                    "evidence": [{
+                        "evidence_id": evidence[1]["id"], "stance": "supports",
+                        "rationale": "The evaluation confirms the mechanism.",
+                    }],
+                    "rationale": "Avoid a duplicate Claim.", "caveats": [],
+                }],
+                "claim_relations": [], "skipped": [],
+            }
+            client.usage_snapshot.return_value = {
+                "chat_requests": 1, "chat_tokens": 80,
+                "embedding_requests": 0, "embedding_tokens": 0,
+            }
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(
+                usage, "USAGE_DIR", temp_path
+            ), patch.object(usage, "USAGE_PATH", usage_path):
+                generate_server = create_server("127.0.0.1", 0, config_path)
+                status, generated = self._request(
+                    generate_server, "POST", "/api/claim-proposals/generate",
+                    json.dumps({"evidence_ids": [evidence[1]["id"]]}),
+                )
+                proposal = generated["proposals"][0]
+                accept_server = create_server("127.0.0.1", 0, config_path)
+                accept_status, accepted = self._request(
+                    accept_server, "POST",
+                    f"/api/claim-proposals/{proposal['id']}/accept", "{}",
+                )
+
+        self.assertEqual(status, 201)
+        self.assertEqual(proposal["payload"]["operation"], "link_evidence")
+        self.assertEqual(generated["comparison_claim_count"], 1)
+        self.assertEqual(accept_status, 201)
+        self.assertEqual(accepted["id"], existing["id"])
+        self.assertEqual(len(accepted["evidence"]), 2)
 
     def test_cached_find_more_does_not_increment_paper_usage(self):
         def papers(prefix, source):
@@ -619,6 +779,23 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(get_status, 200)
         self.assertEqual(fetched["default_search_mode"], "intelligent")
         self.assertIn("default_search_mode: intelligent", config_text)
+
+    def test_import_can_be_saved_as_default_search_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            server = create_server("127.0.0.1", 0, config_path)
+            status, saved = self._request(
+                server,
+                "POST",
+                "/api/config/default-search-mode",
+                json.dumps({"mode": "import"}),
+            )
+            server = create_server("127.0.0.1", 0, config_path)
+            _, fetched = self._request(server, "GET", "/api/config")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["default_search_mode"], "import")
+        self.assertEqual(fetched["default_search_mode"], "import")
 
     def test_debug_replay_uses_saved_artifact_sources_without_search_or_ai(self):
         with tempfile.TemporaryDirectory() as temp_dir:

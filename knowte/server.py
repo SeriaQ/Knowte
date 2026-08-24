@@ -28,6 +28,11 @@ from .config import (
     set_intelligent_max_results,
     set_max_papers,
     set_ai_settings,
+    set_ai_model_profiles,
+    ai_model_profiles,
+    ai_available_capabilities,
+    ai_role_assignments,
+    ai_profile_for_role,
     set_semanticscholar_key,
     set_searxng_url,
     set_web_ignore_year_filter,
@@ -35,7 +40,7 @@ from .config import (
 from .ai import AIError
 from .capture import CaptureError, capture_source_content
 from .companion import CompanionStore
-from .intelligent import _client_from_config, intelligent_search
+from .intelligent import _client_from_config, _model_name_from_config, intelligent_search
 from .knowledge import (
     KNOWLEDGE_DB_PATH,
     create_annotation,
@@ -44,18 +49,22 @@ from .knowledge import (
     create_claim,
     create_claim_relation,
     create_claim_proposal,
-    create_view,
+    create_evidence_proposal,
     create_evidence,
     delete_annotation,
     discard_claim_proposal,
     delete_evidence,
     delete_view,
+    discard_wiki_proposal,
     get_capture_file,
     get_snapshot_file,
     get_source,
     get_source_workspace,
     get_view,
+    get_wiki,
+    find_related_claims,
     list_claim_proposals,
+    list_evidence_proposals,
     list_claims,
     list_evidence,
     list_artifacts,
@@ -63,14 +72,26 @@ from .knowledge import (
     list_replay_sources,
     list_sources,
     list_views,
+    list_wiki_proposals,
+    list_project_documents,
     set_entity_tags,
     save_source,
     revise_claim,
     set_claim_lifecycle,
     store_capture,
+    accept_evidence_proposal,
     update_view,
+    create_wiki_proposal,
+    accept_wiki_proposal,
+    save_project_document,
 )
 from .plans import PLANS_PATH, create_plan, delete_plan, list_plans, update_plan
+from .prompts.review_copilot import (
+    review_copilot_prompt,
+    review_copilot_shared_prompt,
+    review_copilot_stage_prompt_previews,
+)
+from .prompts.search_strategy import build_search_strategy_prompt
 from .search import search_papers
 from .searxng import (
     SearxngManagerError,
@@ -84,20 +105,54 @@ from .usage import can_request, get_usage, record_ai_usage, record_request
 _INTELLIGENT_PROGRESS = {}
 _INTELLIGENT_PROGRESS_LOCK = threading.RLock()
 
-_REVIEW_COPILOT_CORE_PROMPT = """You are the Review Copilot inside Knowte, a local-first system for collecting, examining, and turning information into durable knowledge.
 
-Knowte distinguishes these objects:
-- Source: an original paper, web page, document, or other information-bearing work.
-- Evidence: a precise text excerpt or visual snapshot grounded in a Source.
-- Claim: a knowledge statement synthesized from Evidence; do not treat model inference as established fact.
-- Annotation: a user's note attached to an entity.
-- Artifact: a purpose-led body of work that links shared knowledge without owning duplicate copies.
+def _public_ai_profiles(config: dict) -> list[dict]:
+    profiles = []
+    for item in ai_model_profiles(config):
+        public = {key: value for key, value in item.items() if key != "api_key"}
+        public["available_capabilities"] = sorted(ai_available_capabilities(item))
+        public["api_key_configured"] = bool(item.get("api_key"))
+        profiles.append(public)
+    return profiles
 
-Use only the supplied context. Clearly distinguish what a Source or Evidence states from your own inference. Refer to supplied items by their type and index when useful. Be critical about relevance, authority, duplication, uncertainty, and missing coverage. Never claim that you changed the Library, an Artifact, or any other data.
 
-Return a JSON object with an `answer` string and a `recommendations` array. The answer may use Markdown. Each recommendation may contain `source_index`, `decision` (`add`, `skip`, or `inspect`), and `reason`."""
+def _map_document_quote(workspace: dict, quote: str) -> tuple[str, str] | None:
+    """Map a native-document quotation to a captured segment without altering words."""
+    quote = str(quote or "").strip()
+    if not quote:
+        return None
+    normalized_quote = " ".join(quote.split())
+    for segment in workspace.get("segments", []):
+        text = str(segment.get("text") or "")
+        if quote in text:
+            return str(segment.get("id") or ""), quote
+        compact = []
+        starts = []
+        ends = []
+        in_space = False
+        for index, character in enumerate(text):
+            if character.isspace():
+                if compact and not in_space:
+                    compact.append(" ")
+                    starts.append(index)
+                    ends.append(index + 1)
+                in_space = True
+            else:
+                compact.append(character)
+                starts.append(index)
+                ends.append(index + 1)
+                in_space = False
+        normalized_text = "".join(compact).strip()
+        offset = "".join(compact).find(normalized_quote)
+        if offset >= 0 and offset + len(normalized_quote) <= len(starts):
+            original = text[starts[offset]:ends[offset + len(normalized_quote) - 1]].strip()
+            return str(segment.get("id") or ""), original
+    return None
 
-_CLAIM_PROPOSAL_CAPABILITY = "claim-proposal-v1"
+_CLAIM_PROPOSAL_CAPABILITY = "claim-proposal-v3"
+_EVIDENCE_PROPOSAL_CAPABILITY = "evidence-proposal-v2"
+_WIKI_PROPOSAL_CAPABILITY = "wiki-maintainer-v1"
+_WIKI_ARTICLE_CAPABILITY = "wiki-article-v1"
 
 
 def _claim_proposal_prompt() -> str:
@@ -106,11 +161,110 @@ def _claim_proposal_prompt() -> str:
     )
 
 
-def _copilot_settings(config: dict[str, str]) -> tuple[str, float, int, dict]:
+def _evidence_proposal_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath("evidence_proposal.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def _evidence_document_proposal_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath(
+        "evidence_document_proposal.md"
+    ).read_text(encoding="utf-8")
+
+
+def _wiki_maintainer_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath("wiki_maintainer.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def _wiki_article_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath("wiki_article.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def _wiki_article_selection_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath(
+        "wiki_article_selection.md"
+    ).read_text(encoding="utf-8")
+
+
+def _wiki_claim_context(claim: dict, include_evidence: bool = False) -> dict:
+    item = {
+        "id": claim["id"],
+        "statement": claim.get("statement", ""),
+        "basis": claim.get("basis", ""),
+        "review_state": claim.get("review_state", "accepted"),
+        "lifecycle": claim.get("lifecycle", "active"),
+        "tags": [tag.get("name", "") for tag in claim.get("tags", [])],
+        "relations": [
+            {
+                "subject_claim_id": relation.get("subject_claim_id", ""),
+                "object_claim_id": relation.get("object_claim_id", ""),
+                "relation_type": relation.get("relation_type", ""),
+            }
+            for relation in claim.get("relations", [])
+        ],
+    }
+    if include_evidence:
+        item["evidence"] = [
+            {
+                "evidence_id": evidence.get("evidence_id", ""),
+                "stance": evidence.get("stance", ""),
+                "source_title": evidence.get("source_title", ""),
+                "locator": evidence.get("locator", ""),
+                "quote": str(evidence.get("quote") or "")[:4000],
+            }
+            for evidence in claim.get("evidence", [])[:12]
+        ]
+    return item
+
+
+def _normalize_wiki_article(result: dict, allowed_claim_ids: set[str]) -> dict:
+    if not isinstance(result, dict):
+        raise AIError("invalid_model_json", "Article response was not an object.")
+    title = str(result.get("title") or "").strip()[:300]
+    if not title:
+        raise AIError("invalid_model_json", "Article response has no title.")
+    sections = []
+    for raw_section in result.get("sections", [])[:30]:
+        if not isinstance(raw_section, dict):
+            continue
+        heading = str(raw_section.get("heading") or "").strip()[:300]
+        paragraphs = []
+        for raw_paragraph in raw_section.get("paragraphs", [])[:30]:
+            if not isinstance(raw_paragraph, dict):
+                continue
+            text = str(raw_paragraph.get("text") or "").strip()[:12000]
+            claim_ids = list(dict.fromkeys(
+                str(item) for item in raw_paragraph.get("claim_ids", [])
+                if str(item) in allowed_claim_ids
+            ))
+            if text and claim_ids:
+                paragraphs.append({"text": text, "claim_ids": claim_ids})
+        if heading and paragraphs:
+            sections.append({"heading": heading, "paragraphs": paragraphs})
+    if not sections:
+        raise AIError("invalid_model_json", "Article response has no grounded sections.")
+    return {
+        "title": title,
+        "introduction": str(result.get("introduction") or "").strip()[:5000],
+        "sections": sections,
+        "gaps": [
+            str(item).strip()[:1000] for item in result.get("gaps", [])[:20]
+            if str(item).strip()
+        ],
+        "capability_version": _WIKI_ARTICLE_CAPABILITY,
+    }
+
+
+def _copilot_settings(
+    config: dict[str, str], context: str = "search"
+) -> tuple[str, float, int, dict]:
     instructions = str(config.get("ai_copilot_instructions") or "").strip()
-    prompt = _REVIEW_COPILOT_CORE_PROMPT
-    if instructions:
-        prompt += "\n\nUser-configured instructions:\n" + instructions
+    prompt = review_copilot_prompt(context, instructions)
     try:
         temperature = max(0.0, min(float(config.get("ai_copilot_temperature", "0.2")), 2.0))
     except (TypeError, ValueError):
@@ -132,6 +286,85 @@ def _copilot_settings(config: dict[str, str]) -> tuple[str, float, int, dict]:
         and str(key) not in reserved
     }
     return prompt, temperature, max_tokens, advanced
+
+
+def _import_candidates(raw: str) -> list[dict]:
+    text = str(raw or "").strip()[:100000]
+    if not text:
+        return []
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    candidate_text = fenced.group(1).strip() if fenced else text
+    entries: list[dict] = []
+    try:
+        decoded = json.loads(candidate_text)
+        if isinstance(decoded, dict):
+            decoded = decoded.get("sources", [])
+        if isinstance(decoded, list):
+            entries = [item for item in decoded if isinstance(item, dict)][:100]
+    except json.JSONDecodeError:
+        entries = []
+    if not entries:
+        for line in text.splitlines():
+            value = line.strip().lstrip("-*• ").strip()
+            match = re.search(
+                r"(?:https?://\S+|(?:doi:\s*)?10\.\d{4,9}/\S+|(?:arxiv:\s*)?\d{4}\.\d{4,5}(?:v\d+)?)",
+                value,
+                re.IGNORECASE,
+            )
+            if match:
+                entries.append({"url": match.group(0).rstrip(".,;)]}")})
+    output = []
+    seen = set()
+    for index, item in enumerate(entries[:100]):
+        url = str(item.get("url") or "").strip()
+        doi = str(item.get("doi") or "").strip()
+        arxiv_id = str(item.get("arxiv_id") or "").strip()
+        if url.lower().startswith("doi:"):
+            doi, url = url[4:].strip(), ""
+        if url.lower().startswith("arxiv:"):
+            arxiv_id, url = url[6:].strip(), ""
+        if not doi and re.fullmatch(r"10\.\d{4,9}/\S+", url, re.IGNORECASE):
+            doi, url = url, ""
+        if not arxiv_id and re.fullmatch(r"\d{4}\.\d{4,5}(?:v\d+)?", url, re.IGNORECASE):
+            arxiv_id, url = url, ""
+        if doi and not url:
+            url = f"https://doi.org/{doi}"
+        if arxiv_id and not url:
+            url = f"https://arxiv.org/abs/{arxiv_id}"
+        parsed = urlparse(url)
+        valid_url = parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        locator = (doi or arxiv_id or url).casefold()
+        if not locator or locator in seen:
+            continue
+        seen.add(locator)
+        title = str(item.get("title") or "").strip()[:500]
+        source_type = str(item.get("source_type") or "web").strip().lower()
+        why = str(item.get("why_relevant") or "").strip()[:1800]
+        authors = item.get("authors") or []
+        if isinstance(authors, list):
+            authors = ", ".join(str(author).strip() for author in authors if str(author).strip())
+        try:
+            year = int(item.get("year") or 0)
+        except (TypeError, ValueError):
+            year = 0
+        output.append({
+            "id": url or locator,
+            "title": title or (arxiv_id and f"arXiv {arxiv_id}") or doi or parsed.netloc or f"Imported Source {index + 1}",
+            "authors": str(authors or "Unknown")[:500],
+            "year": year if 1000 <= year <= 9999 else 0,
+            "abstract": "Imported candidate; inspect the original Source before creating Evidence.",
+            "url": url,
+            "paper_url": url,
+            "pdf_url": "",
+            "doi_url": f"https://doi.org/{doi}" if doi else "",
+            "keywords": [],
+            "source": "Third-party import",
+            "result_type": "paper" if source_type in {"paper", "report"} else "web",
+            "import_status": "partial" if valid_url else "unresolved",
+            "import_note": why,
+            "match_reason": why,
+        })
+    return output
 
 
 def companion_extension_info() -> dict[str, str]:
@@ -489,6 +722,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         if parsed.path.rstrip("/") == "/api/config":
             config = load_config(self.config_path)
             copilot_prompt, copilot_temperature, copilot_max_tokens, copilot_advanced = _copilot_settings(config)
+            public_profiles = _public_ai_profiles(config)
+            profile_roles = ai_role_assignments(config)
+            profile_by_id = {item["id"]: item for item in public_profiles}
+            chat_profile = profile_by_id.get(profile_roles.get("intelligent_search", ""), {})
+            embedding_profile = profile_by_id.get(profile_roles.get("embedding", ""), {})
             payload = {
                 "email": config.get("email", ""),
                 "semanticscholar_api_key": "",
@@ -504,12 +742,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "default_search_mode": (
                     config.get("default_search_mode")
                     if config.get("default_search_mode")
-                    in {"keyword", "intelligent"}
+                    in {"keyword", "intelligent", "import"}
                     else "keyword"
                 ),
                 "web_ignore_year_filter": self._parse_bool(
                     config.get("web_ignore_year_filter")
                 ),
+                "ai_model_profiles": public_profiles,
+                "ai_role_assignments": profile_roles,
+                "ai_provider": config.get("ai_provider", "openai_compatible"),
+                "ai_custom_recipe": json.loads(config.get("ai_custom_recipe") or "{}"),
                 "ai_base_url": config.get("ai_base_url", ""),
                 "ai_api_key": "",
                 "ai_api_key_configured": bool(config.get("ai_api_key", "")),
@@ -537,26 +779,35 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "ai_timeout_seconds": self._parse_bounded_int(
                     config.get("ai_timeout_seconds"), 45, 5, 600
                 ),
+                "ai_search_timeout_seconds": self._parse_bounded_int(
+                    config.get("ai_search_timeout_seconds")
+                    or config.get("ai_timeout_seconds"), 45, 5, 600
+                ),
+                "ai_stage_timeout_seconds": self._parse_bounded_int(
+                    config.get("ai_stage_timeout_seconds")
+                    or config.get("ai_timeout_seconds"), 45, 5, 600
+                ),
                 "ai_copilot_instructions": config.get("ai_copilot_instructions", ""),
                 "ai_copilot_temperature": copilot_temperature,
                 "ai_copilot_max_tokens": copilot_max_tokens,
                 "ai_copilot_advanced_parameters": copilot_advanced,
                 "ai_copilot_prompt_preview": copilot_prompt,
-                "ai_configured": bool(
-                    config.get("ai_base_url") and config.get("ai_chat_model")
-                ),
-                "ai_chat_configured": bool(
-                    config.get("ai_base_url") and config.get("ai_chat_model")
-                ),
+                "ai_copilot_prompt_shared": review_copilot_shared_prompt(),
+                "ai_copilot_prompt_previews": {
+                    "search_strategy": build_search_strategy_prompt(
+                        [], str(config.get("ai_copilot_instructions") or "")
+                    ),
+                    "evidence_proposal": _evidence_proposal_prompt(),
+                    "claim_proposal": _claim_proposal_prompt(),
+                    "wiki_maintenance": _wiki_maintainer_prompt(),
+                    "article_selection": _wiki_article_selection_prompt(),
+                    "article_writing": _wiki_article_prompt(),
+                    **review_copilot_stage_prompt_previews(),
+                },
+                "ai_configured": bool(chat_profile.get("base_url") and chat_profile.get("model")),
+                "ai_chat_configured": bool(chat_profile.get("base_url") and chat_profile.get("model")),
                 "ai_embedding_configured": bool(
-                    config.get("ai_embedding_model")
-                    and (
-                        config.get("ai_embedding_base_url")
-                        if self._parse_bool(
-                            config.get("ai_embedding_separate_connection")
-                        )
-                        else config.get("ai_base_url")
-                    )
+                    embedding_profile.get("base_url") and embedding_profile.get("model")
                 ),
             }
             body = json.dumps(payload).encode("utf-8")
@@ -637,6 +888,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 limit = self._parse_bounded_int(
                     params.get("limit", ["20"])[0], 20, 1, 100
                 )
+                raw_strategy = params.get("strategy", [""])[0]
+                search_actions = json.loads(raw_strategy) if raw_strategy else []
+                if not isinstance(search_actions, list):
+                    search_actions = []
                 web_pages = max(
                     1,
                     min(int(params.get("web_pages", ["1"])[0] or "1"), 10),
@@ -653,6 +908,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     progress=lambda stage, details: _set_intelligent_progress(
                         run_id, stage, details
                     ),
+                    search_actions=search_actions,
+                    profile_id=params.get("model_profile_id", [""])[0][:80],
                 )
                 payload["warnings"] = [*warnings, *payload.get("warnings", [])]
                 payload["enabled_backends"] = backends
@@ -731,8 +988,29 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 {"proposals": list_claim_proposals(self.knowledge_db_path)}
             )
             return
+        if parsed.path.rstrip("/") == "/api/evidence-proposals":
+            self._send_json(
+                {"proposals": list_evidence_proposals(self.knowledge_db_path)}
+            )
+            return
         if parsed.path.rstrip("/") == "/api/views":
             self._send_json({"views": list_views(self.knowledge_db_path)})
+            return
+        if parsed.path.rstrip("/") == "/api/wiki":
+            self._send_json(get_wiki(self.knowledge_db_path))
+            return
+        if parsed.path.rstrip("/") == "/api/wiki/proposals":
+            self._send_json(
+                {"proposals": list_wiki_proposals(self.knowledge_db_path)}
+            )
+            return
+        if parsed.path.rstrip("/") == "/api/project-documents":
+            query = parse_qs(parsed.query)
+            self._send_json({
+                "documents": list_project_documents(
+                    str(query.get("artifact_id", [""])[0]), self.knowledge_db_path
+                )
+            })
             return
         view_match = re.fullmatch(r"/api/views/([0-9a-f]+)", parsed.path.rstrip("/"))
         if view_match:
@@ -1077,6 +1355,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         proposal_accept_match = re.fullmatch(
             r"/api/claim-proposals/([0-9a-f]+)/accept", route
         )
+        evidence_proposal_accept_match = re.fullmatch(
+            r"/api/evidence-proposals/([0-9a-f]+)/accept", route
+        )
+        wiki_proposal_accept_match = re.fullmatch(
+            r"/api/wiki/proposals/([0-9a-f]+)/accept", route
+        )
         if route not in {
             "/api/config",
             "/api/config/default-search-mode",
@@ -1086,11 +1370,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/library/sources",
             "/api/library/sources/batch",
             "/api/review/chat",
+            "/api/search/strategy",
+            "/api/search/import",
             "/api/evidence",
             "/api/claims",
             "/api/claim-relations",
             "/api/claim-proposals/generate",
-            "/api/views",
+            "/api/evidence-proposals/generate",
+            "/api/wiki/proposals/generate",
+            "/api/wiki/articles/generate",
+            "/api/project-documents",
             "/api/tags/entity",
             "/api/annotations",
             "/api/companion/pairing",
@@ -1098,7 +1387,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/companion/captures",
             "/api/companion/commit",
             "/api/companion/theme",
-        } and not capture_match and not companion_confirm_match and not proposal_accept_match:
+        } and not capture_match and not companion_confirm_match and not proposal_accept_match and not evidence_proposal_accept_match and not wiki_proposal_accept_match:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -1116,6 +1405,32 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             except ValueError as error:
                 self._send_json(
                     {"error": "invalid_claim_proposal", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if evidence_proposal_accept_match:
+            try:
+                evidence = accept_evidence_proposal(
+                    evidence_proposal_accept_match.group(1), payload,
+                    self.knowledge_db_path,
+                )
+                self._send_json(evidence, HTTPStatus.CREATED)
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_evidence_proposal", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if wiki_proposal_accept_match:
+            try:
+                self._send_json(
+                    accept_wiki_proposal(
+                        wiki_proposal_accept_match.group(1), self.knowledge_db_path
+                    )
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_wiki_proposal", "message": str(error)},
                     HTTPStatus.BAD_REQUEST,
                 )
             return
@@ -1285,15 +1600,522 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
             return
-        if route == "/api/views":
+        if route == "/api/wiki/proposals/generate":
             try:
+                wiki = get_wiki(self.knowledge_db_path)
+                requested_ids = payload.get("claim_ids")
+                if not isinstance(requested_ids, list):
+                    requested_ids = []
+                requested_ids = list(dict.fromkeys(
+                    str(item) for item in requested_ids if item
+                ))
+                active_claims = [
+                    claim for claim in wiki["claims"]
+                    if claim.get("lifecycle") == "active"
+                ]
+                if requested_ids:
+                    requested = set(requested_ids)
+                    selected_claims = [
+                        claim for claim in active_claims if claim["id"] in requested
+                    ]
+                    existing_ids = {
+                        claim_id for page in wiki["pages"]
+                        for claim_id in page.get("claim_ids", [])
+                    }
+                    selected_ids = {claim["id"] for claim in selected_claims} | existing_ids
+                    selected_claims = [
+                        claim for claim in active_claims if claim["id"] in selected_ids
+                    ]
+                else:
+                    selected_claims = active_claims
+                if not selected_claims:
+                    raise ValueError("The Wiki needs at least one active Claim to organize")
+                if len(selected_claims) > 200:
+                    raise ValueError(
+                        "Select a smaller Claim subset; one Wiki review can organize at most 200 Claims"
+                    )
+                config = load_config(self.config_path)
+                client = _client_from_config(
+                    config, require_embedding=False, role="wiki",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                )
+                _, temperature, max_tokens, advanced = _copilot_settings(config, "views")
+                request_payload = json.dumps({
+                    "instruction": str(payload.get("instruction") or "")[:2000],
+                    "current_wiki": [
+                        {
+                            "title": page["title"],
+                            "summary": page["summary"],
+                            "parent_id": page["parent_id"],
+                            "page_id": page["id"],
+                            "claim_ids": page["claim_ids"],
+                        }
+                        for page in wiki["pages"]
+                    ],
+                    "claims": [
+                        _wiki_claim_context(claim) for claim in selected_claims
+                    ],
+                }, ensure_ascii=False)
+                result = client.chat_json(
+                    _wiki_maintainer_prompt(), request_payload,
+                    temperature=min(temperature, 0.3),
+                    max_tokens=max(3000, max_tokens),
+                    extra_parameters=advanced,
+                )
+                proposal = create_wiki_proposal(
+                    result,
+                    _WIKI_PROPOSAL_CAPABILITY,
+                    _model_name_from_config(
+                        config, "wiki",
+                        str(payload.get("model_profile_id") or "")[:80],
+                    ),
+                    {"claim_ids": [claim["id"] for claim in selected_claims]},
+                    self.knowledge_db_path,
+                )
+                snapshot = client.usage_snapshot()
+                latest_usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
                 self._send_json(
-                    create_view(payload, self.knowledge_db_path),
+                    {"proposal": proposal, "usage": latest_usage},
                     HTTPStatus.CREATED,
                 )
             except ValueError as error:
                 self._send_json(
-                    {"error": "invalid_view", "message": str(error)},
+                    {"error": "invalid_wiki_request", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error), "usage": get_usage()},
+                    HTTPStatus.BAD_REQUEST
+                    if error.code in {"ai_unconfigured", "chat_model_missing"}
+                    else HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return
+        if route == "/api/wiki/articles/generate":
+            goal = str(payload.get("goal") or "").strip()[:2000]
+            if not goal:
+                self._send_json(
+                    {"error": "goal_required", "message": "Describe what this Article should help you understand."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                wiki = get_wiki(self.knowledge_db_path)
+                claim_ids = {
+                    claim_id for page in wiki["pages"]
+                    for claim_id in page.get("claim_ids", [])
+                }
+                selected_claims = [
+                    claim for claim in wiki["claims"]
+                    if claim["id"] in claim_ids and claim.get("lifecycle") == "active"
+                ]
+                if not selected_claims:
+                    raise ValueError("The global Wiki has no organized Claims for this Article")
+                if len(selected_claims) > 200:
+                    raise ValueError("Article generation currently supports up to 200 Wiki Claims")
+                config = load_config(self.config_path)
+                client = _client_from_config(
+                    config, require_embedding=False, role="article",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                )
+                _, temperature, max_tokens, advanced = _copilot_settings(config, "views")
+                wiki_pages = [
+                    {
+                        "id": page["id"],
+                        "title": page["title"],
+                        "parent_id": page["parent_id"],
+                        "summary": page["summary"],
+                        "claim_ids": page["claim_ids"],
+                    }
+                    for page in wiki["pages"]
+                ]
+                selection = client.chat_json(
+                    _wiki_article_selection_prompt(),
+                    json.dumps({
+                        "goal": goal,
+                        "wiki_pages": wiki_pages,
+                        "claims": [
+                            _wiki_claim_context(claim) for claim in selected_claims
+                        ],
+                    }, ensure_ascii=False),
+                    temperature=min(temperature, 0.25),
+                    max_tokens=min(max(1200, max_tokens), 3000),
+                    extra_parameters=advanced,
+                )
+                valid_ids = {claim["id"] for claim in selected_claims}
+                chosen_ids = list(dict.fromkeys(
+                    str(item) for item in (
+                        selection.get("claim_ids", [])
+                        if isinstance(selection, dict) else []
+                    )
+                    if str(item) in valid_ids
+                ))[:40]
+                if not chosen_ids:
+                    raise AIError(
+                        "no_article_material",
+                        "The model selected no valid Wiki Claims for this Article.",
+                    )
+                chosen_set = set(chosen_ids)
+                chosen_claims = sorted(
+                    (claim for claim in selected_claims if claim["id"] in chosen_set),
+                    key=lambda claim: chosen_ids.index(claim["id"]),
+                )
+                result = client.chat_json(
+                    _wiki_article_prompt(),
+                    json.dumps({
+                        "goal": goal,
+                        "selection_rationale": str(
+                            selection.get("rationale") or ""
+                        )[:2000],
+                        "outline": (
+                            selection.get("outline")
+                            if isinstance(selection.get("outline"), list) else []
+                        ),
+                        "claims": [
+                            _wiki_claim_context(claim, include_evidence=True)
+                            for claim in chosen_claims
+                        ],
+                    }, ensure_ascii=False),
+                    temperature=min(temperature, 0.4),
+                    max_tokens=max(3000, max_tokens),
+                    extra_parameters=advanced,
+                )
+                article = _normalize_wiki_article(result, chosen_set)
+                article["selected_claim_ids"] = chosen_ids
+                snapshot = client.usage_snapshot()
+                latest_usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json({"article": article, "usage": latest_usage})
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_article_request", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error), "usage": get_usage()},
+                    HTTPStatus.BAD_REQUEST
+                    if error.code in {"ai_unconfigured", "chat_model_missing"}
+                    else HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return
+        if route == "/api/project-documents":
+            try:
+                self._send_json(
+                    save_project_document(payload, self.knowledge_db_path),
+                    HTTPStatus.CREATED,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_project_document", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/search/import":
+            candidates = _import_candidates(str(payload.get("content") or ""))
+            existing_urls = {
+                str(item.get("url") or "").rstrip("/").casefold()
+                for item in list_sources(self.knowledge_db_path)
+                if item.get("url")
+            }
+            for candidate in candidates:
+                if str(candidate.get("url") or "").rstrip("/").casefold() in existing_urls:
+                    candidate["import_status"] = "duplicate"
+            self._send_json({"results": candidates, "count": len(candidates)})
+            return
+        if route == "/api/search/strategy":
+            intent = str(payload.get("intent") or "").strip()[:2000]
+            if not intent:
+                self._send_json(
+                    {"error": "empty_intent", "message": "Enter a search intent first."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            enabled = payload.get("backends") if isinstance(payload.get("backends"), list) else []
+            academic_enabled = any(
+                item in {"arxiv", "openalex", "semanticscholar"} for item in enabled
+            )
+            web_enabled = "websearch" in enabled
+            try:
+                config = load_config(self.config_path)
+                client = _client_from_config(
+                    config, require_embedding=False, role="intelligent_search",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                )
+                custom_instructions = str(
+                    config.get("ai_copilot_instructions") or ""
+                ).strip()
+                selected_areas = (
+                    payload.get("areas")
+                    if isinstance(payload.get("areas"), list)
+                    else []
+                )
+                strategy_prompt = build_search_strategy_prompt(
+                    selected_areas, custom_instructions
+                )
+                _, copilot_temperature, copilot_max_tokens, copilot_advanced = (
+                    _copilot_settings(config)
+                )
+                strategy = client.chat_json(
+                    strategy_prompt,
+                    json.dumps({
+                        "intent": intent,
+                        "available_channels": {
+                            "academic": academic_enabled,
+                            "web": web_enabled,
+                        },
+                        "areas": selected_areas,
+                        "year_from": payload.get("year_from") or None,
+                        "year_to": payload.get("year_to") or None,
+                        "output": {"actions": [{
+                            "query": "concise retrieval query",
+                            "target": "academic|web|both",
+                            "purpose": "why this retrieval action exists",
+                        }]},
+                    }, ensure_ascii=False),
+                    temperature=copilot_temperature,
+                    max_tokens=copilot_max_tokens,
+                    extra_parameters=copilot_advanced,
+                )
+                actions = []
+                for item in strategy.get("actions", []) if isinstance(strategy, dict) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    action_query = str(item.get("query") or "").strip()[:500]
+                    target = str(item.get("target") or "both").lower()
+                    if target == "academic" and not academic_enabled:
+                        continue
+                    if target == "web" and not web_enabled:
+                        continue
+                    if target == "both" and not (academic_enabled and web_enabled):
+                        target = "academic" if academic_enabled else "web"
+                    if action_query and target in {"academic", "web", "both"}:
+                        actions.append({
+                            "query": action_query,
+                            "target": target,
+                            "purpose": str(item.get("purpose") or "").strip()[:500],
+                        })
+                if not actions:
+                    actions = [{"query": intent, "target": "both" if academic_enabled and web_enabled else ("academic" if academic_enabled else "web"), "purpose": "Search the original intent directly."}]
+                snapshot = client.usage_snapshot()
+                usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json({"actions": actions[:5], "usage": usage})
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error), "usage": get_usage()},
+                    HTTPStatus.BAD_REQUEST if error.code == "ai_unconfigured" else HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return
+        if route == "/api/evidence-proposals/generate":
+            source_ids = payload.get("source_ids")
+            if not isinstance(source_ids, list):
+                source_ids = []
+            source_ids = list(dict.fromkeys(str(item) for item in source_ids[:6] if item))
+            focus = str(payload.get("focus") or "").strip()[:2000]
+            if not source_ids or not focus:
+                self._send_json(
+                    {"error": "source_focus_required",
+                     "message": "Select at least one Source and enter a Focus."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                workspaces = []
+                for source_id in source_ids:
+                    workspace = get_source_workspace(source_id, self.knowledge_db_path)
+                    if not workspace.get("capture"):
+                        captured = capture_source_content(workspace["source"], self.content_dir)
+                        workspace = store_capture(
+                            source_id, captured, self.knowledge_db_path
+                        )
+                    workspaces.append(workspace)
+                config = load_config(self.config_path)
+                client = _client_from_config(
+                    config, require_embedding=False, role="evidence",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                )
+                requested_profile_id = str(payload.get("model_profile_id") or "")[:80]
+                evidence_profile = next((
+                    item for item in ai_model_profiles(config)
+                    if str(item.get("id") or "") == requested_profile_id
+                ), None) or ai_profile_for_role(config, "evidence")
+                capabilities = set(evidence_profile.get("capabilities", []))
+                native_documents = []
+                browsable_urls = []
+                source_context = []
+                for workspace in workspaces:
+                    source = workspace["source"]
+                    source_url = source.get("url") or source.get("paper_url")
+                    input_kind = "capture"
+                    if capabilities & {"native_documents", "file_extraction"}:
+                        try:
+                            raw_path, media_type, _ = get_capture_file(
+                                source["id"], self.content_dir, self.knowledge_db_path
+                            )
+                            if media_type == "application/pdf":
+                                native_documents.append({
+                                    "data": raw_path.read_bytes(),
+                                    "mime_type": media_type,
+                                    "filename": f"{source['id']}.pdf",
+                                })
+                                input_kind = "native_document"
+                        except (ValueError, OSError):
+                            pass
+                    if (
+                        input_kind == "capture"
+                        and "url_fetch" in capabilities
+                        and source_url
+                    ):
+                        browsable_urls.append(str(source_url))
+                        input_kind = "url"
+                    segments = []
+                    budget = 0
+                    if input_kind == "capture":
+                        for segment in workspace.get("segments", []):
+                            text = str(segment.get("text") or "")
+                            if budget + len(text) > 45000:
+                                break
+                            segments.append({
+                                "segment_id": segment["id"],
+                                "locator": segment.get("locator", ""),
+                                "text": text,
+                            })
+                            budget += len(text)
+                    source_context.append({
+                        "source_id": source["id"],
+                        "title": source["title"],
+                        "url": source_url,
+                        "input_kind": input_kind,
+                        "segments": segments,
+                    })
+                request_text = json.dumps(
+                    {"focus": focus, "sources": source_context}, ensure_ascii=False
+                )
+                result = None
+                grounded_input_used = bool(native_documents or browsable_urls)
+                if grounded_input_used:
+                    try:
+                        result = client.grounded_json(
+                            _evidence_document_proposal_prompt(), request_text,
+                            documents=native_documents, urls=browsable_urls,
+                            max_tokens=3500,
+                        )
+                    except AIError as error:
+                        # Malformed output is still a completed model response. Return it
+                        # to the user instead of silently spending a second request.
+                        if error.code == "invalid_model_json":
+                            raise
+                        result = None
+                    except (ValueError, OSError):
+                        result = None
+                if result is None:
+                    # A failed grounded request falls back to locally captured text without
+                    # resending native files or assuming the provider visited a URL.
+                    fallback_context = []
+                    for workspace in workspaces:
+                        segments = []
+                        budget = 0
+                        for segment in workspace.get("segments", []):
+                            text = str(segment.get("text") or "")
+                            if budget + len(text) > 45000:
+                                break
+                            segments.append({
+                                "segment_id": segment["id"],
+                                "locator": segment.get("locator", ""),
+                                "text": text,
+                            })
+                            budget += len(text)
+                        fallback_context.append({
+                            "source_id": workspace["source"]["id"],
+                            "title": workspace["source"]["title"],
+                            "url": workspace["source"].get("url")
+                            or workspace["source"].get("paper_url"),
+                            "segments": segments,
+                        })
+                    result = client.chat_json(
+                        _evidence_proposal_prompt(), json.dumps(
+                            {"focus": focus, "sources": fallback_context},
+                            ensure_ascii=False,
+                        ),
+                        temperature=0.1, max_tokens=3500,
+                    )
+                candidates = result.get("evidence") if isinstance(result, dict) else []
+                if not isinstance(candidates, list):
+                    candidates = []
+                allowed_sources = set(source_ids)
+                segment_source = {
+                    segment["id"]: workspace["source"]["id"]
+                    for workspace in workspaces
+                    for segment in workspace.get("segments", [])
+                }
+                scope = {"kind": "selected_sources", "source_ids": source_ids,
+                         "focus": focus}
+                proposals = []
+                for candidate in candidates[:12]:
+                    if not isinstance(candidate, dict):
+                        continue
+                    segment_id = str(candidate.get("segment_id") or "")
+                    source_id = str(candidate.get("source_id") or segment_source.get(segment_id) or "")
+                    if source_id in allowed_sources and (
+                        not segment_id or segment_source.get(segment_id) != source_id
+                    ):
+                        workspace = next(
+                            item for item in workspaces
+                            if item["source"]["id"] == source_id
+                        )
+                        mapped = _map_document_quote(workspace, candidate.get("quote", ""))
+                        if mapped:
+                            segment_id, verified_quote = mapped
+                            candidate = {
+                                **candidate,
+                                "segment_id": segment_id,
+                                "quote": verified_quote,
+                            }
+                    if source_id not in allowed_sources or segment_source.get(segment_id) != source_id:
+                        continue
+                    try:
+                        proposals.append(create_evidence_proposal(
+                            {**candidate, "source_id": source_id},
+                            _EVIDENCE_PROPOSAL_CAPABILITY,
+                            _model_name_from_config(
+                                config, "evidence",
+                                str(payload.get("model_profile_id") or "")[:80],
+                            ), scope,
+                            self.knowledge_db_path,
+                        ))
+                    except ValueError:
+                        continue
+                if not proposals:
+                    raise AIError(
+                        "no_evidence_proposals",
+                        "The model returned no exact quotations that Knowte could verify.",
+                    )
+                snapshot = client.usage_snapshot()
+                latest_usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json(
+                    {"proposals": proposals,
+                     "summary": str(result.get("summary") or "")[:1000],
+                     "usage": latest_usage}, HTTPStatus.CREATED,
+                )
+            except (AIError, CaptureError) as error:
+                self._send_json(
+                    {"error": getattr(error, "code", "evidence_proposal_failed"),
+                     "message": str(error)}, HTTPStatus.BAD_GATEWAY,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "source_not_found", "message": str(error)},
                     HTTPStatus.BAD_REQUEST,
                 )
             return
@@ -1319,14 +2141,19 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 return
             try:
                 config = load_config(self.config_path)
-                client = _client_from_config(config, require_embedding=False)
+                client = _client_from_config(
+                    config, require_embedding=False, role="claims",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                )
                 artifact = payload.get("artifact")
                 artifact = artifact if isinstance(artifact, dict) else {}
+                focus = str(payload.get("focus") or "").strip()[:2000]
                 scope = {
                     "kind": "selected_evidence",
                     "evidence_ids": evidence_ids,
                     "artifact_id": str(artifact.get("id") or ""),
                     "artifact_title": str(artifact.get("title") or "")[:300],
+                    "focus": focus,
                 }
                 evidence_context = [
                     {
@@ -1334,20 +2161,39 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         "type": item["evidence_type"],
                         "source_id": item["source_id"],
                         "source_title": item["source_title"],
+                        "source_provider": item.get("source_provider", ""),
                         "locator": item["locator"],
                         "quote": item["quote"][:5000],
                         "tags": [tag["name"] for tag in item.get("tags", [])],
                     }
                     for item in evidence_items
                 ]
+                context_tags = list(dict.fromkeys(
+                    tag
+                    for item in evidence_context
+                    for tag in item.get("tags", [])
+                    if tag
+                ))
+                related_claims = find_related_claims(
+                    " ".join([
+                        focus,
+                        *(item["quote"] for item in evidence_context),
+                    ]),
+                    context_tags, 20, self.knowledge_db_path,
+                )
+                scope["comparison_claim_ids"] = [
+                    item["claim_id"] for item in related_claims
+                ]
                 request_payload = json.dumps(
                     {
                         "scope": scope,
+                        "focus": focus,
                         "artifact": {
                             "title": str(artifact.get("title") or "")[:300],
                             "purpose": str(artifact.get("purpose") or "")[:2000],
                         },
                         "evidence": evidence_context,
+                        "existing_claims": related_claims,
                         "instruction": str(payload.get("instruction") or "")[:2000],
                     },
                     ensure_ascii=False,
@@ -1360,6 +2206,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 if not isinstance(candidates, list):
                     candidates = []
                 allowed_evidence = set(evidence_ids)
+                allowed_claims = {
+                    item["claim_id"]: item for item in related_claims
+                }
                 proposals = []
                 for candidate in candidates[:20]:
                     if not isinstance(candidate, dict):
@@ -1372,20 +2221,115 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                             continue
                         links.append(link)
                     candidate = {**candidate, "evidence": links}
+                    if not links or not any(
+                        str(link.get("stance") or "supports").lower()
+                        in {"supports", "limits"}
+                        for link in links
+                    ):
+                        continue
+                    if str(candidate.get("basis") or "").lower() == "inference" and len({
+                        link.get("evidence_id") for link in links
+                    }) < 2:
+                        continue
                     try:
                         proposals.append(create_claim_proposal(
-                            candidate,
+                            {**candidate, "operation": "create_claim"},
                             _CLAIM_PROPOSAL_CAPABILITY,
-                            config.get("ai_chat_model", ""),
+                            _model_name_from_config(
+                                config, "claims",
+                                str(payload.get("model_profile_id") or "")[:80],
+                            ),
                             scope,
                             self.knowledge_db_path,
                         ))
                     except ValueError:
                         continue
-                if not proposals:
+                updates = result.get("existing_claim_updates") if isinstance(result, dict) else []
+                for candidate in (updates if isinstance(updates, list) else [])[:20]:
+                    if not isinstance(candidate, dict):
+                        continue
+                    target_id = str(candidate.get("claim_id") or "")
+                    target = allowed_claims.get(target_id)
+                    if not target:
+                        continue
+                    links = []
+                    for link in candidate.get("evidence") or []:
+                        if not isinstance(link, dict):
+                            continue
+                        if str(link.get("evidence_id") or "") in allowed_evidence:
+                            links.append(link)
+                    if not links:
+                        continue
+                    try:
+                        proposals.append(create_claim_proposal(
+                            {
+                                "operation": "link_evidence",
+                                "target_claim_id": target_id,
+                                "target_statement": target["statement"],
+                                "evidence": links,
+                                "rationale": str(candidate.get("rationale") or "")[:2000],
+                                "caveats": candidate.get("caveats") or [],
+                            },
+                            _CLAIM_PROPOSAL_CAPABILITY,
+                            _model_name_from_config(
+                                config, "claims",
+                                str(payload.get("model_profile_id") or "")[:80],
+                            ), scope, self.knowledge_db_path,
+                        ))
+                    except ValueError:
+                        continue
+                relations = result.get("claim_relations") if isinstance(result, dict) else []
+                for candidate in (relations if isinstance(relations, list) else [])[:12]:
+                    if not isinstance(candidate, dict):
+                        continue
+                    subject_id = str(candidate.get("subject_claim_id") or "")
+                    object_id = str(candidate.get("object_claim_id") or "")
+                    relation_type = str(candidate.get("relation_type") or "").lower()
+                    if (
+                        subject_id not in allowed_claims
+                        or object_id not in allowed_claims
+                        or subject_id == object_id
+                        or relation_type not in {"supports", "contradicts", "related"}
+                    ):
+                        continue
+                    try:
+                        proposals.append(create_claim_proposal(
+                            {
+                                "operation": "create_relation",
+                                "subject_claim_id": subject_id,
+                                "subject_statement": allowed_claims[subject_id]["statement"],
+                                "object_claim_id": object_id,
+                                "object_statement": allowed_claims[object_id]["statement"],
+                                "relation_type": relation_type,
+                                "rationale": str(candidate.get("rationale") or "")[:2000],
+                                "evidence": [],
+                            },
+                            _CLAIM_PROPOSAL_CAPABILITY,
+                            _model_name_from_config(
+                                config, "claims",
+                                str(payload.get("model_profile_id") or "")[:80],
+                            ), scope, self.knowledge_db_path,
+                        ))
+                    except ValueError:
+                        continue
+                skipped_items = [
+                    {
+                        "evidence_ids": [
+                            str(item) for item in candidate.get("evidence_ids", [])[:12]
+                            if str(item) in allowed_evidence
+                        ],
+                        "reason": str(candidate.get("reason") or "")[:1000],
+                    }
+                    for candidate in (
+                        result.get("skipped", [])
+                        if isinstance(result.get("skipped"), list) else []
+                    )[:20]
+                    if isinstance(candidate, dict) and str(candidate.get("reason") or "").strip()
+                ]
+                if not proposals and not skipped_items:
                     raise AIError(
                         "no_claim_proposals",
-                        "The model returned no valid Claim proposals.",
+                        "The model returned neither valid Claim changes nor skip explanations.",
                     )
                 snapshot = client.usage_snapshot()
                 latest_usage = record_ai_usage(
@@ -1396,9 +2340,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     {
                         "proposals": proposals,
                         "summary": str(result.get("summary") or "")[:1000],
+                        "skipped": skipped_items,
+                        "comparison_claim_count": len(related_claims),
                         "usage": latest_usage,
                     },
-                    HTTPStatus.CREATED,
+                    HTTPStatus.CREATED if proposals else HTTPStatus.OK,
                 )
             except AIError as error:
                 self._send_json(
@@ -1687,8 +2633,13 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 client = _client_from_config(
                     config,
                     require_embedding=False,
+                    role="copilot",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                    timeout_scope="search" if review_context == "search" else "stage",
                 )
-                copilot_prompt, copilot_temperature, copilot_max_tokens, copilot_advanced = _copilot_settings(config)
+                copilot_prompt, copilot_temperature, copilot_max_tokens, copilot_advanced = _copilot_settings(
+                    config, review_context
+                )
                 review_input = json.dumps(
                     {
                         "question": question,
@@ -1697,9 +2648,19 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                             "title": str(artifact_context.get("title") or "")[:300],
                             "purpose": str(artifact_context.get("purpose") or "")[:1200],
                         },
+                        "search_strategy": (
+                            payload.get("search_strategy")
+                            if isinstance(payload.get("search_strategy"), dict)
+                            else {}
+                        ),
                         "selected_sources": source_context,
                         "selected_evidence": evidence_context,
                         "selected_claims": claim_context,
+                        "wiki_context": (
+                            payload.get("wiki_context")
+                            if isinstance(payload.get("wiki_context"), dict)
+                            else {}
+                        ),
                         "recent_conversation": conversation_context,
                     },
                     ensure_ascii=False,
@@ -1714,6 +2675,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     temperature=copilot_temperature,
                     max_tokens=copilot_max_tokens,
                     extra_parameters=copilot_advanced,
+                    allow_text_fallback=True,
                 )
                 if not isinstance(review, dict):
                     raise AIError(
@@ -1725,13 +2687,31 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     chat_requests=snapshot.get("chat_requests", 0),
                     chat_tokens=snapshot.get("chat_tokens", 0),
                 )
+                proposed_search_actions = []
+                if review_context == "search" and isinstance(review.get("search_actions"), list):
+                    for item in review["search_actions"][:5]:
+                        if not isinstance(item, dict):
+                            continue
+                        action_query = str(item.get("query") or "").strip()[:500]
+                        target = str(item.get("target") or "both").strip().lower()
+                        if action_query and target in {"academic", "web", "both"}:
+                            proposed_search_actions.append({
+                                "query": action_query,
+                                "target": target,
+                                "purpose": str(item.get("purpose") or "").strip()[:500],
+                            })
                 self._send_json(
                     {
                         "answer": str(review.get("answer") or "").strip(),
                         "recommendations": (
                             review.get("recommendations")
-                            if isinstance(review.get("recommendations"), list)
+                            if review_context == "library"
+                            and isinstance(review.get("recommendations"), list)
                             else []
+                        ),
+                        "search_actions": proposed_search_actions,
+                        "structured_output_degraded": bool(
+                            review.get("_structured_output_degraded")
                         ),
                         "usage": latest_usage,
                     }
@@ -1863,6 +2843,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         )
         config = set_web_ignore_year_filter(web_ignore_year_filter, self.config_path)
         ai_field_names = {
+            "ai_model_profiles",
+            "ai_role_assignments",
+            "ai_provider",
+            "ai_custom_recipe",
             "ai_base_url",
             "ai_api_key",
             "ai_chat_model",
@@ -1874,13 +2858,31 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "ai_verify_batch_size",
             "ai_verify_concurrency",
             "ai_timeout_seconds",
+            "ai_search_timeout_seconds",
+            "ai_stage_timeout_seconds",
             "ai_copilot_instructions",
             "ai_copilot_temperature",
             "ai_copilot_max_tokens",
             "ai_copilot_advanced_parameters",
         }
-        if ai_field_names.intersection(payload):
+        if "ai_model_profiles" in payload or "ai_role_assignments" in payload:
+            try:
+                config = set_ai_model_profiles(
+                    payload.get("ai_model_profiles", []),
+                    payload.get("ai_role_assignments", {}),
+                    self.config_path,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_ai_profiles", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+        legacy_ai_fields = ai_field_names - {"ai_model_profiles", "ai_role_assignments"}
+        if legacy_ai_fields.intersection(payload):
             ai_settings = {
+                "ai_provider": payload.get("ai_provider"),
+                "ai_custom_recipe": payload.get("ai_custom_recipe"),
                 "ai_base_url": payload.get("ai_base_url"),
                 "ai_chat_model": payload.get("ai_chat_model"),
                 "ai_embedding_model": payload.get("ai_embedding_model"),
@@ -1894,6 +2896,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "ai_verify_batch_size": payload.get("ai_verify_batch_size"),
                 "ai_verify_concurrency": payload.get("ai_verify_concurrency"),
                 "ai_timeout_seconds": payload.get("ai_timeout_seconds"),
+                "ai_search_timeout_seconds": payload.get("ai_search_timeout_seconds"),
+                "ai_stage_timeout_seconds": payload.get("ai_stage_timeout_seconds"),
                 "ai_copilot_instructions": payload.get("ai_copilot_instructions"),
                 "ai_copilot_temperature": payload.get("ai_copilot_temperature"),
                 "ai_copilot_max_tokens": payload.get("ai_copilot_max_tokens"),
@@ -1906,6 +2910,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     "ai_embedding_api_key"
                 )
             config = set_ai_settings(ai_settings, self.config_path)
+        public_profiles = _public_ai_profiles(config)
+        profile_roles = ai_role_assignments(config)
+        profile_by_id = {item["id"]: item for item in public_profiles}
+        chat_profile = profile_by_id.get(profile_roles.get("intelligent_search", ""), {})
+        embedding_profile = profile_by_id.get(profile_roles.get("embedding", ""), {})
         response_payload = {
             "email": config.get("email", ""),
             "semanticscholar_api_key": "",
@@ -1921,12 +2930,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "default_search_mode": (
                 config.get("default_search_mode")
                 if config.get("default_search_mode")
-                in {"keyword", "intelligent"}
+                in {"keyword", "intelligent", "import"}
                 else "keyword"
             ),
             "web_ignore_year_filter": self._parse_bool(
                 config.get("web_ignore_year_filter")
             ),
+            "ai_model_profiles": public_profiles,
+            "ai_role_assignments": profile_roles,
+            "ai_provider": config.get("ai_provider", "openai_compatible"),
+            "ai_custom_recipe": json.loads(config.get("ai_custom_recipe") or "{}"),
             "ai_base_url": config.get("ai_base_url", ""),
             "ai_api_key": "",
             "ai_api_key_configured": bool(config.get("ai_api_key", "")),
@@ -1954,26 +2967,35 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "ai_timeout_seconds": self._parse_bounded_int(
                 config.get("ai_timeout_seconds"), 45, 5, 600
             ),
+            "ai_search_timeout_seconds": self._parse_bounded_int(
+                config.get("ai_search_timeout_seconds")
+                or config.get("ai_timeout_seconds"), 45, 5, 600
+            ),
+            "ai_stage_timeout_seconds": self._parse_bounded_int(
+                config.get("ai_stage_timeout_seconds")
+                or config.get("ai_timeout_seconds"), 45, 5, 600
+            ),
             "ai_copilot_instructions": config.get("ai_copilot_instructions", ""),
             "ai_copilot_temperature": _copilot_settings(config)[1],
             "ai_copilot_max_tokens": _copilot_settings(config)[2],
             "ai_copilot_advanced_parameters": _copilot_settings(config)[3],
             "ai_copilot_prompt_preview": _copilot_settings(config)[0],
-            "ai_configured": bool(
-                config.get("ai_base_url") and config.get("ai_chat_model")
-            ),
-            "ai_chat_configured": bool(
-                config.get("ai_base_url") and config.get("ai_chat_model")
-            ),
+            "ai_copilot_prompt_shared": review_copilot_shared_prompt(),
+            "ai_copilot_prompt_previews": {
+                "search_strategy": build_search_strategy_prompt(
+                    [], str(config.get("ai_copilot_instructions") or "")
+                ),
+                "evidence_proposal": _evidence_proposal_prompt(),
+                "claim_proposal": _claim_proposal_prompt(),
+                "wiki_maintenance": _wiki_maintainer_prompt(),
+                "article_selection": _wiki_article_selection_prompt(),
+                "article_writing": _wiki_article_prompt(),
+                **review_copilot_stage_prompt_previews(),
+            },
+            "ai_configured": bool(chat_profile.get("base_url") and chat_profile.get("model")),
+            "ai_chat_configured": bool(chat_profile.get("base_url") and chat_profile.get("model")),
             "ai_embedding_configured": bool(
-                config.get("ai_embedding_model")
-                and (
-                    config.get("ai_embedding_base_url")
-                    if self._parse_bool(
-                        config.get("ai_embedding_separate_connection")
-                    )
-                    else config.get("ai_base_url")
-                )
+                embedding_profile.get("base_url") and embedding_profile.get("model")
             ),
         }
         response = json.dumps(response_payload).encode("utf-8")
@@ -2052,6 +3074,18 @@ class KnowteHandler(SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
+        wiki_proposal_match = re.fullmatch(
+            r"/api/wiki/proposals/([0-9a-f]+)", parsed.path.rstrip("/")
+        )
+        if wiki_proposal_match:
+            deleted = discard_wiki_proposal(
+                wiki_proposal_match.group(1), self.knowledge_db_path
+            )
+            self._send_json(
+                {"deleted": deleted},
+                HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND,
+            )
+            return
         view_match = re.fullmatch(r"/api/views/([0-9a-f]+)", parsed.path.rstrip("/"))
         if view_match:
             deleted = delete_view(view_match.group(1), self.knowledge_db_path)
@@ -2071,7 +3105,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             )
             return
         proposal_match = re.fullmatch(
-            r"/api/claim-proposals/([0-9a-f]+)", parsed.path.rstrip("/")
+            r"/api/(?:claim|evidence)-proposals/([0-9a-f]+)", parsed.path.rstrip("/")
         )
         if proposal_match:
             deleted = discard_claim_proposal(

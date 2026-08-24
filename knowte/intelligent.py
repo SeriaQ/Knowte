@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List
 
 from .ai import AIConnection, AIError, OpenAICompatibleClient, cosine_similarity
+from .config import ai_model_profiles, ai_role_assignments
 from .search import search_papers
 
 _ACADEMIC_SOURCES = {"arxiv", "openalex", "semanticscholar"}
@@ -21,45 +22,70 @@ _EMBED_CACHE_MAX = 4096
 def _client_from_config(
     config: Dict[str, str],
     require_embedding: bool = True,
+    role: str = "intelligent_search",
+    profile_id: str = "",
+    timeout_scope: str = "",
 ) -> OpenAICompatibleClient:
-    base_url = (config.get("ai_base_url") or "").strip()
-    chat_model = (config.get("ai_chat_model") or "").strip()
-    embedding_model = (config.get("ai_embedding_model") or "").strip()
+    profiles = ai_model_profiles(config)
+    profile_by_id = {str(item.get("id")): item for item in profiles}
+    roles = ai_role_assignments(config)
+    chat_profile = profile_by_id.get(profile_id) if profile_id else None
+    if chat_profile and "chat" not in chat_profile.get("capabilities", []):
+        chat_profile = None
+    chat_profile = chat_profile or profile_by_id.get(roles.get(role) or "")
+    embedding_profile = profile_by_id.get(roles.get("embedding") or "") or {}
+    chat_profile = chat_profile or {}
+    base_url = str(chat_profile.get("base_url") or "").strip()
+    chat_model = str(chat_profile.get("model") or "").strip()
+    embedding_model = str(embedding_profile.get("model") or "").strip()
     if not base_url or not chat_model:
         raise AIError(
             "ai_unconfigured",
             "Configure AI Base URL and Language Model first.",
         )
-    separate_embedding = str(
-        config.get("ai_embedding_separate_connection") or ""
-    ).lower() in {"1", "true", "yes", "on"}
-    embedding_base_url = (
-        (config.get("ai_embedding_base_url") or "").strip()
-        if separate_embedding
-        else base_url
-    )
+    embedding_base_url = str(embedding_profile.get("base_url") or "").strip()
     if embedding_model and not embedding_base_url:
         raise AIError("ai_unconfigured", "Configure the Embedding Base URL.")
+    timeout_key = (
+        "ai_search_timeout_seconds"
+        if timeout_scope == "search" or (not timeout_scope and role == "intelligent_search")
+        else "ai_stage_timeout_seconds"
+    )
     return OpenAICompatibleClient(
-        AIConnection(base_url, config.get("ai_api_key") or ""),
+        AIConnection(
+            base_url,
+            str(chat_profile.get("api_key") or ""),
+            str(chat_profile.get("proxy_mode") or "auto"),
+            str(chat_profile.get("proxy_url") or ""),
+        ),
         chat_model,
         AIConnection(
             embedding_base_url,
-            (
-                config.get("ai_embedding_api_key") or ""
-                if separate_embedding
-                else config.get("ai_api_key") or ""
-            ),
+            str(embedding_profile.get("api_key") or ""),
+            str(embedding_profile.get("proxy_mode") or "auto"),
+            str(embedding_profile.get("proxy_url") or ""),
         ),
         embedding_model,
-        timeout=int(config.get("ai_timeout_seconds") or "45"),
-        enable_thinking=(
-            str(config.get("ai_enable_thinking") or "").lower()
-            in {"1", "true", "yes", "on"}
-            if "ai_enable_thinking" in config
-            else False
+        timeout=int(
+            config.get(timeout_key)
+            or config.get("ai_timeout_seconds")
+            or "45"
         ),
+        enable_thinking=(
+            bool(chat_profile.get("enable_thinking", False))
+        ),
+        provider=str(chat_profile.get("provider") or "openai_compatible"),
+        custom_recipe=(chat_profile.get("custom_recipe") or {}),
     )
+
+
+def _model_name_from_config(
+    config: Dict[str, str], role: str, profile_id: str = ""
+) -> str:
+    profiles = {str(item.get("id")): item for item in ai_model_profiles(config)}
+    roles = ai_role_assignments(config)
+    profile = profiles.get(profile_id or roles.get(role) or "") or {}
+    return str(profile.get("model") or "")
 
 
 def _dedupe(results: List[dict]) -> List[dict]:
@@ -79,36 +105,6 @@ def _candidate_text(result: dict) -> str:
     abstract = str(result.get("abstract") or "")[:3500]
     keywords = ", ".join(str(value) for value in (result.get("keywords") or [])[:20])
     return f"Title: {title}\nAbstract: {abstract}\nKeywords: {keywords}".strip()
-
-
-def _expand_queries(
-    client: OpenAICompatibleClient,
-    query: str,
-    areas: List[str],
-) -> List[str]:
-    area_rule = (
-        "The user explicitly selected these area codes; keep every query inside them: "
-        + ", ".join(areas)
-        if areas
-        else "No area was selected. Infer useful academic terminology without imposing a hard field filter."
-    )
-    payload = client.chat_json(
-        "You generate retrieval queries for academic discovery. Return JSON only.",
-        (
-            f"Intent: {query}\n{area_rule}\n"
-            "Return {\"queries\": [..]} with at most 2 concise search queries. "
-            "Use terminology likely to appear in relevant papers that may not repeat the user's wording. "
-            "Do not explain."
-        ),
-        max_tokens=256,
-    )
-    queries = payload.get("queries", []) if isinstance(payload, dict) else []
-    cleaned = [
-        str(value).strip()
-        for value in queries
-        if isinstance(value, str) and str(value).strip()
-    ]
-    return list(dict.fromkeys(cleaned))[:2]
 
 
 def _embedding_vectors(
@@ -356,6 +352,8 @@ def intelligent_search(
     year_to: int | None,
     web_pages: int = 1,
     progress: Callable[[str, Dict[str, Any]], None] | None = None,
+    search_actions: List[dict] | None = None,
+    profile_id: str = "",
 ) -> Dict[str, Any]:
     def report(stage: str, **details: Any) -> None:
         if progress is not None:
@@ -363,7 +361,10 @@ def intelligent_search(
 
     academic_backends = [source for source in backends if source in _ACADEMIC_SOURCES]
     include_web = "websearch" in backends and bool(config.get("searxng_url"))
-    client = _client_from_config(config, require_embedding=bool(academic_backends))
+    client = _client_from_config(
+        config, require_embedding=bool(academic_backends), role="intelligent_search",
+        profile_id=profile_id,
+    )
     candidate_limit = max(
         20,
         min(int(config.get("max_papers") or "100"), 100),
@@ -379,29 +380,33 @@ def intelligent_search(
     warnings: List[str] = []
     stages: Dict[str, Any] = {
         "recall": {"status": "complete", "requests": 0},
-        "expand": {"status": "skipped", "requests": 0},
         "embed": {"status": "skipped", "requests": 0},
         "verify": {"status": "pending", "requests": 0},
     }
 
-    expanded_queries: List[str] = []
-    if academic_backends:
-        report("expand")
-        try:
-            expanded_queries = _expand_queries(client, query, areas)
-            stages["expand"] = {"status": "complete", "requests": 1}
-        except AIError as error:
-            warnings.append(f"query_expansion_failed:{error.code}")
-            stages["expand"] = {"status": "degraded", "requests": 1}
+    actions = []
+    for item in (search_actions or [])[:5]:
+        if not isinstance(item, dict):
+            continue
+        action_query = str(item.get("query") or "").strip()[:500]
+        target = str(item.get("target") or "both").strip().lower()
+        if action_query and target in {"academic", "web", "both"}:
+            actions.append({"query": action_query, "target": target})
+    if not actions:
+        actions = [{"query": query, "target": "both"}]
+    academic_queries = list(dict.fromkeys(
+        item["query"] for item in actions
+        if item["target"] in {"academic", "both"}
+    ))
+    web_queries = list(dict.fromkeys(
+        item["query"] for item in actions
+        if item["target"] in {"web", "both"}
+    ))
 
     academic_candidates: List[dict] = []
     if academic_backends:
-        report(
-            "recall",
-            expanded_queries=expanded_queries,
-            expansion_status=stages["expand"]["status"],
-        )
-        for retrieval_query in [query, *expanded_queries]:
+        report("recall", search_actions=actions)
+        for retrieval_query in academic_queries:
             academic_candidates.extend(
                 search_papers(
                     retrieval_query,
@@ -421,20 +426,22 @@ def intelligent_search(
     web_candidates: List[dict] = []
     if include_web:
         report("recall")
-        web_candidates = search_papers(
-            query,
-            limit=limit,
-            backends=["websearch"],
-            year_from=year_from,
-            year_to=year_to,
-            searxng_url=config.get("searxng_url"),
-            web_ignore_year_filter=str(
-                config.get("web_ignore_year_filter") or ""
-            ).lower() in {"1", "true", "yes", "on"},
-            web_pages=web_pages,
-            strict_match=False,
-        )
-        stages["recall"]["requests"] += 1
+        for retrieval_query in web_queries:
+            web_candidates.extend(search_papers(
+                retrieval_query,
+                limit=limit,
+                backends=["websearch"],
+                year_from=year_from,
+                year_to=year_to,
+                searxng_url=config.get("searxng_url"),
+                web_ignore_year_filter=str(
+                    config.get("web_ignore_year_filter") or ""
+                ).lower() in {"1", "true", "yes", "on"},
+                web_pages=web_pages,
+                strict_match=False,
+            ))
+            stages["recall"]["requests"] += 1
+        web_candidates = _dedupe(web_candidates)
 
     ranked_academic = academic_candidates
     if academic_candidates and client.embedding_model:
@@ -519,7 +526,7 @@ def intelligent_search(
         "count": len(final_results),
         "warnings": warnings,
         "stages": stages,
-        "expanded_queries": expanded_queries,
+        "search_actions": actions,
         "candidate_counts": {
             "academic": len(academic_candidates),
             "web": len(web_candidates),
@@ -528,11 +535,9 @@ def intelligent_search(
         "source_counts": source_counts,
         "request_budget": {
             "retrieval": stages["recall"]["requests"],
-            "academic_retrieval": (
-                1 + len(expanded_queries) if academic_backends else 0
-            ),
-            "web_retrieval": 1 if include_web else 0,
-            "chat": stages["expand"]["requests"] + stages["verify"]["requests"],
+            "academic_retrieval": len(academic_queries) if academic_backends else 0,
+            "web_retrieval": len(web_queries) if include_web else 0,
+            "chat": stages["verify"]["requests"],
             "embedding": stages["embed"]["requests"],
         },
         "_ai_usage": client.usage_snapshot(),

@@ -2,6 +2,22 @@ const form = document.querySelector("#search-form");
 const input = form.querySelector("input[name='keywords']");
 const searchSubmitBtn = document.querySelector("#search-submit");
 const savePlanBtn = document.querySelector("#save-plan");
+const discussSearchBtn = document.querySelector("#discuss-search");
+const searchStrategyEl = document.querySelector("#search-strategy");
+const searchStrategyListEl = document.querySelector("#search-strategy-list");
+const searchStrategyWaitingEl = document.querySelector("#search-strategy-waiting");
+const searchStrategyWaitingListEl = document.querySelector("#search-strategy-waiting-list");
+const searchStrategyAddBtn = document.querySelector("#search-strategy-add");
+const searchStrategyStatusEl = document.querySelector("#search-strategy-status");
+const searchStrategyStaleEl = document.querySelector("#search-strategy-stale");
+const searchStrategyUseAnywayBtn = document.querySelector("#search-strategy-use-anyway");
+const searchStrategyDiscussAgainBtn = document.querySelector("#search-strategy-discuss-again");
+const searchImportEl = document.querySelector("#search-import");
+const importContentInput = document.querySelector("#import-content");
+const parseImportBtn = document.querySelector("#parse-import");
+const importStatusEl = document.querySelector("#import-status");
+const copyImportPromptBtn = document.querySelector("#copy-import-prompt");
+const importPromptPreviewEl = document.querySelector("#import-prompt-preview");
 const searchModeButtons = document.querySelectorAll("[data-search-mode]");
 const defaultSearchModeButtons = document.querySelectorAll(
   "[data-default-search-mode]",
@@ -49,13 +65,32 @@ const aiEmbeddingApiKeyRemoveBtn = document.querySelector("#ai-embedding-api-key
 const aiEmbeddingApiKeyRemoveNote = document.querySelector("#ai-embedding-api-key-remove-note");
 const aiVerifyBatchSizeInput = document.querySelector("#ai-verify-batch-size");
 const aiVerifyConcurrencyInput = document.querySelector("#ai-verify-concurrency");
-const aiTimeoutInput = document.querySelector("#ai-timeout");
+const aiSearchTimeoutInput = document.querySelector("#ai-search-timeout");
+const aiStageTimeoutInput = document.querySelector("#ai-stage-timeout");
 const aiCopilotInstructionsInput = document.querySelector("#ai-copilot-instructions");
 const aiCopilotTemperatureInput = document.querySelector("#ai-copilot-temperature");
 const aiCopilotMaxTokensInput = document.querySelector("#ai-copilot-max-tokens");
 const aiCopilotParameterList = document.querySelector("#ai-copilot-parameter-list");
 const aiCopilotAddParameterBtn = document.querySelector("#ai-copilot-add-parameter");
+const aiCopilotPromptSharedEl = document.querySelector("#ai-copilot-prompt-shared");
+const aiCopilotPromptSharedBlockEl = document.querySelector("#ai-copilot-prompt-shared-block");
 const aiCopilotPromptPreviewEl = document.querySelector("#ai-copilot-prompt-preview");
+const aiCopilotPromptStageInput = document.querySelector("#ai-copilot-prompt-stage");
+const aiCopilotPromptStageLabelEl = document.querySelector("#ai-copilot-prompt-stage-label");
+const aiCopilotPromptNoteEl = document.querySelector("#ai-copilot-prompt-note");
+const aiProviderInput = document.querySelector("#ai-provider");
+const aiCustomRecipeInput = document.querySelector("#ai-custom-recipe");
+const aiCustomRecipeSection = document.querySelector("#ai-custom-recipe-section");
+const aiProfileListEl = document.querySelector("#ai-profile-list");
+const aiProfileAddBtn = document.querySelector("#ai-profile-add");
+const aiRoleGridEl = document.querySelector("#ai-role-grid");
+const contextModelSelect = document.querySelector("#context-model-select");
+const searchModelControl = document.querySelector("#search-model-control");
+const searchModelSelect = document.querySelector("#search-model-select");
+const evidenceModelSelect = document.querySelector("#evidence-model-select");
+const claimsModelSelect = document.querySelector("#claims-model-select");
+const wikiModelSelect = document.querySelector("#wiki-model-select");
+const articleModelSelect = document.querySelector("#article-model-select");
 const companionPairingKeyInput = document.querySelector("#companion-pairing-key");
 const companionPairingGenerateBtn = document.querySelector("#companion-pairing-generate");
 const companionPathCopyBtn = document.querySelector("#companion-path-copy");
@@ -102,10 +137,16 @@ const libraryStatusEl = document.querySelector("#library-status");
 const libraryAbstractToggleBtn = document.querySelector("#library-abstract-toggle");
 const evidenceLibraryListEl = document.querySelector("#evidence-library-list");
 const libraryProposeClaimsBtn = document.querySelector("#library-propose-claims");
+const claimProposalFocusInput = document.querySelector("#claim-proposal-focus");
 const evidenceCreateClaimBtn = document.querySelector("#evidence-create-claim");
 const evidenceStatusEl = document.querySelector("#evidence-status");
 const resultsSelectAllInput = document.querySelector("#results-select-all");
 const librarySelectAllInput = document.querySelector("#library-select-all");
+const evidenceProposalFocusInput = document.querySelector("#evidence-proposal-focus");
+const proposeEvidenceBtn = document.querySelector("#propose-evidence");
+const evidenceProposalsToggleBtn = document.querySelector("#evidence-proposals-toggle");
+const evidenceProposalBoardEl = document.querySelector("#evidence-proposal-board");
+const evidenceProposalListEl = document.querySelector("#evidence-proposal-list");
 const evidenceLibrarySelectAllInput = document.querySelector("#evidence-library-select-all");
 const evidenceTagFilterInput = document.querySelector("#evidence-tag-filter");
 const claimsSelectAllInput = document.querySelector("#claims-select-all");
@@ -228,6 +269,9 @@ const claimsSelectedCountEl = document.querySelector("#claims-selected-count");
 const claimsRelationTypeInput = document.querySelector("#claims-relation-type");
 const claimProposalBoardEl = document.querySelector("#claim-proposal-board");
 const claimProposalListEl = document.querySelector("#claim-proposal-list");
+const claimProposalReportEl = document.querySelector("#claim-proposal-report");
+const claimProposalReportSummaryEl = document.querySelector("#claim-proposal-report-summary");
+const claimProposalReportBodyEl = document.querySelector("#claim-proposal-report-body");
 const claimIncomingTrayEl = document.querySelector("#claim-incoming-tray");
 const claimIncomingTitleEl = document.querySelector("#claim-incoming-title");
 const claimIncomingItemsEl = document.querySelector("#claim-incoming-items");
@@ -272,6 +316,31 @@ const viewAddParagraphBtn = document.querySelector("#view-add-paragraph");
 const viewEditCancelBtn = document.querySelector("#view-edit-cancel");
 const viewDetailClaimsEl = document.querySelector("#view-detail-claims");
 const viewDetailStatusEl = document.querySelector("#view-detail-status");
+const wikiWorkspaceEl = document.querySelector("#wiki-workspace");
+const wikiModeWikiBtn = document.querySelector("#wiki-mode-wiki");
+const wikiModeGraphBtn = document.querySelector("#wiki-mode-graph");
+const wikiOrganizeBtn = document.querySelector("#wiki-organize");
+const wikiGenerateReadingBtn = document.querySelector("#wiki-generate-reading");
+const wikiProposalsToggleBtn = document.querySelector("#wiki-proposals-toggle");
+const wikiIncomingTrayEl = document.querySelector("#wiki-incoming-tray");
+const wikiIncomingTitleEl = document.querySelector("#wiki-incoming-title");
+const wikiIncomingItemsEl = document.querySelector("#wiki-incoming-items");
+const wikiIncomingClearBtn = document.querySelector("#wiki-incoming-clear");
+const wikiHealthEl = document.querySelector("#wiki-health");
+const wikiMainEl = document.querySelector("#wiki-main");
+const wikiTreeEl = document.querySelector("#wiki-tree");
+const wikiPageEl = document.querySelector("#wiki-page");
+const wikiGraphEl = document.querySelector("#wiki-graph");
+const wikiProposalReviewEl = document.querySelector("#wiki-proposal-review");
+const wikiProposalCloseBtn = document.querySelector("#wiki-proposal-close");
+const wikiProposalListEl = document.querySelector("#wiki-proposal-list");
+const wikiReadingComposerEl = document.querySelector("#wiki-reading-composer");
+const wikiReadingCloseBtn = document.querySelector("#wiki-reading-close");
+const wikiReadingGoalInput = document.querySelector("#wiki-reading-goal");
+const wikiReadingScopeEl = document.querySelector("#wiki-reading-scope");
+const wikiReadingRunBtn = document.querySelector("#wiki-reading-run");
+const wikiReadingEl = document.querySelector("#wiki-reading");
+const wikiStatusEl = document.querySelector("#wiki-status");
 let currentUsage = {
   last_5_min: 0,
   last_day: 0,
@@ -309,6 +378,44 @@ let aiEmbeddingApiKeyRemovalPending = false;
 let savedProfileState = null;
 let configStatusTimer = null;
 let searchMode = "keyword";
+let searchStrategyActions = [];
+let searchStrategyWaitingActions = [];
+let searchStrategyIntent = "";
+let searchStrategyStaleAcknowledged = false;
+const SEARCH_STRATEGY_TOP_LIMIT = 5;
+const SEARCH_STRATEGY_CANDIDATE_LIMIT = 15;
+let searchStrategyAttentionTimer = null;
+let aiCopilotPromptPreviews = {};
+let aiCopilotPromptShared = "";
+let aiModelProfiles = [];
+let aiRoleAssignments = {};
+const AI_ROLE_DEFINITIONS = [
+  ["embedding", "Embedding", "embeddings"],
+  ["intelligent_search", "Intelligent Search", "chat"],
+  ["copilot", "Review Copilot", "chat"],
+  ["evidence", "Evidence proposal", "chat"],
+  ["claims", "Claim proposal", "chat"],
+  ["wiki", "Wiki organization", "chat"],
+  ["article", "Article generation", "chat"],
+];
+
+const renderCopilotPromptPreview = () => {
+  const stage = aiCopilotPromptStageInput?.value || "search_strategy";
+  const dedicated = [
+    "search_strategy", "evidence_proposal", "claim_proposal",
+    "wiki_maintenance", "article_selection", "article_writing",
+  ].includes(stage);
+  aiCopilotPromptSharedBlockEl.hidden = dedicated;
+  aiCopilotPromptSharedEl.textContent = aiCopilotPromptShared;
+  aiCopilotPromptStageLabelEl.textContent = dedicated
+    ? "Dedicated capability prompt" : "Stage-specific addition";
+  aiCopilotPromptNoteEl.textContent = dedicated
+    ? "This capability uses the complete dedicated prompt shown above; the shared Review Copilot prompt is not added."
+    : "The actual system prompt combines the shared prompt, this stage-specific addition, and your Custom instructions.";
+  aiCopilotPromptPreviewEl.textContent = aiCopilotPromptPreviews[stage] || "";
+};
+
+aiCopilotPromptStageInput?.addEventListener("change", renderCopilotPromptPreview);
 let defaultSearchMode = "keyword";
 let savedPlans = [];
 let intelligentRunToken = 0;
@@ -320,12 +427,22 @@ let librarySources = [];
 let libraryEvidence = [];
 let claims = [];
 let claimProposals = [];
+let latestClaimProposalReport = null;
+let evidenceProposals = [];
+let claimProposalQueueOpen = false;
+let evidenceProposalQueueOpen = false;
 let views = [];
 let activeViewId = "";
 let viewDraftClaimIds = [];
 let viewDraftBlocks = [];
 let viewAddingClaims = false;
 let activeGraphClaimId = "";
+let wikiState = { pages: [], claims: [], graph: { nodes: [], edges: [] }, unorganized_claim_ids: [], stale_claim_ids: [], awaiting_review: 0 };
+let wikiProposals = [];
+let activeWikiPageId = "";
+let wikiMode = "wiki";
+let currentWikiReading = null;
+let currentWikiReadingGoal = "";
 const selectedResultKeys = new Set();
 const selectedLibrarySourceKeys = new Set();
 const selectedEvidenceIds = new Set();
@@ -348,6 +465,7 @@ let activePdfDocument = null;
 let pdfRenderToken = 0;
 let pdfZoom = 1;
 let evidenceTool = "text";
+let readerTextSelectionArmed = false;
 let activeEvidenceDetailId = null;
 let pendingPdfScrollAnchor = null;
 let activeTagEditor = null;
@@ -363,6 +481,9 @@ const reviewConversations = {
   views: [],
   artifact: [],
 };
+const chatInputHistories = {};
+const chatInputHistoryCursors = {};
+const chatInputDrafts = {};
 const expandedArtifactIds = new Set();
 const DEFAULT_SEARXNG_URL = "http://127.0.0.1:8888/search";
 
@@ -476,7 +597,7 @@ companionPairingGenerateBtn.addEventListener("click", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        theme: document.body.dataset.theme === "light" ? "light" : "dark",
+        theme: themeToggleBtn?.dataset.mode || "auto",
       }),
     });
     const data = await response.json();
@@ -578,6 +699,335 @@ aiCopilotAddParameterBtn.addEventListener("click", () => {
   updateProfileDirtyState();
 });
 
+const newAIProfile = () => ({
+  id: globalThis.crypto?.randomUUID?.() || `model-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  name: "New model", provider: "openai_compatible", base_url: "", model: "",
+  capabilities: ["chat"], enable_thinking: false,
+  custom_recipe: {}, api_key: "", api_key_configured: false,
+  remove_api_key: false, proxy_mode: "auto", proxy_url: "",
+});
+
+const availableAICapabilities = (profile) => {
+  const provider = String(profile.provider || "openai_compatible").toLowerCase();
+  const model = String(profile.model || "").trim().toLowerCase();
+  const base = String(profile.base_url || "").trim().toLowerCase();
+  const available = new Set(["chat", "embeddings"]);
+  if (provider === "deepseek") return new Set(["chat"]);
+  if (provider === "openai") {
+    if (["gpt-4.1", "gpt-5", "o3", "o4"].some((prefix) => model.startsWith(prefix))) {
+      available.add("native_documents"); available.add("web_search");
+    }
+  } else if (provider === "google") {
+    if (model.startsWith("gemini-")) {
+      available.add("native_documents"); available.add("url_fetch");
+    }
+  } else if (provider === "anthropic") {
+    available.delete("embeddings");
+    if (model.startsWith("claude-")) {
+      available.add("native_documents"); available.add("web_search");
+    }
+  } else if (provider === "qwen") {
+    const searchFamilies = ["qwen3.8", "qwen3.7", "qwen3.6", "qwen3.5", "qwen3-max", "qwen-max", "qwen-plus", "qwen-turbo"];
+    if (searchFamilies.some((prefix) => model.startsWith(prefix))) available.add("web_search");
+    if (model === "qwen3.8-max" && base.includes("cn-beijing.maas.aliyuncs.com")) {
+      available.add("native_documents");
+    }
+  } else if (provider === "kimi") {
+    available.delete("embeddings"); available.add("file_extraction");
+    if (model.startsWith("kimi-k2.6")) available.add("web_search");
+  } else if (provider === "custom") {
+    return new Set(["chat", "embeddings", "native_documents", "file_extraction", "web_search", "url_fetch"]);
+  }
+  return available;
+};
+
+const aiThinkingAvailable = (profile) => {
+  const provider = String(profile.provider || "openai_compatible").toLowerCase();
+  const model = String(profile.model || "").trim().toLowerCase();
+  if (["openai_compatible", "deepseek", "custom"].includes(provider)) return true;
+  if (provider === "qwen") return model.startsWith("qwen3") || model.startsWith("qwq");
+  if (provider === "kimi") return model.startsWith("kimi-k2.6");
+  return false;
+};
+
+const renderAIRoles = () => {
+  aiRoleGridEl.replaceChildren();
+  const firstChatProfile = aiModelProfiles.find(
+    (profile) => (profile.capabilities || []).includes("chat"),
+  );
+  AI_ROLE_DEFINITIONS.filter(([, , capability]) => capability === "chat")
+    .forEach(([role]) => {
+      if (!aiRoleAssignments[role] && firstChatProfile) {
+        aiRoleAssignments[role] = firstChatProfile.id;
+      }
+    });
+  AI_ROLE_DEFINITIONS.forEach(([role, label, capability]) => {
+    const field = document.createElement("label");
+    field.className = "ai-role-field";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const select = document.createElement("select");
+    select.dataset.aiRole = role;
+    select.appendChild(new Option(
+      role === "embedding" ? "No embedding model" : "Select a model", "",
+    ));
+    aiModelProfiles
+      .filter((profile) => (profile.capabilities || []).includes(capability))
+      .forEach((profile) => select.appendChild(new Option(
+        profile.name || profile.model || "Unnamed model", profile.id,
+      )));
+    select.value = aiRoleAssignments[role] || "";
+    select.addEventListener("change", () => {
+      aiRoleAssignments[role] = select.value;
+      updateProfileDirtyState();
+    });
+    field.append(name, select);
+    aiRoleGridEl.appendChild(field);
+  });
+  const selectedCopilotModel = contextModelSelect.value
+    || aiRoleAssignments.copilot || "";
+  contextModelSelect.replaceChildren(new Option("Select a Copilot model", ""));
+  aiModelProfiles.filter((profile) => (profile.capabilities || []).includes("chat"))
+    .forEach((profile) => contextModelSelect.appendChild(new Option(
+      profile.name || profile.model || "Unnamed model", profile.id,
+    )));
+  contextModelSelect.value = [...contextModelSelect.options].some(
+    (option) => option.value === selectedCopilotModel,
+  ) ? selectedCopilotModel : "";
+  renderActionModelSelectors();
+};
+
+const renderActionModelSelectors = () => {
+  const definitions = [
+    [searchModelSelect, "intelligent_search", "Select a Search model"],
+    [evidenceModelSelect, "evidence", "Select an Evidence model"],
+    [claimsModelSelect, "claims", "Select a Claims model"],
+    [wikiModelSelect, "wiki", "Select a Wiki model"],
+    [articleModelSelect, "article", "Select an Article model"],
+  ];
+  const chatProfiles = aiModelProfiles.filter(
+    (profile) => (profile.capabilities || []).includes("chat"),
+  );
+  definitions.forEach(([select, role, placeholder]) => {
+    if (!select) return;
+    const current = select.value || aiRoleAssignments[role] || "";
+    select.replaceChildren(new Option(placeholder, ""));
+    chatProfiles.forEach((profile) => select.appendChild(new Option(
+      profile.name || profile.model || "Unnamed model", profile.id,
+    )));
+    select.value = [...select.options].some((option) => option.value === current)
+      ? current : "";
+  });
+};
+
+const renderAIProfiles = () => {
+  aiProfileListEl.replaceChildren();
+  aiModelProfiles.forEach((profile, index) => {
+    const card = document.createElement("details");
+    card.className = "ai-profile-card";
+    card.open = aiModelProfiles.length === 1;
+    const summary = document.createElement("summary");
+    const title = document.createElement("strong");
+    title.textContent = profile.name || profile.model || `Model ${index + 1}`;
+    const meta = document.createElement("small");
+    meta.textContent = [profile.provider?.replaceAll("_", "-"), profile.model].filter(Boolean).join(" · ");
+    summary.append(title, meta);
+    const body = document.createElement("div");
+    body.className = "ai-profile-body";
+    const field = (label, input) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "config-row";
+      const caption = document.createElement("span");
+      caption.textContent = label;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(input.tagName)) {
+        input.setAttribute("aria-label", label);
+      }
+      wrapper.append(caption, input);
+      return wrapper;
+    };
+    const nameInput = document.createElement("input");
+    nameInput.value = profile.name || "";
+    nameInput.addEventListener("input", () => {
+      profile.name = nameInput.value; title.textContent = nameInput.value || profile.model || "Unnamed model";
+      renderAIRoles(); updateProfileDirtyState();
+    });
+    const provider = document.createElement("select");
+    [["openai_compatible", "OpenAI-compatible"], ["openai", "OpenAI"], ["google", "Google Gemini"], ["anthropic", "Anthropic"], ["deepseek", "DeepSeek"], ["qwen", "Alibaba Model Studio · Qwen"], ["kimi", "Moonshot · Kimi"], ["custom", "Custom Recipe"]]
+      .forEach(([value, text]) => provider.appendChild(new Option(text, value)));
+    provider.value = profile.provider || "openai_compatible";
+    const base = document.createElement("input");
+    base.value = profile.base_url || ""; base.placeholder = "https://provider.example/v1";
+    const model = document.createElement("input");
+    model.value = profile.model || ""; model.placeholder = "Provider model ID";
+    const proxyMode = document.createElement("select");
+    [["auto", "Auto · local direct, public system proxy"], ["system", "System proxy"], ["direct", "Direct · never use a proxy"], ["custom", "Custom proxy"]]
+      .forEach(([value, text]) => proxyMode.appendChild(new Option(text, value)));
+    proxyMode.value = profile.proxy_mode || "auto";
+    const proxyUrl = document.createElement("input");
+    proxyUrl.value = profile.proxy_url || "";
+    proxyUrl.placeholder = "http://127.0.0.1:7890";
+    const proxyUrlField = field("Proxy URL", proxyUrl);
+    proxyUrlField.hidden = proxyMode.value !== "custom";
+    const key = document.createElement("input");
+    key.type = "password"; key.autocomplete = "new-password";
+    key.setAttribute("aria-label", "API key");
+    key.placeholder = profile.api_key_configured && !profile.remove_api_key
+      ? "Configured; enter a new key to replace" : "Optional for local services";
+    const keyRow = document.createElement("div");
+    keyRow.className = "secret-input-row";
+    const removeKey = document.createElement("button");
+    removeKey.type = "button"; removeKey.className = "secret-remove";
+    removeKey.textContent = profile.remove_api_key ? "Undo" : "Remove";
+    removeKey.hidden = !profile.api_key_configured;
+    removeKey.addEventListener("click", () => {
+      profile.remove_api_key = !profile.remove_api_key;
+      key.disabled = profile.remove_api_key; key.value = "";
+      removeKey.textContent = profile.remove_api_key ? "Undo" : "Remove";
+      updateProfileDirtyState();
+    });
+    keyRow.append(key, removeKey);
+    const capabilityBox = document.createElement("div");
+    capabilityBox.className = "ai-capability-list";
+    const capabilityInputs = new Map();
+    const capabilityDefinitions = [
+      ["chat", "Chat"], ["embeddings", "Embeddings"],
+      ["native_documents", "Native PDF"], ["file_extraction", "File extraction"],
+      ["web_search", "Web search"], ["url_fetch", "URL fetch"],
+    ];
+    capabilityDefinitions
+      .forEach(([value, text]) => {
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox"; checkbox.checked = (profile.capabilities || []).includes(value);
+        capabilityInputs.set(value, checkbox);
+        checkbox.addEventListener("change", () => {
+          const set = new Set(profile.capabilities || []);
+          checkbox.checked ? set.add(value) : set.delete(value);
+          profile.capabilities = [...set]; renderAIRoles(); updateProfileDirtyState();
+        });
+        label.append(checkbox, document.createTextNode(text)); capabilityBox.appendChild(label);
+      });
+    const capabilityNote = document.createElement("small");
+    capabilityNote.className = "ai-capability-note";
+    capabilityNote.textContent = "Unavailable capabilities are locked for this provider, model, and endpoint.";
+    capabilityBox.appendChild(capabilityNote);
+    const refreshCapabilities = () => {
+      const available = availableAICapabilities(profile);
+      const enabled = new Set(profile.capabilities || []);
+      capabilityInputs.forEach((input, capability) => {
+        const supported = available.has(capability);
+        input.disabled = !supported;
+        input.closest("label")?.classList.toggle("unavailable", !supported);
+        input.closest("label")?.setAttribute(
+          "title", supported ? "Implemented for this configuration" : "Not implemented for this configuration",
+        );
+        if (!supported) enabled.delete(capability);
+        input.checked = supported && enabled.has(capability);
+      });
+      profile.capabilities = [...enabled];
+    };
+    refreshCapabilities();
+    const thinking = document.createElement("label");
+    thinking.className = "config-check";
+    const thinkingInput = document.createElement("input");
+    thinkingInput.type = "checkbox"; thinkingInput.checked = Boolean(profile.enable_thinking);
+    thinking.append(thinkingInput, document.createTextNode("Enable Thinking"));
+    const refreshThinking = () => {
+      const supported = aiThinkingAvailable(profile);
+      thinkingInput.disabled = !supported;
+      thinking.classList.toggle("unavailable", !supported);
+      thinking.title = supported
+        ? "Implemented for this configuration"
+        : "Knowte has no verified Thinking toggle for this configuration";
+      if (!supported) {
+        thinkingInput.checked = false;
+        profile.enable_thinking = false;
+      }
+    };
+    refreshThinking();
+    const recipe = document.createElement("textarea");
+    recipe.rows = 10; recipe.spellcheck = false;
+    recipe.value = JSON.stringify(profile.custom_recipe || {}, null, 2);
+    const recipeField = field("Custom request recipe", recipe);
+    recipeField.hidden = provider.value !== "custom";
+    const removeProfile = document.createElement("button");
+    removeProfile.type = "button"; removeProfile.className = "ai-profile-remove";
+    removeProfile.textContent = "Remove model";
+    removeProfile.addEventListener("click", () => {
+      aiModelProfiles.splice(index, 1);
+      Object.keys(aiRoleAssignments).forEach((role) => {
+        if (aiRoleAssignments[role] === profile.id) aiRoleAssignments[role] = "";
+      });
+      renderAIProfiles(); renderAIRoles(); updateProfileDirtyState();
+    });
+    provider.addEventListener("change", () => {
+      profile.provider = provider.value; recipeField.hidden = provider.value !== "custom";
+      const defaults = {
+        openai: "https://api.openai.com/v1",
+        google: "https://generativelanguage.googleapis.com/v1beta",
+        anthropic: "https://api.anthropic.com/v1",
+        deepseek: "https://api.deepseek.com",
+        qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        kimi: "https://api.moonshot.cn/v1",
+      };
+      if (!base.value.trim() && defaults[provider.value]) {
+        base.value = defaults[provider.value]; profile.base_url = base.value;
+      }
+      const presetCapabilities = {
+        deepseek: ["chat"],
+        qwen: ["chat", "native_documents", "web_search"],
+        kimi: ["chat", "file_extraction", "web_search"],
+        openai: ["chat", "native_documents", "web_search"],
+        google: ["chat", "native_documents", "url_fetch"],
+        anthropic: ["chat", "native_documents", "web_search"],
+      };
+      if (presetCapabilities[provider.value]) {
+        profile.capabilities = [...presetCapabilities[provider.value]];
+      }
+      refreshCapabilities();
+      refreshThinking();
+      meta.textContent = [provider.value.replaceAll("_", "-"), profile.model].filter(Boolean).join(" · ");
+      renderAIRoles(); updateProfileDirtyState();
+    });
+    base.addEventListener("input", () => { profile.base_url = base.value; refreshCapabilities(); refreshThinking(); renderAIRoles(); updateProfileDirtyState(); });
+    model.addEventListener("input", () => { profile.model = model.value; meta.textContent = [profile.provider?.replaceAll("_", "-"), model.value].filter(Boolean).join(" · "); refreshCapabilities(); refreshThinking(); renderAIRoles(); updateProfileDirtyState(); });
+    proxyMode.addEventListener("change", () => {
+      profile.proxy_mode = proxyMode.value;
+      proxyUrlField.hidden = proxyMode.value !== "custom";
+      updateProfileDirtyState();
+    });
+    proxyUrl.addEventListener("input", () => { profile.proxy_url = proxyUrl.value; updateProfileDirtyState(); });
+    key.addEventListener("input", () => { profile.api_key = key.value; profile.remove_api_key = false; updateProfileDirtyState(); });
+    thinkingInput.addEventListener("change", () => { profile.enable_thinking = thinkingInput.checked; updateProfileDirtyState(); });
+    recipe.addEventListener("input", () => { profile.custom_recipe_text = recipe.value; updateProfileDirtyState(); });
+    body.append(
+      field("Profile name", nameInput), field("Provider", provider),
+      field("Base URL", base), field("Model ID", model), field("API key", keyRow),
+      field("Proxy routing", proxyMode), proxyUrlField,
+      field("Capabilities", capabilityBox), thinking, recipeField, removeProfile,
+    );
+    card.append(summary, body); aiProfileListEl.appendChild(card);
+  });
+  renderAIRoles();
+};
+
+aiProfileAddBtn.addEventListener("click", () => {
+  aiModelProfiles.push(newAIProfile());
+  renderAIProfiles();
+  aiProfileListEl.lastElementChild.open = true;
+  updateProfileDirtyState();
+});
+
+const serializedAIProfiles = () => aiModelProfiles.map((profile) => ({
+  id: profile.id, name: String(profile.name || "").trim(), provider: profile.provider,
+  base_url: String(profile.base_url || "").trim(), model: String(profile.model || "").trim(),
+  proxy_mode: profile.proxy_mode || "auto", proxy_url: String(profile.proxy_url || "").trim(),
+  capabilities: [...(profile.capabilities || [])], enable_thinking: Boolean(profile.enable_thinking),
+  custom_recipe: JSON.parse(profile.custom_recipe_text ?? JSON.stringify(profile.custom_recipe || {})),
+  ...(profile.api_key ? { api_key: profile.api_key } : {}),
+  remove_api_key: Boolean(profile.remove_api_key),
+}));
+
 const serializeProfileState = (overrides = {}) => JSON.stringify({
   email: overrides.email ?? emailInput.value.trim(),
   searxng_url: overrides.searxng_url ?? (searxngInput?.value.trim() || ""),
@@ -590,21 +1040,16 @@ const serializeProfileState = (overrides = {}) => JSON.stringify({
   api_key_update: s2KeyInput.value.trim(),
   api_key_clear: semanticscholarKeyRemovalPending,
   web_ignore_year_filter: Boolean(webIgnoreYearFilterInput?.checked),
-  ai_base_url: overrides.ai_base_url ?? aiBaseUrlInput.value.trim(),
-  ai_chat_model: overrides.ai_chat_model ?? aiChatModelInput.value.trim(),
-  ai_embedding_model: overrides.ai_embedding_model ?? aiEmbeddingModelInput.value.trim(),
-  ai_embedding_separate_connection: overrides.ai_embedding_separate_connection
-    ?? Boolean(aiEmbeddingSeparateInput.open),
-  ai_enable_thinking: overrides.ai_enable_thinking
-    ?? Boolean(aiEnableThinkingInput.checked),
-  ai_embedding_base_url: overrides.ai_embedding_base_url
-    ?? aiEmbeddingBaseUrlInput.value.trim(),
+  ai_model_profiles: overrides.ai_model_profiles ?? serializedAIProfiles(),
+  ai_role_assignments: overrides.ai_role_assignments ?? aiRoleAssignments,
   ai_verify_batch_size: overrides.ai_verify_batch_size
     ?? Number(aiVerifyBatchSizeInput.value || 5),
   ai_verify_concurrency: overrides.ai_verify_concurrency
     ?? Number(aiVerifyConcurrencyInput.value || 1),
-  ai_timeout_seconds: overrides.ai_timeout_seconds
-    ?? Number(aiTimeoutInput.value || 45),
+  ai_search_timeout_seconds: overrides.ai_search_timeout_seconds
+    ?? Number(aiSearchTimeoutInput.value || 45),
+  ai_stage_timeout_seconds: overrides.ai_stage_timeout_seconds
+    ?? Number(aiStageTimeoutInput.value || 45),
   ai_copilot_instructions: overrides.ai_copilot_instructions
     ?? aiCopilotInstructionsInput.value.trim(),
   ai_copilot_temperature: overrides.ai_copilot_temperature
@@ -613,10 +1058,6 @@ const serializeProfileState = (overrides = {}) => JSON.stringify({
     ?? Number(aiCopilotMaxTokensInput.value || 1200),
   ai_copilot_advanced_parameters: overrides.ai_copilot_advanced_parameters
     ?? copilotAdvancedParameters(),
-  ai_api_key_update: aiApiKeyInput.value.trim(),
-  ai_api_key_clear: aiApiKeyRemovalPending,
-  ai_embedding_api_key_update: aiEmbeddingApiKeyInput.value.trim(),
-  ai_embedding_api_key_clear: aiEmbeddingApiKeyRemovalPending,
 });
 
 const isConfigDirty = () => {
@@ -947,8 +1388,163 @@ const clearDisplayedSearchResults = () => {
   renderPaginationControls();
 };
 
+const renderSearchStrategy = () => {
+  searchStrategyListEl.replaceChildren();
+  searchStrategyWaitingListEl.replaceChildren();
+  const renderAction = (action, index, collection, container, isWaiting) => {
+    const row = document.createElement("div");
+    row.className = "search-strategy-row";
+    const makeField = (labelText, control, className) => {
+      const field = document.createElement("label");
+      field.className = `search-strategy-field ${className}`;
+      const label = document.createElement("span");
+      label.textContent = labelText;
+      field.append(label, control);
+      return field;
+    };
+    const query = document.createElement("input");
+    query.type = "text";
+    query.value = action.query || "";
+    query.placeholder = "Retrieval query";
+    query.setAttribute("aria-label", `${isWaiting ? "Waiting" : "Active"} search action ${index + 1} query`);
+    query.addEventListener("input", () => { action.query = query.value; });
+    const target = document.createElement("select");
+    ["academic", "web", "both"].forEach((value) => target.appendChild(new Option(
+      value === "both" ? "Both" : value[0].toUpperCase() + value.slice(1), value,
+    )));
+    target.value = action.target || "both";
+    target.setAttribute("aria-label", `${isWaiting ? "Waiting" : "Active"} search action ${index + 1} target`);
+    target.addEventListener("change", () => { action.target = target.value; });
+    const purpose = document.createElement("textarea");
+    purpose.rows = 2;
+    purpose.value = action.purpose || "";
+    purpose.placeholder = "Purpose (optional)";
+    purpose.setAttribute("aria-label", `${isWaiting ? "Waiting" : "Active"} search action ${index + 1} purpose`);
+    purpose.addEventListener("input", () => { action.purpose = purpose.value; });
+    const controls = document.createElement("div");
+    controls.className = "search-strategy-row-actions";
+    const transfer = document.createElement("button");
+    transfer.type = "button";
+    transfer.className = "search-strategy-transfer";
+    transfer.innerHTML = isWaiting
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg><span>Move in</span>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg><span>Move out</span>';
+    transfer.setAttribute(
+      "aria-label",
+      `${isWaiting ? "Move into" : "Move out of"} active Search list`,
+    );
+    transfer.addEventListener("click", () => {
+      if (isWaiting && searchStrategyActions.length >= SEARCH_STRATEGY_TOP_LIMIT) {
+        searchStrategyStatusEl.textContent = "The Search list already has 5 candidates. Move one out before moving another in.";
+        searchStrategyStatusEl.dataset.state = "error";
+        searchStrategyStatusEl.classList.remove("is-attention");
+        void searchStrategyStatusEl.offsetWidth;
+        searchStrategyStatusEl.classList.add("is-attention");
+        if (searchStrategyAttentionTimer !== null) {
+          window.clearTimeout(searchStrategyAttentionTimer);
+        }
+        searchStrategyAttentionTimer = window.setTimeout(() => {
+          searchStrategyStatusEl.classList.remove("is-attention");
+          searchStrategyAttentionTimer = null;
+        }, 1000);
+        return;
+      }
+      const [moved] = collection.splice(index, 1);
+      if (isWaiting) searchStrategyActions.push(moved);
+      else searchStrategyWaitingActions.push(moved);
+      renderSearchStrategy();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "search-strategy-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Delete ${isWaiting ? "waiting" : "active"} search action ${index + 1}`);
+    remove.addEventListener("click", () => {
+      collection.splice(index, 1);
+      renderSearchStrategy();
+    });
+    controls.append(transfer, remove);
+    row.append(
+      makeField("Source", target, "search-strategy-target"),
+      makeField("Query", query, "search-strategy-query"),
+      controls,
+      makeField("Purpose", purpose, "search-strategy-purpose"),
+    );
+    container.appendChild(row);
+  };
+  searchStrategyActions.forEach(
+    (action, index) => renderAction(
+      action, index, searchStrategyActions, searchStrategyListEl, false,
+    ),
+  );
+  searchStrategyWaitingActions.forEach(
+    (action, index) => renderAction(
+      action, index, searchStrategyWaitingActions, searchStrategyWaitingListEl, true,
+    ),
+  );
+  const waitingCount = searchStrategyWaitingActions.length;
+  searchStrategyWaitingEl.hidden = waitingCount === 0;
+  searchStrategyAddBtn.disabled = searchStrategyActions.length + waitingCount >= SEARCH_STRATEGY_CANDIDATE_LIMIT;
+  searchStrategyStatusEl.dataset.state = "";
+  searchStrategyStatusEl.textContent = searchStrategyActions.length || waitingCount
+    ? `${searchStrategyActions.length} active${waitingCount ? ` · ${waitingCount} waiting` : ""}. Search runs active candidates only, up to 5.`
+    : "No strategy actions yet. Search will use the original intent directly.";
+  updateSearchStrategyIntentState();
+};
+
+const normalizedSearchIntent = () => input.value.trim().replace(/\s+/g, " ");
+
+const isSearchStrategyStale = () => Boolean(
+  searchStrategyActions.length
+  && searchStrategyIntent
+  && normalizedSearchIntent() !== searchStrategyIntent
+);
+
+function updateSearchStrategyIntentState() {
+  const stale = isSearchStrategyStale();
+  if (!stale) searchStrategyStaleAcknowledged = false;
+  searchStrategyStaleEl.hidden = !stale || searchStrategyStaleAcknowledged;
+}
+
+const importPrompt = () => {
+  const intent = input.value.trim() || "<describe what you want to discover>";
+  const areas = [...getEffectiveAreas()];
+  const { yearFrom, yearTo } = normalizeSearchYears();
+  return `You are helping me discover real, independently verifiable Sources for a local knowledge workspace called Knowte.
+
+Research request:
+${intent}
+
+Filters:
+- Since: ${yearFrom || "none"}
+- Until: ${yearTo || "none"}
+- Preferred areas: ${areas.length ? areas.join(", ") : "none"}
+- Maximum sources: 10
+
+Find primary and high-value secondary Sources relevant to this request. Prioritize original papers, technical reports, official documentation or engineering posts, followed by materially useful surveys, benchmarks, follow-up work, and independent analyses.
+
+Requirements:
+- Include only Sources that you believe really exist.
+- Every item must contain at least one resolvable URL, DOI, or arXiv ID.
+- Do not invent missing metadata; use an empty string, empty array, or 0 instead.
+- Keep Source metadata separate from your explanation of relevance.
+- Do not put your own summary into the Source abstract.
+- Avoid duplicate versions of the same work.
+- Return JSON only, without Markdown fences or additional prose.
+
+Use this exact structure:
+{"knowte_import_version":1,"request":"${intent.replaceAll('"', '\\"')}","sources":[{"title":"Exact Source title","source_type":"paper","url":"https://...","doi":"","arxiv_id":"","authors":["Author name"],"year":2025,"why_relevant":"Why this Source may help answer the request"}]}
+
+Valid source_type values: paper, report, documentation, web, book, dataset, other.
+
+Example:
+{"knowte_import_version":1,"request":"How does Qwen optimize long-context processing?","sources":[{"title":"Qwen2.5 Technical Report","source_type":"report","url":"https://arxiv.org/abs/2412.15115","doi":"","arxiv_id":"2412.15115","authors":[],"year":2024,"why_relevant":"A primary technical report describing the Qwen2.5 model family."}]}`;
+};
+
+const updateImportPrompt = () => { importPromptPreviewEl.textContent = importPrompt(); };
+
 const setSearchMode = (mode) => {
-  const nextMode = mode === "smart" ? "smart" : "keyword";
+  const nextMode = ["smart", "import"].includes(mode) ? mode : "keyword";
   const modeChanged = nextMode !== searchMode;
   searchMode = nextMode;
   searchModeButtons.forEach((button) => {
@@ -956,10 +1552,23 @@ const setSearchMode = (mode) => {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+  searchStrategyEl.hidden = searchMode !== "smart"
+    || !(searchStrategyActions.length || searchStrategyWaitingActions.length);
+  searchImportEl.hidden = searchMode !== "import";
+  discussSearchBtn.hidden = searchMode !== "smart";
+  if (searchModelControl) searchModelControl.hidden = searchMode !== "smart";
+  form.classList.toggle("has-model-control", searchMode === "smart");
+  searchSubmitBtn.hidden = searchMode === "import";
+  savePlanBtn.hidden = searchMode === "import";
   if (searchMode === "smart") {
     input.placeholder = "Describe what you want to understand...";
     searchSubmitBtn.textContent = "Search";
     searchModeHint.textContent = "Discover and verify results against your full intent.";
+  } else if (searchMode === "import") {
+    input.placeholder = "Describe what you asked the external service to find…";
+    searchModeHint.textContent = "Import links or structured results from people, tools, or external LLMs.";
+    intelligentProgressEl.hidden = true;
+    updateImportPrompt();
   } else {
     input.placeholder = "Enter keywords, authors, or domains...";
     searchSubmitBtn.textContent = "Search";
@@ -969,8 +1578,10 @@ const setSearchMode = (mode) => {
   if (modeChanged) {
     clearDisplayedSearchResults();
     statusEl.textContent = searchMode === "smart"
-      ? "Intelligent mode ready. Describe what you want to understand."
-      : "Keyword mode ready. Enter a query to search providers directly.";
+      ? "Intelligent mode ready. Search directly or discuss a retrieval strategy first."
+      : searchMode === "import"
+        ? "Import mode ready. Paste human-curated links or structured external results."
+        : "Keyword mode ready. Enter a query to search providers directly.";
   }
 };
 
@@ -978,9 +1589,11 @@ const renderDefaultSearchMode = () => {
   defaultSearchModeButtons.forEach((button) => {
     const isDefault = button.dataset.defaultSearchMode === defaultSearchMode;
     const label = isDefault ? "Default search mode" : "Set as default";
-    const modeName = button.dataset.defaultSearchMode === "intelligent"
-      ? "Intelligent"
-      : "Keyword";
+    const modeName = ({
+      intelligent: "Intelligent",
+      import: "Import",
+      keyword: "Keyword",
+    })[button.dataset.defaultSearchMode] || "Keyword";
     button.classList.toggle("is-default", isDefault);
     button.textContent = isDefault ? "★" : "☆";
     button.setAttribute("aria-pressed", String(isDefault));
@@ -1166,6 +1779,7 @@ const selectedClaims = () => [...selectedClaimIds]
   .filter(Boolean);
 
 const activeView = () => views.find((view) => view.id === activeViewId) || null;
+const activeWikiPage = () => wikiState.pages.find((page) => page.id === activeWikiPageId) || null;
 const viewTypeLabel = (value) => ({
   wiki: "Wiki",
   article: "Article",
@@ -1216,10 +1830,10 @@ const renderChatContext = () => {
   const sourceCount = chatContextSources.size;
   const evidenceCount = chatContextEvidence.size;
   const total = sourceCount + evidenceCount;
-  const currentView = currentReviewContext() === "views" ? activeView() : null;
+  const currentWikiPage = currentReviewContext() === "views" ? activeWikiPage() : null;
   chatContextSummaryEl.textContent = total
     ? `${sourceCount} Source${sourceCount === 1 ? "" : "s"} · ${evidenceCount} Evidence`
-    : currentView ? `Current View included · ${currentView.title}` : "No context attached";
+    : currentWikiPage ? `Wiki Page included · ${currentWikiPage.title}` : "No context attached";
   chatContextTrayEl.replaceChildren();
   const appendChip = (type, key, label, collection) => {
     const chip = document.createElement("div");
@@ -1396,14 +2010,12 @@ evidenceHandoffCancelBtn.addEventListener("click", () => {
 });
 
 claimsBuildViewBtn.addEventListener("click", () => {
-  activeViewId = "";
-  viewAddingClaims = false;
-  setViewDetailMode(false);
   selectedClaimIds.forEach((id) => incomingViewClaimIds.add(id));
   claimsReturnToView = false;
   renderIncomingTrays();
+  renderWikiIncoming();
   showPanel("views-panel");
-  viewTitleInput.focus();
+  fetchWiki().catch((error) => { wikiStatusEl.textContent = error.message; });
 });
 
 viewAddClaimsBtn.addEventListener("click", () => {
@@ -1504,6 +2116,7 @@ const renderReviewWorkspace = () => {
   const libraryEvidenceMode = context === "evidence";
   const activeArtifact = activeReviewArtifact();
   const currentView = activeView();
+  const currentWikiPage = activeWikiPage();
   const contextNames = {
     search: "Search",
     library: "Sources",
@@ -1514,18 +2127,27 @@ const renderReviewWorkspace = () => {
     plans: "Plans",
     config: "Config",
   };
-  const nextReviewContextKey = context === "views" && currentView
-    ? `views:${currentView.id}` : context;
+  const nextReviewContextKey = context === "views" && currentWikiPage
+    ? `views:${currentWikiPage.id}` : context;
   const contextChanged = activeReviewContextKey !== nextReviewContextKey;
+  if (contextChanged) {
+    chatInputDrafts[activeReviewContextKey] = contextChatInput.value;
+  }
   activeReviewContextKey = nextReviewContextKey;
   reviewConversations[activeReviewContextKey] ||= [];
+  chatInputHistories[activeReviewContextKey] ||= [];
+  if (contextChanged) {
+    contextChatInput.value = chatInputDrafts[activeReviewContextKey] || "";
+    chatInputHistoryCursors[activeReviewContextKey] =
+      chatInputHistories[activeReviewContextKey].length;
+  }
   const selectionCount = libraryEvidenceMode
     ? evidenceSelection.length
     : context === "artifact"
     ? Number(activeArtifact?.source_count || 0)
     : context === "claims" ? selectedClaims().length
     : context === "views"
-      ? (currentView?.claims?.length || incomingViewClaimIds.size) : selected.length;
+      ? (currentWikiPage?.claim_ids?.length || incomingViewClaimIds.size) : selected.length;
   contextModeLabelEl.textContent = context === "library"
     ? `Sources · ${librarySources.length} Source${librarySources.length === 1 ? "" : "s"}`
     : context === "evidence"
@@ -1533,9 +2155,9 @@ const renderReviewWorkspace = () => {
     : context === "claims"
       ? `Claims · ${claims.length} total`
     : context === "views"
-      ? currentView
-        ? `View · ${currentView.title}`
-        : `Views · ${views.length} total`
+      ? currentWikiPage
+        ? `Wiki · ${currentWikiPage.title}`
+        : "Global Wiki"
     : context === "artifact"
       ? `Project · ${activeArtifact?.title || "No active Project"}`
       : context === "plans"
@@ -1550,7 +2172,7 @@ const renderReviewWorkspace = () => {
     : context === "claims"
       ? "Selected Claims"
     : context === "views"
-      ? currentView ? "Current View" : "View draft"
+      ? currentWikiPage ? "Current Page" : "Wiki intake"
     : context === "plans"
       ? "Saved Plans"
       : context === "config"
@@ -1563,8 +2185,8 @@ const renderReviewWorkspace = () => {
     : context === "claims"
       ? `${selectedClaims().length} selected`
     : context === "views"
-      ? currentView
-        ? `${currentView.claims?.length || 0} Claims`
+      ? currentWikiPage
+        ? `${currentWikiPage.claim_ids?.length || 0} Claims`
         : `${incomingViewClaimIds.size} incoming`
     : context === "plans"
       ? `${savedPlans.length} saved`
@@ -1593,8 +2215,8 @@ const renderReviewWorkspace = () => {
   if (context === "claims") {
     reviewStageAdvanceBtn.disabled = selectedClaims().length === 0;
     reviewStageAdvanceBtn.textContent = selectedClaims().length
-      ? `Build View from ${selectedClaims().length} Claim${selectedClaims().length === 1 ? "" : "s"}`
-      : "Build View";
+      ? `Send ${selectedClaims().length} Claim${selectedClaims().length === 1 ? "" : "s"} to Wiki`
+      : "Send to Wiki";
   }
   reviewKnowledgeSection.hidden = context !== "library" || !activeSourceWorkspace;
   const copilotAvailable = ["search", "library", "evidence", "claims", "views", "artifact"].includes(context);
@@ -1609,7 +2231,9 @@ const renderReviewWorkspace = () => {
     : context === "claims"
       ? "Discuss selected Claims and their Evidence…"
     : context === "views"
-      ? "Discuss this View and its Claims…"
+      ? currentWikiPage
+        ? "Discuss this Wiki Page and its Claims…"
+        : "Discuss the global Wiki structure…"
     : context === "artifact"
       ? "Discuss this Project…"
       : "Discuss this selection with the LLM…";
@@ -1696,20 +2320,20 @@ const renderReviewWorkspace = () => {
       contextSelectionListEl.appendChild(empty);
     }
   } else if (context === "views") {
-    if (currentView) {
-      appendContextItem(currentView.title);
+    if (currentWikiPage) {
+      appendContextItem(currentWikiPage.title);
       const detail = document.createElement("p");
       detail.textContent = [
-        currentView.artifact?.title ? `Project: ${currentView.artifact.title}` : "Standalone View",
-        currentView.purpose || currentView.artifact?.purpose || "No Purpose added.",
-        `${currentView.claims?.length || 0} Claims`,
+        "Global Wiki",
+        `${currentWikiPage.claim_ids?.length || 0} Claims`,
+        `${wikiState.unorganized_claim_ids?.length || 0} unorganized`,
       ].join(" · ");
       contextSelectionListEl.appendChild(detail);
     } else {
       const draft = document.createElement("p");
       draft.textContent = incomingViewClaimIds.size
-        ? `${incomingViewClaimIds.size} incoming Claim${incomingViewClaimIds.size === 1 ? "" : "s"} ready to organize.`
-        : "Open a saved View or add Claims to a new View draft.";
+        ? `${incomingViewClaimIds.size} incoming Claim${incomingViewClaimIds.size === 1 ? "" : "s"} ready for a Wiki Patch.`
+        : "The global Wiki is organized from accepted Claims through reviewed Wiki Patches.";
       contextSelectionListEl.appendChild(draft);
     }
   } else if (context === "plans") {
@@ -1803,6 +2427,12 @@ const renderResults = () => {
     meta.className = "result-meta";
     const sourceLabel = paper.source ? ` · ${paper.source}` : "";
     meta.textContent = `${paper.authors} · ${paper.year}${sourceLabel}`;
+    if (paper.import_status) {
+      const importState = document.createElement("span");
+      importState.className = `import-state is-${paper.import_status}`;
+      importState.textContent = paper.import_status[0].toUpperCase() + paper.import_status.slice(1);
+      meta.append(" · ", importState);
+    }
 
     const abstract = document.createElement("p");
     abstract.className = "result-abstract";
@@ -1926,6 +2556,23 @@ const renderSecretControls = () => {
   );
 };
 
+const renderProviderConfig = () => {
+  aiCustomRecipeSection.hidden = aiProviderInput.value !== "custom";
+};
+
+aiProviderInput.addEventListener("change", () => {
+  const defaults = {
+    openai: "https://api.openai.com/v1",
+    google: "https://generativelanguage.googleapis.com/v1beta",
+    anthropic: "https://api.anthropic.com/v1",
+  };
+  if (!aiBaseUrlInput.value.trim() && defaults[aiProviderInput.value]) {
+    aiBaseUrlInput.value = defaults[aiProviderInput.value];
+  }
+  renderProviderConfig();
+  updateProfileDirtyState();
+});
+
 const fetchConfig = async () => {
   try {
     const response = await fetch("/api/config");
@@ -1933,6 +2580,15 @@ const fetchConfig = async () => {
       return;
     }
     const data = await response.json();
+    aiModelProfiles = (data.ai_model_profiles || []).map((profile) => ({
+      ...profile, api_key: "", remove_api_key: false,
+      custom_recipe_text: JSON.stringify(profile.custom_recipe || {}, null, 2),
+    }));
+    aiRoleAssignments = { ...(data.ai_role_assignments || {}) };
+    renderAIProfiles();
+    aiProviderInput.value = data.ai_provider || "openai_compatible";
+    aiCustomRecipeInput.value = JSON.stringify(data.ai_custom_recipe || {}, null, 2);
+    renderProviderConfig();
     emailInput.value = data.email || "";
     semanticscholarKeyConfigured = Boolean(data.semanticscholar_api_key_configured);
     s2KeyInput.value = "";
@@ -1961,12 +2617,21 @@ const fetchConfig = async () => {
       : "Optional for local services";
     aiVerifyBatchSizeInput.value = String(data.ai_verify_batch_size || 5);
     aiVerifyConcurrencyInput.value = String(data.ai_verify_concurrency || 1);
-    aiTimeoutInput.value = String(data.ai_timeout_seconds || 45);
+    aiSearchTimeoutInput.value = String(
+      data.ai_search_timeout_seconds || data.ai_timeout_seconds || 45,
+    );
+    aiStageTimeoutInput.value = String(
+      data.ai_stage_timeout_seconds || data.ai_timeout_seconds || 45,
+    );
     aiCopilotInstructionsInput.value = data.ai_copilot_instructions || "";
     aiCopilotTemperatureInput.value = String(data.ai_copilot_temperature ?? 0.2);
     aiCopilotMaxTokensInput.value = String(data.ai_copilot_max_tokens || 1200);
     renderCopilotAdvancedParameters(data.ai_copilot_advanced_parameters ?? { top_p: 0.9 });
-    aiCopilotPromptPreviewEl.textContent = data.ai_copilot_prompt_preview || "";
+    aiCopilotPromptPreviews = data.ai_copilot_prompt_previews || {
+      search: data.ai_copilot_prompt_preview || "",
+    };
+    aiCopilotPromptShared = data.ai_copilot_prompt_shared || "";
+    renderCopilotPromptPreview();
     semanticscholarKeyRemovalPending = false;
     aiApiKeyRemovalPending = false;
     aiEmbeddingApiKeyRemovalPending = false;
@@ -1980,11 +2645,10 @@ const fetchConfig = async () => {
     }
     configuredMaxPapers = parseMaxPapers(data.max_papers);
     configuredIntelligentMaxResults = Number(data.intelligent_max_results || 20);
-    defaultSearchMode = data.default_search_mode === "intelligent"
-      ? "intelligent"
-      : "keyword";
+    defaultSearchMode = ["intelligent", "import"].includes(data.default_search_mode)
+      ? data.default_search_mode : "keyword";
     renderDefaultSearchMode();
-    setSearchMode(defaultSearchMode === "intelligent" ? "smart" : "keyword");
+    setSearchMode(defaultSearchMode === "intelligent" ? "smart" : defaultSearchMode);
     activeLimit = configuredMaxPapers;
     maxPapersInput.value = String(configuredMaxPapers);
     intelligentMaxResultsInput.value = String(configuredIntelligentMaxResults);
@@ -2056,21 +2720,12 @@ const saveConfig = async () => {
         enabled_backends,
         max_papers,
         intelligent_max_results,
-        ai_base_url: aiBaseUrlInput.value.trim(),
-        ...(ai_api_key || clear_ai_api_key ? { ai_api_key } : {}),
-        ai_chat_model: aiChatModelInput.value.trim(),
-        ai_embedding_model: aiEmbeddingModelInput.value.trim(),
-        ai_embedding_separate_connection: Boolean(
-          aiEmbeddingSeparateInput.open,
-        ),
-        ai_enable_thinking: Boolean(aiEnableThinkingInput.checked),
-        ai_embedding_base_url: aiEmbeddingBaseUrlInput.value.trim(),
-        ...(ai_embedding_api_key || clear_ai_embedding_api_key
-          ? { ai_embedding_api_key }
-          : {}),
+        ai_model_profiles: serializedAIProfiles(),
+        ai_role_assignments: aiRoleAssignments,
         ai_verify_batch_size: Number(aiVerifyBatchSizeInput.value || 5),
         ai_verify_concurrency: Number(aiVerifyConcurrencyInput.value || 1),
-        ai_timeout_seconds: Number(aiTimeoutInput.value || 45),
+        ai_search_timeout_seconds: Number(aiSearchTimeoutInput.value || 45),
+        ai_stage_timeout_seconds: Number(aiStageTimeoutInput.value || 45),
         ai_copilot_instructions: aiCopilotInstructionsInput.value.trim(),
         ai_copilot_temperature: Number(aiCopilotTemperatureInput.value || 0),
         ai_copilot_max_tokens: Number(aiCopilotMaxTokensInput.value || 1200),
@@ -2085,6 +2740,15 @@ const saveConfig = async () => {
       throw new Error("save_failed");
     }
     const data = await response.json();
+    aiModelProfiles = (data.ai_model_profiles || []).map((profile) => ({
+      ...profile, api_key: "", remove_api_key: false,
+      custom_recipe_text: JSON.stringify(profile.custom_recipe || {}, null, 2),
+    }));
+    aiRoleAssignments = { ...(data.ai_role_assignments || {}) };
+    renderAIProfiles();
+    aiProviderInput.value = data.ai_provider || "openai_compatible";
+    aiCustomRecipeInput.value = JSON.stringify(data.ai_custom_recipe || {}, null, 2);
+    renderProviderConfig();
     setConfigStatus("Config saved.", 1000);
     if (data.email) {
       emailInput.value = data.email;
@@ -2119,12 +2783,21 @@ const saveConfig = async () => {
     aiEmbeddingApiKeyRemovalPending = false;
     aiVerifyBatchSizeInput.value = String(data.ai_verify_batch_size || 5);
     aiVerifyConcurrencyInput.value = String(data.ai_verify_concurrency || 1);
-    aiTimeoutInput.value = String(data.ai_timeout_seconds || 45);
+    aiSearchTimeoutInput.value = String(
+      data.ai_search_timeout_seconds || data.ai_timeout_seconds || 45,
+    );
+    aiStageTimeoutInput.value = String(
+      data.ai_stage_timeout_seconds || data.ai_timeout_seconds || 45,
+    );
     aiCopilotInstructionsInput.value = data.ai_copilot_instructions || "";
     aiCopilotTemperatureInput.value = String(data.ai_copilot_temperature ?? 0.2);
     aiCopilotMaxTokensInput.value = String(data.ai_copilot_max_tokens || 1200);
     renderCopilotAdvancedParameters(data.ai_copilot_advanced_parameters ?? { top_p: 0.9 });
-    aiCopilotPromptPreviewEl.textContent = data.ai_copilot_prompt_preview || "";
+    aiCopilotPromptPreviews = data.ai_copilot_prompt_previews || {
+      search: data.ai_copilot_prompt_preview || "",
+    };
+    aiCopilotPromptShared = data.ai_copilot_prompt_shared || "";
+    renderCopilotPromptPreview();
     renderSecretControls();
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
@@ -2443,30 +3116,10 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
   const runId = globalThis.crypto?.randomUUID?.()
     || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   let lastProgressStage = "";
-  const renderExpandedQueries = (queries, expansionStatus = "complete") => {
-    intelligentExpandedEl.replaceChildren();
-    const label = document.createElement("strong");
-    label.textContent = "Expanded queries";
-    intelligentExpandedEl.appendChild(label);
-    if (queries.length) {
-      queries.forEach((expandedQuery) => {
-        const chip = document.createElement("span");
-        chip.textContent = expandedQuery;
-        intelligentExpandedEl.appendChild(chip);
-      });
-    } else {
-      const empty = document.createElement("span");
-      empty.textContent = expansionStatus === "degraded"
-        ? "Unavailable; continuing with the original query"
-        : "None generated; using the original query";
-      intelligentExpandedEl.appendChild(empty);
-    }
-    intelligentExpandedEl.hidden = false;
-  };
   const renderProgressStage = (stage) => {
     if (!stage || stage === lastProgressStage) return;
     lastProgressStage = stage;
-    const academicOrder = ["expand", "recall", "embed", "verify"];
+    const academicOrder = ["recall", "embed", "verify"];
     const academicIndex = academicOrder.indexOf(stage);
     if (academicEnabled && academicIndex >= 0) {
       academicOrder.forEach((name, index) => {
@@ -2496,15 +3149,6 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
       if (!response.ok || token !== intelligentRunToken) return;
       const progress = await response.json();
       renderProgressStage(progress.stage);
-      if (
-        academicEnabled
-        && Object.hasOwn(progress, "expanded_queries")
-      ) {
-        renderExpandedQueries(
-          progress.expanded_queries || [],
-          progress.expansion_status || "complete",
-        );
-      }
     } catch (_error) {
       // The main request remains authoritative if a progress poll is missed.
     }
@@ -2519,7 +3163,13 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
       web_pages: "1",
       backends: backends.join(","),
       run_id: runId,
+      model_profile_id: searchModelSelect?.value || "",
     });
+    if (searchStrategyActions.length) {
+      params.set("strategy", JSON.stringify(searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT).map(
+        ({ query: actionQuery, target }) => ({ query: actionQuery.trim(), target }),
+      ).filter((item) => item.query)));
+    }
     if (yearFrom) params.set("year_from", yearFrom);
     if (yearTo) params.set("year_to", yearTo);
     const response = await fetch(`/api/intelligent-search?${params}`, {
@@ -2538,7 +3188,7 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
     }
     const stages = data.stages || {};
     if (academicEnabled) {
-      ["recall", "expand", "embed", "verify"].forEach((stageName) => {
+      ["recall", "embed", "verify"].forEach((stageName) => {
         markStage(
           academicStagesEl,
           stageName,
@@ -2554,16 +3204,8 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
     intelligentBudgetEl.textContent = data.debug_replay
       ? "Debug Replay: 0 retrieval rounds · 0 embedding batches · 0 LLM requests"
       : `Actual pipeline work: ${budget.retrieval || 0} retrieval round(s) · ${budget.embedding || 0} embedding batch(es) · ${budget.chat || 0} LLM request(s)`;
-    const expandedQueries = data.expanded_queries || [];
-    if (academicEnabled && !data.debug_replay) {
-      renderExpandedQueries(
-        expandedQueries,
-        stages.expand?.status || "complete",
-      );
-    } else if (data.debug_replay) {
-      intelligentExpandedEl.hidden = true;
-      intelligentExpandedEl.replaceChildren();
-    }
+    intelligentExpandedEl.hidden = true;
+    intelligentExpandedEl.replaceChildren();
     fullResults = data.results || [];
     updateUsage(data.usage);
     renderResults();
@@ -2611,6 +3253,133 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
   }
 };
 
+searchStrategyAddBtn.addEventListener("click", () => {
+  if (searchStrategyActions.length + searchStrategyWaitingActions.length >= SEARCH_STRATEGY_CANDIDATE_LIMIT) return;
+  if (!searchStrategyActions.length && !searchStrategyWaitingActions.length) {
+    searchStrategyIntent = normalizedSearchIntent();
+    searchStrategyStaleAcknowledged = false;
+  }
+  const collection = searchStrategyActions.length < SEARCH_STRATEGY_TOP_LIMIT
+    ? searchStrategyActions : searchStrategyWaitingActions;
+  collection.push({ query: "", target: "both", purpose: "" });
+  searchStrategyEl.hidden = false;
+  renderSearchStrategy();
+});
+
+discussSearchBtn.addEventListener("click", async () => {
+  const intent = input.value.trim();
+  if (!intent) {
+    statusEl.textContent = "Enter a search intent before discussing it.";
+    input.focus();
+    return;
+  }
+  contextPanel.classList.add("is-open", "is-search-strategy-focus");
+  contextPanelToggleBtn.setAttribute("aria-expanded", "true");
+  window.setTimeout(() => contextPanel.classList.remove("is-search-strategy-focus"), 1300);
+  contextModeLabelEl.textContent = "Search strategy";
+  contextChatInput.placeholder = "Discuss this search strategy…";
+  contextChatInput.focus({ preventScroll: true });
+  contextPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  discussSearchBtn.disabled = true;
+  discussSearchBtn.textContent = "Discussing…";
+  searchStrategyStatusEl.textContent = "Copilot is proposing source-specific retrieval actions…";
+  try {
+    const { yearFrom, yearTo } = normalizeSearchYears();
+    const response = await fetch("/api/search/strategy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        intent,
+        model_profile_id: searchModelSelect?.value || "",
+        backends: activeBackends(),
+        areas: [...getEffectiveAreas()],
+        year_from: yearFrom,
+        year_to: yearTo,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    updateUsage(data.usage);
+    if (!response.ok) throw new Error(data.message || "Copilot could not propose a strategy.");
+    searchStrategyActions = (data.actions || []).slice(0, SEARCH_STRATEGY_TOP_LIMIT);
+    searchStrategyWaitingActions = [];
+    searchStrategyIntent = normalizedSearchIntent();
+    searchStrategyStaleAcknowledged = false;
+    searchStrategyEl.hidden = false;
+    renderSearchStrategy();
+    const strategyMessage = `I proposed ${searchStrategyActions.length} source-specific retrieval action${searchStrategyActions.length === 1 ? "" : "s"}. You can edit them directly or continue discussing the strategy here.`;
+    appendReviewMessage(strategyMessage, "assistant");
+    reviewConversations.search.push({ role: "assistant", content: strategyMessage });
+  } catch (error) {
+    searchStrategyStatusEl.textContent = error.message;
+    appendReviewMessage(error.message, "error");
+  } finally {
+    discussSearchBtn.disabled = false;
+    discussSearchBtn.textContent = "Discuss";
+  }
+});
+
+copyImportPromptBtn.addEventListener("click", async () => {
+  updateImportPrompt();
+  try {
+    await navigator.clipboard.writeText(importPromptPreviewEl.textContent);
+    copyImportPromptBtn.textContent = "✓ Copied";
+    window.setTimeout(() => { copyImportPromptBtn.textContent = "Copy import prompt"; }, 1000);
+  } catch (_error) {
+    importStatusEl.textContent = "Could not access the clipboard. Expand Preview prompt and copy it manually.";
+  }
+});
+
+parseImportBtn.addEventListener("click", async () => {
+  const content = importContentInput.value.trim();
+  if (!content) {
+    importStatusEl.textContent = "Paste at least one URL, DOI, arXiv ID, or structured result.";
+    return;
+  }
+  parseImportBtn.disabled = true;
+  importStatusEl.textContent = "Parsing and checking candidates…";
+  try {
+    const response = await fetch("/api/search/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not parse imported results.");
+    fullResults = data.results || [];
+    selectedResultKeys.clear();
+    pageSelectTop.value = "1";
+    renderResults();
+    renderReviewWorkspace();
+    importStatusEl.textContent = fullResults.length
+      ? `Parsed ${fullResults.length} candidate${fullResults.length === 1 ? "" : "s"}. Review and select them below.`
+      : "No resolvable candidates were found. Check the format or identifiers.";
+    statusEl.textContent = `Imported ${fullResults.length} candidate Source${fullResults.length === 1 ? "" : "s"}.`;
+  } catch (error) {
+    importStatusEl.textContent = error.message;
+  } finally {
+    parseImportBtn.disabled = false;
+  }
+});
+
+input.addEventListener("input", () => {
+  if (searchMode === "import") updateImportPrompt();
+  if (searchStrategyActions.length || searchStrategyWaitingActions.length) {
+    searchStrategyStaleAcknowledged = false;
+    updateSearchStrategyIntentState();
+  }
+});
+
+searchStrategyUseAnywayBtn.addEventListener("click", () => {
+  searchStrategyStaleAcknowledged = true;
+  searchStrategyStaleEl.hidden = true;
+  searchStrategyStatusEl.dataset.state = "";
+  searchStrategyStatusEl.textContent = "Using the current strategy with the revised intent. Search runs active candidates only.";
+});
+
+searchStrategyDiscussAgainBtn.addEventListener("click", () => {
+  discussSearchBtn.click();
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const query = input.value.trim();
@@ -2624,6 +3393,13 @@ form.addEventListener("submit", async (event) => {
   const { yearFrom, yearTo } = normalizeSearchYears();
   const backends = activeBackends();
   if (searchMode === "smart") {
+    if (isSearchStrategyStale() && !searchStrategyStaleAcknowledged) {
+      searchStrategyStaleEl.hidden = false;
+      searchStrategyStatusEl.dataset.state = "error";
+      searchStrategyStatusEl.textContent = "Review the outdated strategy before searching.";
+      searchStrategyEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      return;
+    }
     await runIntelligentSearch(query, areas, yearFrom, yearTo, backends);
   } else {
     intelligentProgressEl.hidden = true;
@@ -3243,6 +4019,17 @@ const renderIncomingTrays = () => {
   });
 };
 
+const syncProposalQueueButton = (button, count, isOpen) => {
+  button.textContent = `Awaiting review · ${count}`;
+  button.disabled = count === 0;
+  button.classList.toggle("has-pending", count > 0);
+  button.classList.toggle("is-open", count > 0 && isOpen);
+  button.setAttribute("aria-expanded", String(count > 0 && isOpen));
+  button.title = count > 0
+    ? `${isOpen ? "Hide" : "Show"} ${count} item${count === 1 ? "" : "s"} awaiting review`
+    : "Nothing is awaiting review";
+};
+
 const renderClaims = () => {
   claimsListEl.replaceChildren();
   syncTagFilterOptions(claimsTagFilterInput, claims);
@@ -3259,7 +4046,7 @@ const renderClaims = () => {
   claimsBuildViewBtn.disabled = selectedClaimIds.size === 0;
   claimsSelectedCountEl.textContent = `${selectedClaimIds.size} selected`;
   claimsBuildViewBtn.textContent = selectedClaimIds.size
-    ? `Build View · ${selectedClaimIds.size}` : "Build View";
+    ? `Send to Wiki · ${selectedClaimIds.size}` : "Send to Wiki";
   claimsHandoffReturnEl.hidden = !claimsReturnToView;
   claimsHandoffApplyBtn.disabled = claimsReturnToView && selectedClaimIds.size === 0;
   renderIncomingTrays();
@@ -3267,7 +4054,9 @@ const renderClaims = () => {
   claimsRelateBtn.title = relationSelection.length === 2
     ? `First selected → second selected: ${relationSelection[0].statement} → ${relationSelection[1].statement}`
     : "Select two Claims; the relation runs from the first selected to the second.";
-  claimsProposalsToggleBtn.textContent = `Review proposals · ${claimProposals.length}`;
+  syncProposalQueueButton(
+    claimsProposalsToggleBtn, claimProposals.length, claimProposalQueueOpen,
+  );
   if (!claims.length) {
     const empty = document.createElement("div");
     empty.className = "knowledge-empty";
@@ -3376,12 +4165,45 @@ const renderClaims = () => {
 
 const renderClaimProposals = () => {
   claimProposalListEl.replaceChildren();
-  claimProposalBoardEl.hidden = claimProposals.length === 0;
-  claimsProposalsToggleBtn.textContent = `Review proposals · ${claimProposals.length}`;
+  if (!claimProposals.length) claimProposalQueueOpen = false;
+  claimProposalBoardEl.hidden = !claimProposalQueueOpen || claimProposals.length === 0;
+  claimsListEl.hidden = claimProposalQueueOpen && claimProposals.length > 0;
+  syncProposalQueueButton(
+    claimsProposalsToggleBtn, claimProposals.length, claimProposalQueueOpen,
+  );
+  claimProposalReportEl.hidden = !latestClaimProposalReport;
+  claimProposalReportBodyEl.replaceChildren();
+  if (latestClaimProposalReport) {
+    const { summary, skipped = [], comparisonClaimCount = 0 } = latestClaimProposalReport;
+    claimProposalReportSummaryEl.textContent = `Latest run · ${skipped.length} skipped`;
+    if (summary) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = summary;
+      claimProposalReportBodyEl.appendChild(paragraph);
+    }
+    const context = document.createElement("small");
+    context.textContent = `${comparisonClaimCount} existing Claim${comparisonClaimCount === 1 ? "" : "s"} compared locally.`;
+    claimProposalReportBodyEl.appendChild(context);
+    skipped.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "claim-proposal-skip";
+      const ids = Array.isArray(item.evidence_ids) ? item.evidence_ids : [];
+      row.textContent = `${ids.length} Evidence · ${item.reason || "No durable change proposed."}`;
+      claimProposalReportBodyEl.appendChild(row);
+    });
+  }
   claimProposals.forEach((proposal) => {
     const payload = proposal.payload || {};
+    const operation = payload.operation || "create_claim";
     const card = document.createElement("article");
-    card.className = "claim-proposal-card";
+    card.className = `claim-proposal-card claim-operation-${operation.replaceAll("_", "-")}`;
+    const operationLabel = document.createElement("div");
+    operationLabel.className = "claim-proposal-operation";
+    operationLabel.textContent = ({
+      create_claim: payload.basis === "inference" ? "New inference" : "New reported Claim",
+      link_evidence: "Update existing Claim",
+      create_relation: "New Claim relation",
+    })[operation] || "Claim change";
     const statement = document.createElement("textarea");
     statement.rows = 3;
     statement.value = payload.statement || "";
@@ -3396,6 +4218,24 @@ const renderClaimProposals = () => {
     basisLabel.textContent = "Basis";
     basisField.append(basisLabel, basis);
     fields.append(basisField);
+    const target = document.createElement("div");
+    target.className = "claim-proposal-target";
+    if (operation === "link_evidence") {
+      const targetLabel = document.createElement("small");
+      targetLabel.textContent = "Attach selected Evidence to";
+      const targetStatement = document.createElement("strong");
+      targetStatement.textContent = payload.target_statement || payload.target_claim_id || "Existing Claim";
+      target.append(targetLabel, targetStatement);
+    } else if (operation === "create_relation") {
+      const subject = document.createElement("strong");
+      subject.textContent = payload.subject_statement || payload.subject_claim_id || "Claim";
+      const relation = document.createElement("span");
+      relation.className = "claim-relation-preview";
+      relation.textContent = `→ ${payload.relation_type || "related"} →`;
+      const object = document.createElement("strong");
+      object.textContent = payload.object_statement || payload.object_claim_id || "Claim";
+      target.append(subject, relation, object);
+    }
     const evidence = document.createElement("div");
     evidence.className = "proposal-evidence-list";
     (payload.evidence || []).forEach((link) => {
@@ -3411,12 +4251,13 @@ const renderClaimProposals = () => {
     const rationaleBody = document.createElement("p");
     rationaleBody.textContent = payload.rationale || "No rationale supplied.";
     rationale.append(rationaleLabel, rationaleBody);
+    const caveatItems = (payload.caveats || []).filter(Boolean);
     const caveats = document.createElement("section");
     caveats.className = "proposal-explanation proposal-caveats";
     const caveatsLabel = document.createElement("strong");
     caveatsLabel.textContent = "Caveats";
     const caveatsBody = document.createElement("p");
-    caveatsBody.textContent = (payload.caveats || []).join(" · ") || "No caveats supplied.";
+    caveatsBody.textContent = caveatItems.join(" · ");
     caveats.append(caveatsLabel, caveatsBody);
     const actions = document.createElement("div");
     actions.className = "claim-card-actions claim-proposal-actions";
@@ -3426,15 +4267,16 @@ const renderClaimProposals = () => {
     const acceptLabel = document.createElement("span");
     acceptLabel.textContent = "Accept";
     accept.append(createControlIcon("accept"), acceptLabel);
-    const resolveProposal = async (reviewState) => {
+    const resolveProposal = async (reviewState = "accepted") => {
       [accept, keepDisputed].forEach((button) => { button.disabled = true; });
       const artifact = artifacts.find((item) => item.id === collectArtifactSelect.value) || null;
+      const edits = operation === "create_claim" ? {
+        statement: statement.value.trim(), basis: basis.value, review_state: reviewState,
+        artifact_ids: artifact?.id ? [artifact.id] : [],
+      } : {};
       const response = await fetch(`/api/claim-proposals/${proposal.id}/accept`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          statement: statement.value.trim(), basis: basis.value, review_state: reviewState,
-          artifact_ids: artifact?.id ? [artifact.id] : [],
-        }),
+        body: JSON.stringify(edits),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -3452,6 +4294,10 @@ const renderClaimProposals = () => {
     disputedLabel.textContent = "Keep disputed";
     keepDisputed.append(createControlIcon("disputed"), disputedLabel);
     keepDisputed.addEventListener("click", () => resolveProposal("disputed"));
+    keepDisputed.hidden = operation !== "create_claim";
+    acceptLabel.textContent = operation === "link_evidence"
+      ? "Attach Evidence"
+      : operation === "create_relation" ? "Create relation" : "Accept";
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "proposal-discard";
@@ -3464,7 +4310,13 @@ const renderClaimProposals = () => {
       if (response.ok) await fetchClaimProposals();
     });
     actions.append(discard, keepDisputed, accept);
-    card.append(statement, fields, evidence, rationale, caveats, actions);
+    card.append(operationLabel);
+    if (operation === "create_claim") card.append(statement, fields);
+    else card.append(target);
+    if (payload.evidence?.length) card.append(evidence);
+    card.append(rationale);
+    if (caveatItems.length) card.append(caveats);
+    card.append(actions);
     claimProposalListEl.appendChild(card);
   });
 };
@@ -3492,11 +4344,582 @@ const fetchClaims = async () => {
   updateClaimsStatus();
 };
 
+const waitForReaderTarget = async (selector, timeout = 6000) => {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    const target = sourceReaderSegmentsEl.querySelector(selector);
+    if (target) return target;
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  }
+  return null;
+};
+
+const locateEvidenceProposal = async (payload) => {
+  showPanel("sources-panel");
+  const opened = await openSourceReader(payload.source_id);
+  if (!opened) return;
+  const segment = activeSourceWorkspace?.segments.find(
+    (item) => item.id === payload.segment_id,
+  );
+  const isPdf = activeSourceWorkspace?.capture?.media_type === "application/pdf";
+  const selector = isPdf
+    ? `.pdf-page[data-page-number="${Number(segment?.ordinal || 1)}"]`
+    : `.capture-segment[data-segment-id="${CSS.escape(payload.segment_id || "")}"]`;
+  const target = await waitForReaderTarget(selector);
+  if (!target) {
+    libraryStatusEl.textContent = "The passage is verified, but its visual location could not be rendered.";
+    return;
+  }
+  sourceReaderSegmentsEl.querySelectorAll(".reader-located-passage").forEach(
+    (item) => item.classList.remove("reader-located-passage"),
+  );
+  sourceReaderSegmentsEl.querySelectorAll("mark.reader-quote-mark").forEach(
+    (mark) => mark.replaceWith(document.createTextNode(mark.textContent || "")),
+  );
+  target.classList.add("reader-located-passage");
+  sourceReaderSegmentsEl.scrollTo({
+    top: Math.max(0, target.offsetTop - 12),
+    behavior: "smooth",
+  });
+  if (!isPdf) {
+    const textNode = target.querySelector(".capture-segment-text");
+    const fullText = textNode?.textContent || "";
+    const quote = payload.quote || "";
+    const start = fullText.indexOf(quote);
+    if (textNode && start >= 0) {
+      const before = document.createTextNode(fullText.slice(0, start));
+      const mark = document.createElement("mark");
+      mark.className = "reader-quote-mark";
+      mark.textContent = quote;
+      const after = document.createTextNode(fullText.slice(start + quote.length));
+      textNode.replaceChildren(before, mark, after);
+    }
+  }
+};
+
 const fetchClaimProposals = async () => {
   const response = await fetch("/api/claim-proposals");
   if (!response.ok) throw new Error("Could not load Claim proposals.");
   claimProposals = (await response.json()).proposals || [];
   renderClaimProposals();
+};
+
+const scrollClaimProposalQueueToStart = (behavior = "smooth") => {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      const target = claimProposalBoardEl.hidden && latestClaimProposalReport
+        ? claimProposalReportEl : claimProposalBoardEl;
+      if (target.hidden) return;
+      const panel = target.closest(".panel");
+      if (!panel) {
+        target.scrollIntoView({ behavior, block: "start" });
+        return;
+      }
+      const panelRect = panel.getBoundingClientRect();
+      const boardRect = target.getBoundingClientRect();
+      panel.scrollTo({
+        top: Math.max(0, panel.scrollTop + boardRect.top - panelRect.top - 12),
+        behavior,
+      });
+    });
+  });
+};
+
+const renderEvidenceProposals = () => {
+  evidenceProposalListEl.replaceChildren();
+  if (!evidenceProposals.length) evidenceProposalQueueOpen = false;
+  evidenceProposalBoardEl.hidden = !evidenceProposalQueueOpen || evidenceProposals.length === 0;
+  evidenceLibraryListEl.hidden = evidenceProposalQueueOpen && evidenceProposals.length > 0;
+  syncProposalQueueButton(
+    evidenceProposalsToggleBtn, evidenceProposals.length, evidenceProposalQueueOpen,
+  );
+  evidenceProposals.forEach((proposal) => {
+    const payload = proposal.payload || {};
+    const source = librarySources.find((item) => item.id === payload.source_id);
+    const card = document.createElement("article");
+    card.className = "claim-proposal-card evidence-proposal-card";
+    const sourceLabel = document.createElement("small");
+    sourceLabel.textContent = `${source?.title || "Source"} · ${payload.locator || "Captured passage"}`;
+    const quote = document.createElement("textarea");
+    quote.rows = 4;
+    quote.value = payload.quote || "";
+    const rationale = document.createElement("section");
+    rationale.className = "proposal-explanation proposal-rationale";
+    const rationaleLabel = document.createElement("strong");
+    rationaleLabel.textContent = "Rationale";
+    const rationaleBody = document.createElement("p");
+    rationaleBody.textContent = payload.rationale || "No rationale supplied.";
+    rationale.append(rationaleLabel, rationaleBody);
+    const caveatItems = (payload.caveats || []).filter(Boolean);
+    const caveats = document.createElement("section");
+    caveats.className = "proposal-explanation proposal-caveats";
+    const caveatsLabel = document.createElement("strong");
+    caveatsLabel.textContent = "Caveats";
+    const caveatsBody = document.createElement("p");
+    caveatsBody.textContent = caveatItems.join(" · ");
+    caveats.append(caveatsLabel, caveatsBody);
+    const tags = document.createElement("input");
+    tags.placeholder = "Comma-separated tags";
+    tags.value = (payload.tags || []).join(", ");
+    const actions = document.createElement("div");
+    actions.className = "claim-card-actions claim-proposal-actions";
+    const locate = document.createElement("button");
+    locate.type = "button";
+    locate.className = "proposal-locate";
+    locate.append(createControlIcon("inspect"), document.createTextNode("Locate in Source"));
+    locate.addEventListener("click", () => locateEvidenceProposal(payload));
+    const discard = document.createElement("button");
+    discard.type = "button";
+    discard.className = "proposal-discard";
+    discard.append(createControlIcon("discard"), document.createTextNode("Discard"));
+    discard.addEventListener("click", async () => {
+      const response = await fetch(`/api/evidence-proposals/${proposal.id}`, { method: "DELETE" });
+      if (response.ok) await fetchEvidenceProposals();
+    });
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "proposal-accept";
+    accept.append(createControlIcon("accept"), document.createTextNode("Accept"));
+    accept.addEventListener("click", async () => {
+      accept.disabled = true;
+      const response = await fetch(`/api/evidence-proposals/${proposal.id}/accept`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quote: quote.value.trim(),
+          tags: tags.value.split(",").map((item) => item.trim()).filter(Boolean),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        evidenceStatusEl.textContent = data.message || "Could not accept Evidence proposal.";
+        accept.disabled = false;
+        return;
+      }
+      await Promise.all([fetchEvidenceLibrary(), fetchEvidenceProposals()]);
+    });
+    actions.append(locate, discard, accept);
+    card.append(sourceLabel, quote, rationale);
+    if (caveatItems.length) card.append(caveats);
+    card.append(tags, actions);
+    evidenceProposalListEl.appendChild(card);
+  });
+};
+
+const fetchEvidenceProposals = async () => {
+  const response = await fetch("/api/evidence-proposals");
+  if (!response.ok) throw new Error("Could not load Evidence proposals.");
+  evidenceProposals = (await response.json()).proposals || [];
+  renderEvidenceProposals();
+};
+
+const wikiClaimById = (claimId) => wikiState.claims.find((claim) => claim.id === claimId);
+
+const wikiPageDepth = (page) => {
+  const byId = new Map(wikiState.pages.map((item) => [item.id, item]));
+  let depth = 0;
+  let cursor = page;
+  const seen = new Set();
+  while (cursor?.parent_id && depth < 8 && !seen.has(cursor.parent_id)) {
+    seen.add(cursor.parent_id);
+    cursor = byId.get(cursor.parent_id);
+    depth += 1;
+  }
+  return depth;
+};
+
+const renderWikiIncoming = () => {
+  const incoming = [...incomingViewClaimIds]
+    .map((claimId) => claims.find((claim) => claim.id === claimId) || wikiClaimById(claimId))
+    .filter(Boolean);
+  wikiIncomingTrayEl.hidden = incoming.length === 0;
+  wikiIncomingTitleEl.textContent = `Incoming Claims · ${incoming.length}`;
+  wikiIncomingItemsEl.replaceChildren();
+  incoming.forEach((claim) => {
+    const chip = document.createElement("span");
+    chip.textContent = claim.statement;
+    wikiIncomingItemsEl.appendChild(chip);
+  });
+};
+
+const renderWikiPage = () => {
+  wikiPageEl.replaceChildren();
+  const page = wikiState.pages.find((item) => item.id === activeWikiPageId);
+  if (!page) {
+    const empty = document.createElement("div");
+    empty.className = "wiki-empty";
+    const title = document.createElement("strong");
+    title.textContent = wikiState.claims.length ? "The Wiki has not been organized yet." : "No Claims yet.";
+    const note = document.createElement("p");
+    note.textContent = wikiState.claims.length
+      ? "Organize the accepted Claims with AI, then review the proposed structure before it becomes the Wiki."
+      : "Accepted Claims will become the material for the global Wiki.";
+    empty.append(title, note);
+    wikiPageEl.appendChild(empty);
+    return;
+  }
+  const head = document.createElement("header");
+  const eyebrow = document.createElement("small");
+  eyebrow.textContent = "Global Wiki";
+  const title = document.createElement("h2");
+  title.textContent = page.title;
+  const summary = document.createElement("p");
+  summary.textContent = page.summary || "No overview has been written for this Page.";
+  head.append(eyebrow, title, summary);
+  const list = document.createElement("div");
+  list.className = "wiki-claim-list";
+  page.claim_ids.forEach((claimId, index) => {
+    const claim = wikiClaimById(claimId);
+    if (!claim) return;
+    const card = document.createElement("article");
+    card.className = "wiki-claim-card";
+    const meta = document.createElement("small");
+    meta.textContent = `${String(index + 1).padStart(2, "0")} · ${claim.basis}${claim.review_state === "disputed" ? " · disputed" : ""}`;
+    const statement = document.createElement("p");
+    statement.textContent = claim.statement;
+    const evidence = document.createElement("div");
+    evidence.className = "wiki-claim-evidence";
+    (claim.evidence || []).slice(0, 4).forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `${item.source_title || "Source"} · ${item.locator || "Evidence"}`;
+      button.addEventListener("click", () => openEvidenceDetail(item.evidence_id));
+      evidence.appendChild(button);
+    });
+    card.append(meta, statement, evidence);
+    list.appendChild(card);
+  });
+  wikiPageEl.append(head, list);
+};
+
+const renderWikiTree = () => {
+  wikiTreeEl.replaceChildren();
+  if (!wikiState.pages.length) return;
+  const children = new Map();
+  wikiState.pages.forEach((page) => {
+    const key = page.parent_id || "root";
+    if (!children.has(key)) children.set(key, []);
+    children.get(key).push(page);
+  });
+  const appendPages = (parentId, depth = 0, visited = new Set()) => {
+    (children.get(parentId) || []).forEach((page) => {
+      if (visited.has(page.id)) return;
+      visited.add(page.id);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "wiki-tree-item";
+      button.classList.toggle("is-active", page.id === activeWikiPageId);
+      button.style.setProperty("--wiki-depth", depth);
+      const title = document.createElement("span");
+      title.textContent = page.title;
+      const count = document.createElement("small");
+      count.textContent = String(page.claim_ids.length);
+      button.append(title, count);
+      button.addEventListener("click", () => {
+        activeWikiPageId = page.id;
+        renderWiki();
+        renderReviewWorkspace();
+      });
+      wikiTreeEl.appendChild(button);
+      appendPages(page.id, depth + 1, new Set(visited));
+    });
+  };
+  appendPages("root");
+};
+
+const renderWikiGraph = () => {
+  wikiGraphEl.replaceChildren();
+  const nodes = wikiState.graph?.nodes || [];
+  const edges = wikiState.graph?.edges || [];
+  if (!nodes.length) {
+    const empty = document.createElement("div");
+    empty.className = "wiki-empty";
+    empty.textContent = "Accepted Claims will appear here automatically.";
+    wikiGraphEl.appendChild(empty);
+    return;
+  }
+  const canvas = document.createElement("div");
+  canvas.className = "wiki-graph-canvas";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 1000 640");
+  const positions = new Map();
+  const columns = Math.max(2, Math.ceil(Math.sqrt(nodes.length * 1.5)));
+  const rows = Math.ceil(nodes.length / columns);
+  nodes.forEach((node, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    positions.set(node.id, {
+      x: 90 + column * (820 / Math.max(1, columns - 1)),
+      y: rows === 1 ? 300 : 80 + row * (480 / (rows - 1)),
+    });
+  });
+  edges.forEach((edge) => {
+    const from = positions.get(edge.subject_claim_id);
+    const to = positions.get(edge.object_claim_id);
+    if (!from || !to) return;
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", from.x); line.setAttribute("y1", from.y);
+    line.setAttribute("x2", to.x); line.setAttribute("y2", to.y);
+    line.dataset.relation = edge.relation_type;
+    svg.appendChild(line);
+  });
+  canvas.appendChild(svg);
+  nodes.forEach((node, index) => {
+    const position = positions.get(node.id);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "wiki-graph-node";
+    card.style.left = `${position.x / 10}%`;
+    card.style.top = `${position.y / 6.4}%`;
+    card.textContent = `${index + 1}. ${node.statement}`;
+    card.title = node.statement;
+    card.addEventListener("click", () => {
+      const page = wikiState.pages.find((item) => item.claim_ids.includes(node.id));
+      if (page) {
+        activeWikiPageId = page.id;
+        wikiMode = "wiki";
+        renderWiki();
+      }
+    });
+    canvas.appendChild(card);
+  });
+  const legend = document.createElement("div");
+  legend.className = "wiki-graph-legend";
+  ["supports", "contradicts", "related"].forEach((type) => {
+    const item = document.createElement("span");
+    item.dataset.relation = type;
+    item.textContent = type;
+    legend.appendChild(item);
+  });
+  wikiGraphEl.append(canvas, legend);
+};
+
+const renderWikiProposals = () => {
+  wikiProposalListEl.replaceChildren();
+  wikiProposals.forEach((proposal) => {
+    const card = document.createElement("article");
+    card.className = "wiki-proposal-card";
+    const summary = document.createElement("p");
+    summary.textContent = proposal.payload.summary || "A complete Wiki structure is ready to review.";
+    const pages = document.createElement("div");
+    pages.className = "wiki-proposed-pages";
+    (proposal.payload.pages || []).forEach((page) => {
+      const row = document.createElement("div");
+      const depth = (() => {
+        let value = 0; let cursor = page; const seen = new Set();
+        while (cursor?.parent_key && value < 8 && !seen.has(cursor.parent_key)) {
+          seen.add(cursor.parent_key);
+          cursor = proposal.payload.pages.find((item) => item.key === cursor.parent_key);
+          value += 1;
+        }
+        return value;
+      })();
+      row.style.setProperty("--proposal-depth", depth);
+      const title = document.createElement("strong"); title.textContent = page.title;
+      const count = document.createElement("small"); count.textContent = `${page.claim_ids.length} Claims`;
+      const description = document.createElement("p"); description.textContent = page.summary;
+      row.append(title, count, description);
+      pages.appendChild(row);
+    });
+    const gaps = document.createElement("div");
+    gaps.className = "wiki-proposal-gaps";
+    (proposal.payload.gaps || []).forEach((gap) => {
+      const item = document.createElement("span"); item.textContent = gap; gaps.appendChild(item);
+    });
+    const actions = document.createElement("div");
+    actions.className = "proposal-actions";
+    const discard = document.createElement("button");
+    discard.type = "button"; discard.className = "semantic-action is-destructive"; discard.textContent = "× Discard";
+    discard.addEventListener("click", () => discardWikiProposal(proposal.id));
+    const accept = document.createElement("button");
+    accept.type = "button"; accept.className = "semantic-action is-accept"; accept.textContent = "✓ Apply Wiki Patch";
+    accept.addEventListener("click", () => acceptWikiProposal(proposal.id));
+    actions.append(discard, accept);
+    card.append(summary, pages, gaps, actions);
+    wikiProposalListEl.appendChild(card);
+  });
+  if (!wikiProposals.length) {
+    const empty = document.createElement("div"); empty.className = "wiki-empty";
+    empty.textContent = "No Wiki Patches are awaiting review.";
+    wikiProposalListEl.appendChild(empty);
+  }
+};
+
+const renderWiki = () => {
+  if (!wikiState.pages.some((page) => page.id === activeWikiPageId)) {
+    activeWikiPageId = wikiState.pages[0]?.id || "";
+  }
+  wikiModeWikiBtn.classList.toggle("is-active", wikiMode === "wiki");
+  wikiModeGraphBtn.classList.toggle("is-active", wikiMode === "graph");
+  wikiModeWikiBtn.setAttribute("aria-pressed", String(wikiMode === "wiki"));
+  wikiModeGraphBtn.setAttribute("aria-pressed", String(wikiMode === "graph"));
+  wikiMainEl.hidden = wikiMode !== "wiki" || !wikiProposalReviewEl.hidden || !wikiReadingComposerEl.hidden || !wikiReadingEl.hidden;
+  wikiMainEl.classList.toggle("is-empty", wikiState.pages.length === 0);
+  wikiGraphEl.hidden = wikiMode !== "graph" || !wikiProposalReviewEl.hidden || !wikiReadingComposerEl.hidden || !wikiReadingEl.hidden;
+  wikiHealthEl.replaceChildren();
+  [
+    [wikiState.unorganized_claim_ids?.length || 0, "unorganized"],
+    [wikiState.stale_claim_ids?.length || 0, "stale"],
+  ].forEach(([count, label]) => {
+    const chip = document.createElement("span"); chip.textContent = `${count} ${label}`;
+    chip.classList.toggle("needs-attention", count > 0); wikiHealthEl.appendChild(chip);
+  });
+  wikiProposalsToggleBtn.textContent = `Awaiting review · ${wikiProposals.length}`;
+  wikiProposalsToggleBtn.classList.toggle("has-pending", wikiProposals.length > 0);
+  renderWikiIncoming();
+  renderWikiTree();
+  renderWikiPage();
+  renderWikiGraph();
+  renderWikiProposals();
+};
+
+const fetchWiki = async () => {
+  const [wikiResponse, proposalsResponse] = await Promise.all([
+    fetch("/api/wiki"), fetch("/api/wiki/proposals"),
+  ]);
+  if (!wikiResponse.ok || !proposalsResponse.ok) throw new Error("Could not load the global Wiki.");
+  wikiState = await wikiResponse.json();
+  wikiProposals = (await proposalsResponse.json()).proposals || [];
+  renderWiki();
+  if (currentReviewContext() === "views") renderReviewWorkspace();
+};
+
+const generateWikiProposal = async () => {
+  wikiStatusEl.textContent = "Organizing the global Wiki…";
+  wikiOrganizeBtn.disabled = true;
+  try {
+    const response = await fetch("/api/wiki/proposals/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        claim_ids: [...incomingViewClaimIds],
+        model_profile_id: wikiModelSelect?.value || "",
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.message || "Could not propose a Wiki structure.");
+    incomingViewClaimIds.clear();
+    wikiProposalReviewEl.hidden = false;
+    wikiReadingComposerEl.hidden = true;
+    wikiReadingEl.hidden = true;
+    await fetchWiki();
+    wikiStatusEl.textContent = "Wiki Patch ready for review.";
+  } catch (error) {
+    wikiStatusEl.textContent = error.message;
+  } finally {
+    wikiOrganizeBtn.disabled = false;
+  }
+};
+
+const acceptWikiProposal = async (proposalId) => {
+  wikiStatusEl.textContent = "Applying the reviewed Wiki Patch…";
+  const response = await fetch(`/api/wiki/proposals/${encodeURIComponent(proposalId)}/accept`, { method: "POST" });
+  const body = await response.json();
+  if (!response.ok) { wikiStatusEl.textContent = body.message || "Could not apply the Wiki Patch."; return; }
+  wikiProposalReviewEl.hidden = true;
+  await fetchWiki();
+  wikiStatusEl.textContent = "Global Wiki updated.";
+};
+
+const discardWikiProposal = async (proposalId) => {
+  const response = await fetch(`/api/wiki/proposals/${encodeURIComponent(proposalId)}`, { method: "DELETE" });
+  if (!response.ok) { wikiStatusEl.textContent = "Could not discard the Wiki Patch."; return; }
+  await fetchWiki();
+  if (!wikiProposals.length) wikiProposalReviewEl.hidden = true;
+  wikiStatusEl.textContent = "Wiki Patch discarded.";
+};
+
+const renderWikiReading = (reading) => {
+  currentWikiReading = reading;
+  wikiReadingEl.replaceChildren();
+  const toolbar = document.createElement("div");
+  toolbar.className = "wiki-reading-toolbar";
+  const back = document.createElement("button"); back.type = "button"; back.className = "reader-toolbar-btn"; back.textContent = "← Wiki";
+  back.addEventListener("click", () => { wikiReadingEl.hidden = true; renderWiki(); });
+  const readingActions = document.createElement("div");
+  readingActions.className = "wiki-reading-save";
+  const notice = document.createElement("small"); notice.textContent = "Temporary Article · not saved";
+  const projectSelect = document.createElement("select");
+  projectSelect.setAttribute("aria-label", "Project for saved Article");
+  const emptyOption = document.createElement("option"); emptyOption.value = ""; emptyOption.textContent = "Choose Project"; projectSelect.appendChild(emptyOption);
+  artifacts.forEach((artifact) => {
+    const option = document.createElement("option"); option.value = artifact.id; option.textContent = artifact.title; projectSelect.appendChild(option);
+  });
+  const save = document.createElement("button"); save.type = "button"; save.className = "reader-toolbar-btn"; save.textContent = "＋ Save to Project";
+  save.disabled = artifacts.length === 0;
+  save.addEventListener("click", async () => {
+    if (!projectSelect.value) { wikiStatusEl.textContent = "Choose a Project for this Article."; return; }
+    save.disabled = true;
+    const response = await fetch("/api/project-documents", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artifact_id: projectSelect.value, title: reading.title, goal: currentWikiReadingGoal, content: reading }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) {
+      notice.textContent = "Saved to Project";
+      wikiStatusEl.textContent = "Article saved as Project content.";
+    } else {
+      save.disabled = false;
+      wikiStatusEl.textContent = body.message || "Could not save the Article.";
+    }
+  });
+  readingActions.append(notice, projectSelect, save);
+  toolbar.append(back, readingActions);
+  const title = document.createElement("h2"); title.textContent = reading.title;
+  const intro = document.createElement("p"); intro.className = "wiki-reading-intro"; intro.textContent = reading.introduction;
+  wikiReadingEl.append(toolbar, title, intro);
+  reading.sections.forEach((section) => {
+    const block = document.createElement("section");
+    const heading = document.createElement("h3"); heading.textContent = section.heading; block.appendChild(heading);
+    section.paragraphs.forEach((paragraph) => {
+      const text = document.createElement("p"); text.textContent = paragraph.text;
+      const citations = document.createElement("div"); citations.className = "wiki-reading-citations";
+      paragraph.claim_ids.forEach((claimId) => {
+        const claim = wikiClaimById(claimId); if (!claim) return;
+        const chip = document.createElement("button"); chip.type = "button"; chip.textContent = claim.statement;
+        chip.addEventListener("click", () => {
+          const page = wikiState.pages.find((item) => item.claim_ids.includes(claimId));
+          if (page) activeWikiPageId = page.id;
+          wikiReadingEl.hidden = true; wikiMode = "wiki"; renderWiki();
+        });
+        citations.appendChild(chip);
+      });
+      block.append(text, citations);
+    });
+    wikiReadingEl.appendChild(block);
+  });
+  if (reading.gaps?.length) {
+    const gaps = document.createElement("aside");
+    const heading = document.createElement("strong"); heading.textContent = "Knowledge gaps"; gaps.appendChild(heading);
+    reading.gaps.forEach((gap) => { const item = document.createElement("p"); item.textContent = gap; gaps.appendChild(item); });
+    wikiReadingEl.appendChild(gaps);
+  }
+  wikiReadingEl.hidden = false;
+  renderWiki();
+};
+
+const generateWikiReading = async () => {
+  const goal = wikiReadingGoalInput.value.trim();
+  if (!goal) { wikiStatusEl.textContent = "Describe the goal for this Article."; return; }
+  wikiReadingRunBtn.disabled = true;
+  wikiStatusEl.textContent = "Writing from the selected Wiki knowledge…";
+  try {
+    currentWikiReadingGoal = goal;
+    const response = await fetch("/api/wiki/articles/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        goal,
+        model_profile_id: articleModelSelect?.value || "",
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.message || "Could not generate the Article.");
+    wikiReadingComposerEl.hidden = true;
+    renderWikiReading(body.article);
+    wikiStatusEl.textContent = "Article generated. It remains temporary.";
+  } catch (error) {
+    wikiStatusEl.textContent = error.message;
+  } finally {
+    wikiReadingRunBtn.disabled = false;
+  }
 };
 
 const renderViews = () => {
@@ -3979,6 +5402,12 @@ const renderLibrary = () => {
   );
   libraryListEl.hidden = Boolean(activeSourceWorkspace);
   sourceReaderEl.hidden = !activeSourceWorkspace;
+  document.querySelector(".source-evidence-proposer").hidden = Boolean(activeSourceWorkspace);
+  proposeEvidenceBtn.disabled = selectedLibrarySourceKeys.size === 0
+    || !evidenceProposalFocusInput.value.trim();
+  proposeEvidenceBtn.textContent = selectedLibrarySourceKeys.size
+    ? `Propose Evidence via LLM · ${selectedLibrarySourceKeys.size}`
+    : "Propose Evidence via LLM";
   libraryAbstractToggleBtn.hidden = Boolean(activeSourceWorkspace);
   libraryPanelInnerEl.classList.toggle("is-reader-focused", Boolean(activeSourceWorkspace));
   libraryPanelInnerEl.classList.toggle(
@@ -4024,6 +5453,7 @@ const renderLibrary = () => {
         librarySelectAllInput, selectedLibrarySourceKeys.size, librarySources.length,
       );
       renderReviewWorkspace();
+      renderLibrary();
     });
     selection.append(checkbox, selectionText);
 
@@ -4248,12 +5678,19 @@ const segmentForPage = (pageNumber) => (
 
 const setEvidenceTool = (tool) => {
   evidenceTool = tool;
+  if (tool !== "text" && readerTextSelectionArmed) cancelReaderTextSelectionArm();
   evidenceTextToolBtn.classList.toggle("is-active", tool === "text");
   evidenceSnapshotToolBtn.classList.toggle("is-active", tool === "snapshot");
   evidenceTextToolBtn.setAttribute("aria-pressed", String(tool === "text"));
   evidenceSnapshotToolBtn.setAttribute("aria-pressed", String(tool === "snapshot"));
   sourceReaderSegmentsEl.classList.toggle("is-snapshot-mode", tool === "snapshot");
   if (tool === "snapshot") window.getSelection()?.removeAllRanges();
+};
+
+const cancelReaderTextSelectionArm = () => {
+  readerTextSelectionArmed = false;
+  evidenceTextToolBtn.classList.remove("is-awaiting-selection");
+  sourceReaderSegmentsEl.classList.remove("is-awaiting-text-selection");
 };
 
 const cancelSnapshotTool = () => {
@@ -4710,19 +6147,19 @@ sourceCaptureBtn.addEventListener("click", async () => {
 });
 
 const captureCurrentReaderSelection = ({ showEditor = false } = {}) => {
-  if (evidenceTool !== "text") return;
+  if (evidenceTool !== "text") return false;
   const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return false;
   const range = selection.getRangeAt(0);
   const origin = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
     ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
   const pdfPage = origin.closest?.(".pdf-page");
   if (pdfPage) {
     if (!pdfPage.contains(range.startContainer) || !pdfPage.contains(range.endContainer)) {
-      return;
+      return false;
     }
     const quote = range.toString().trim();
-    if (!quote) return;
+    if (!quote) return false;
     const pageNumber = Number(pdfPage.dataset.pageNumber);
     const segment = segmentForPage(pageNumber);
     pendingEvidenceSelection = {
@@ -4734,11 +6171,13 @@ const captureCurrentReaderSelection = ({ showEditor = false } = {}) => {
     };
     renderReviewWorkspace();
     if (showEditor) openEvidenceQuickEditor(range.getBoundingClientRect());
-    return;
+    cancelReaderTextSelectionArm();
+    sourceReaderStatusEl.textContent = "Text selected. Review the Evidence before saving.";
+    return true;
   }
   const segmentText = origin.closest?.(".capture-segment-text");
   if (!segmentText || !segmentText.contains(range.startContainer)
-      || !segmentText.contains(range.endContainer)) return;
+      || !segmentText.contains(range.endContainer)) return false;
   const prefix = document.createRange();
   prefix.selectNodeContents(segmentText);
   prefix.setEnd(range.startContainer, range.startOffset);
@@ -4755,9 +6194,14 @@ const captureCurrentReaderSelection = ({ showEditor = false } = {}) => {
   };
   renderReviewWorkspace();
   if (showEditor) openEvidenceQuickEditor(range.getBoundingClientRect());
+  cancelReaderTextSelectionArm();
+  sourceReaderStatusEl.textContent = "Text selected. Review the Evidence before saving.";
+  return true;
 };
 
-sourceReaderSegmentsEl.addEventListener("mouseup", () => captureCurrentReaderSelection());
+sourceReaderSegmentsEl.addEventListener("mouseup", () => captureCurrentReaderSelection({
+  showEditor: readerTextSelectionArmed,
+}));
 
 evidenceTextToolBtn.addEventListener("click", cancelSnapshotTool);
 evidenceSnapshotToolBtn.addEventListener("click", () => {
@@ -4847,7 +6291,13 @@ evidenceQuickSaveBtn.addEventListener("click", async () => {
 
 const runInternalCaptureShortcut = (mode) => {
   if (mode === "text") {
-    captureCurrentReaderSelection({ showEditor: true });
+    if (!activeSourceWorkspace) return;
+    setEvidenceTool("text");
+    if (captureCurrentReaderSelection({ showEditor: true })) return;
+    readerTextSelectionArmed = true;
+    evidenceTextToolBtn.classList.add("is-awaiting-selection");
+    sourceReaderSegmentsEl.classList.add("is-awaiting-text-selection");
+    sourceReaderStatusEl.textContent = "Select text to create Evidence. Press Esc to cancel.";
   }
   if (mode === "snapshot") {
     if (!activeSourceWorkspace) return;
@@ -4876,6 +6326,10 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !evidenceQuickEditor.hidden) {
     closeEvidenceQuickEditor({ discard: true });
     cancelSnapshotTool();
+  }
+  if (event.key === "Escape" && readerTextSelectionArmed) {
+    cancelReaderTextSelectionArm();
+    sourceReaderStatusEl.textContent = "Text selection cancelled.";
   }
 });
 
@@ -4944,21 +6398,101 @@ libraryProposeClaimsBtn.addEventListener("click", async () => {
     const response = await fetch("/api/claim-proposals/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ evidence_ids: [...selectedEvidenceIds], artifact }),
+      body: JSON.stringify({
+        evidence_ids: [...selectedEvidenceIds], artifact,
+        focus: claimProposalFocusInput?.value.trim() || "",
+        model_profile_id: claimsModelSelect?.value || "",
+      }),
     });
     const data = await response.json().catch(() => ({}));
     updateUsage(data.usage);
     if (!response.ok) throw new Error(data.message || "Could not propose Claims.");
-    await fetchClaimProposals();
+    claimProposalQueueOpen = true;
+    const returned = Array.isArray(data.proposals) ? data.proposals : [];
+    const byId = new Map(
+      [...returned, ...claimProposals].map((proposal) => [proposal.id, proposal]),
+    );
+    claimProposals = [...byId.values()];
+    latestClaimProposalReport = {
+      summary: data.summary || "",
+      skipped: Array.isArray(data.skipped) ? data.skipped : [],
+      comparisonClaimCount: Number(data.comparison_claim_count || 0),
+    };
+    renderClaimProposals();
     showPanel("claims-panel");
-    claimProposalBoardEl.hidden = false;
-    evidenceStatusEl.textContent = `${data.proposals.length} Claim proposal${data.proposals.length === 1 ? "" : "s"} awaiting review.`;
+    claimsStatusEl.textContent = returned.length
+      ? `${returned.length} Claim change${returned.length === 1 ? "" : "s"} awaiting review.`
+      : `${latestClaimProposalReport.skipped.length} item${latestClaimProposalReport.skipped.length === 1 ? "" : "s"} examined; no durable Claim change proposed.`;
+    await fetchClaimProposals().catch(() => {
+      claimsStatusEl.textContent += " The background queue refresh failed; the returned proposals remain visible.";
+    });
+    scrollClaimProposalQueueToStart();
   } catch (error) {
     evidenceStatusEl.textContent = error instanceof TypeError
       ? "Connection to Knowte was interrupted before Claims could be proposed. Restart Knowte, then try again."
       : error.message;
   } finally {
     renderEvidenceLibrary();
+  }
+});
+
+evidenceProposalFocusInput.addEventListener("input", renderLibrary);
+
+proposeEvidenceBtn.addEventListener("click", async () => {
+  const focus = evidenceProposalFocusInput.value.trim();
+  const sourceIds = librarySources
+    .filter((source) => selectedLibrarySourceKeys.has(resultKey(source)))
+    .map((source) => source.id);
+  if (!focus || !sourceIds.length) return;
+  if (sourceIds.length > 6) {
+    libraryStatusEl.textContent = "Select at most 6 Sources for one Evidence proposal run.";
+    return;
+  }
+  proposeEvidenceBtn.disabled = true;
+  proposeEvidenceBtn.textContent = "Proposing…";
+  const modelName = evidenceModelSelect?.selectedOptions?.[0]?.textContent
+    || "selected model";
+  const startedAt = Date.now();
+  const renderProposalProgress = () => {
+    const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    libraryStatusEl.textContent = `Proposing Evidence with ${modelName}…\n${elapsed} s elapsed`;
+  };
+  renderProposalProgress();
+  const elapsedTimer = window.setInterval(renderProposalProgress, 1000);
+  try {
+    const response = await fetch("/api/evidence-proposals/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_ids: sourceIds, focus,
+        model_profile_id: evidenceModelSelect?.value || "",
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    updateUsage(data.usage);
+    if (!response.ok) throw new Error(data.message || "Could not propose Evidence.");
+    evidenceProposalQueueOpen = true;
+    const returned = Array.isArray(data.proposals) ? data.proposals : [];
+    const byId = new Map(
+      [...returned, ...evidenceProposals].map((proposal) => [proposal.id, proposal]),
+    );
+    evidenceProposals = [...byId.values()];
+    renderEvidenceProposals();
+    showPanel("evidence-panel");
+    evidenceStatusEl.textContent = `${returned.length} Evidence proposal${returned.length === 1 ? "" : "s"} awaiting review.`;
+    fetchEvidenceProposals().catch(() => {
+      evidenceStatusEl.textContent += " The background queue refresh failed; the returned proposals remain visible.";
+    });
+  } catch (error) {
+    libraryStatusEl.textContent = error instanceof TypeError
+      ? "Connection to Knowte was interrupted before Evidence could be proposed."
+      : error.message;
+  } finally {
+    window.clearInterval(elapsedTimer);
+    proposeEvidenceBtn.disabled = false;
+    proposeEvidenceBtn.textContent = selectedLibrarySourceKeys.size
+      ? `Propose Evidence via LLM · ${selectedLibrarySourceKeys.size}`
+      : "Propose Evidence via LLM";
+    renderLibrary();
   }
 });
 
@@ -4999,9 +6533,20 @@ claimCreateBtn.addEventListener("click", async () => {
 claimBasisInput.addEventListener("change", renderIncomingTrays);
 
 claimsProposalsToggleBtn.addEventListener("click", () => {
-  claimProposalBoardEl.hidden = !claimProposalBoardEl.hidden;
-  if (!claimProposalBoardEl.hidden) {
-    claimProposalBoardEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (!claimProposals.length) return;
+  claimProposalQueueOpen = !claimProposalQueueOpen;
+  renderClaimProposals();
+  if (claimProposalQueueOpen) {
+    scrollClaimProposalQueueToStart();
+  }
+});
+
+evidenceProposalsToggleBtn.addEventListener("click", () => {
+  if (!evidenceProposals.length) return;
+  evidenceProposalQueueOpen = !evidenceProposalQueueOpen;
+  renderEvidenceProposals();
+  if (evidenceProposalQueueOpen) {
+    evidenceProposalBoardEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 });
 
@@ -5251,18 +6796,150 @@ contextCollectSelectedBtn.addEventListener("click", () => {
   collectSelectedResults(collectArtifactSelect.value || null);
 });
 
+const appendMarkdownInline = (parent, value) => {
+  const text = String(value || "");
+  const tokenPattern = /(\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)|\*[^*\n]+\*|_[^_\n]+_)/g;
+  let cursor = 0;
+  for (const match of text.matchAll(tokenPattern)) {
+    if (match.index > cursor) {
+      parent.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+    }
+    const token = match[0];
+    if ((token.startsWith("**") && token.endsWith("**"))
+        || (token.startsWith("__") && token.endsWith("__"))) {
+      const strong = document.createElement("strong");
+      appendMarkdownInline(strong, token.slice(2, -2));
+      parent.appendChild(strong);
+    } else if (token.startsWith("`") && token.endsWith("`")) {
+      const code = document.createElement("code");
+      code.textContent = token.slice(1, -1);
+      parent.appendChild(code);
+    } else if (token.startsWith("[")) {
+      const linkMatch = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+      if (linkMatch) {
+        const link = document.createElement("a");
+        link.textContent = linkMatch[1];
+        link.href = linkMatch[2];
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        parent.appendChild(link);
+      } else {
+        parent.appendChild(document.createTextNode(token));
+      }
+    } else {
+      const emphasis = document.createElement("em");
+      appendMarkdownInline(emphasis, token.slice(1, -1));
+      parent.appendChild(emphasis);
+    }
+    cursor = match.index + token.length;
+  }
+  if (cursor < text.length) {
+    parent.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+};
+
+const appendMarkdownParagraph = (parent, lines) => {
+  const paragraph = document.createElement("p");
+  lines.forEach((line, index) => {
+    if (index) paragraph.appendChild(document.createElement("br"));
+    appendMarkdownInline(paragraph, line);
+  });
+  parent.appendChild(paragraph);
+};
+
+const renderSafeMarkdown = (value) => {
+  const root = document.createElement("div");
+  root.className = "context-chat-markdown";
+  const lines = String(value || "").replaceAll("\r\n", "\n").split("\n");
+  let paragraphLines = [];
+  let list = null;
+  let listType = "";
+  const flushParagraph = () => {
+    if (paragraphLines.length) appendMarkdownParagraph(root, paragraphLines);
+    paragraphLines = [];
+  };
+  const closeList = () => { list = null; listType = ""; };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim().startsWith("```")) {
+      flushParagraph(); closeList();
+      const language = line.trim().slice(3).trim();
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      if (language) code.dataset.language = language;
+      code.textContent = codeLines.join("\n");
+      pre.appendChild(code); root.appendChild(pre);
+      continue;
+    }
+    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph(); closeList();
+      const heading = document.createElement(`h${Math.min(4, headingMatch[1].length + 2)}`);
+      appendMarkdownInline(heading, headingMatch[2]);
+      root.appendChild(heading);
+      continue;
+    }
+    const quoteMatch = line.match(/^>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph(); closeList();
+      const quoteLines = [quoteMatch[1]];
+      while (index + 1 < lines.length && /^>\s?/.test(lines[index + 1])) {
+        index += 1;
+        quoteLines.push(lines[index].replace(/^>\s?/, ""));
+      }
+      const quote = document.createElement("blockquote");
+      appendMarkdownParagraph(quote, quoteLines);
+      root.appendChild(quote);
+      continue;
+    }
+    const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      const nextType = ordered ? "ol" : "ul";
+      if (!list || listType !== nextType) {
+        closeList();
+        list = document.createElement(nextType);
+        listType = nextType;
+        root.appendChild(list);
+      }
+      const item = document.createElement("li");
+      appendMarkdownInline(item, (ordered || unordered)[1]);
+      list.appendChild(item);
+      continue;
+    }
+    if (!line.trim()) {
+      flushParagraph(); closeList();
+      continue;
+    }
+    closeList();
+    paragraphLines.push(line);
+  }
+  flushParagraph();
+  return root;
+};
+
 const appendReviewMessage = (
   text,
   role,
   recommendations = [],
   sources = activeReviewSources(),
+  proposedSearchActions = [],
 ) => {
   const message = document.createElement("div");
   message.className = `context-chat-message is-${role}`;
-  const body = document.createElement("p");
-  body.textContent = text;
+  const body = role === "assistant"
+    ? renderSafeMarkdown(text)
+    : document.createElement("p");
+  if (role !== "assistant") body.textContent = text;
   message.appendChild(body);
-  if (recommendations.length) {
+  if (recommendations.length && currentReviewContext() === "library") {
     const list = document.createElement("div");
     list.className = "context-recommendations";
     recommendations.slice(0, 12).forEach((item) => {
@@ -5275,6 +6952,65 @@ const appendReviewMessage = (
       list.appendChild(row);
     });
     message.appendChild(list);
+  }
+  if (role === "assistant" && proposedSearchActions.length) {
+    const actionKey = (action) => `${String(action.target || "both").toLowerCase()}::${String(action.query || "").trim().toLowerCase().replace(/\s+/g, " ")}`;
+    const existingKeys = new Set(
+      [...searchStrategyActions, ...searchStrategyWaitingActions].map(actionKey),
+    );
+    const proposalKeys = new Set();
+    const novelActions = proposedSearchActions.filter((action) => {
+      const key = actionKey(action);
+      if (!String(action.query || "").trim() || existingKeys.has(key) || proposalKeys.has(key)) return false;
+      proposalKeys.add(key);
+      return true;
+    });
+    const proposal = document.createElement("div");
+    proposal.className = "chat-strategy-proposal";
+    const proposalHead = document.createElement("strong");
+    proposalHead.textContent = "Proposed candidates";
+    proposal.appendChild(proposalHead);
+    novelActions.forEach((action) => {
+      const row = document.createElement("div");
+      row.className = "chat-strategy-proposal-row";
+      const meta = document.createElement("span");
+      meta.textContent = String(action.target || "both").toUpperCase();
+      const content = document.createElement("div");
+      const query = document.createElement("strong");
+      query.textContent = action.query;
+      const purpose = document.createElement("small");
+      purpose.textContent = action.purpose || "No purpose supplied.";
+      content.append(query, purpose);
+      row.append(meta, content);
+      proposal.appendChild(row);
+    });
+    if (!novelActions.length) {
+      const note = document.createElement("small");
+      note.textContent = "No candidates differ from the current strategy.";
+      proposal.appendChild(note);
+    }
+    message.appendChild(proposal);
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "chat-apply-strategy";
+    apply.disabled = novelActions.length === 0;
+    apply.textContent = novelActions.length
+      ? `Add candidates · ${novelActions.length}`
+      : "Already in strategy";
+    apply.addEventListener("click", () => {
+      const available = SEARCH_STRATEGY_CANDIDATE_LIMIT
+        - searchStrategyActions.length - searchStrategyWaitingActions.length;
+      const additions = novelActions.slice(0, Math.max(0, available));
+      searchStrategyWaitingActions.push(...additions.map((item) => ({ ...item })));
+      searchStrategyEl.hidden = false;
+      renderSearchStrategy();
+      searchStrategyEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      apply.disabled = true;
+      apply.textContent = additions.length
+        ? `${additions.length} added to waiting list`
+        : "Candidate limit reached";
+    });
+    message.appendChild(apply);
   }
   contextChatEl.appendChild(message);
   contextChatEl.scrollTop = contextChatEl.scrollHeight;
@@ -5289,22 +7025,74 @@ const renderReviewConversation = () => {
       message.role,
       message.recommendations || [],
       message.sources || [],
+      message.search_actions || [],
     );
   });
 };
+
+contextChatInput.addEventListener("input", () => {
+  chatInputDrafts[activeReviewContextKey] = contextChatInput.value;
+  chatInputHistoryCursors[activeReviewContextKey] =
+    (chatInputHistories[activeReviewContextKey] || []).length;
+});
+
+contextChatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    if (!contextChatSendBtn.disabled) contextChatForm.requestSubmit();
+    return;
+  }
+  if (!["ArrowUp", "ArrowDown"].includes(event.key)
+      || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  if (contextChatInput.value.includes("\n")) return;
+  const history = chatInputHistories[activeReviewContextKey] || [];
+  if (!history.length) return;
+  const cursorPosition = contextChatInput.selectionStart ?? 0;
+  const beforeCursor = contextChatInput.value.slice(0, cursorPosition);
+  const afterCursor = contextChatInput.value.slice(cursorPosition);
+  const atHistoryEdge = event.key === "ArrowUp"
+    ? !beforeCursor.includes("\n")
+    : !afterCursor.includes("\n");
+  if (!atHistoryEdge) return;
+  event.preventDefault();
+  let historyCursor = chatInputHistoryCursors[activeReviewContextKey];
+  if (!Number.isInteger(historyCursor)) historyCursor = history.length;
+  if (event.key === "ArrowUp") {
+    if (historyCursor === history.length) {
+      chatInputDrafts[activeReviewContextKey] = contextChatInput.value;
+    }
+    historyCursor = Math.max(0, historyCursor - 1);
+    contextChatInput.value = history[historyCursor];
+  } else {
+    historyCursor = Math.min(history.length, historyCursor + 1);
+    contextChatInput.value = historyCursor === history.length
+      ? (chatInputDrafts[activeReviewContextKey] || "")
+      : history[historyCursor];
+  }
+  chatInputHistoryCursors[activeReviewContextKey] = historyCursor;
+  contextChatInput.setSelectionRange(
+    contextChatInput.value.length, contextChatInput.value.length,
+  );
+});
 
 contextChatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const question = contextChatInput.value.trim();
   if (!question) return;
   const contextKey = activeReviewContextKey;
+  const inputHistory = chatInputHistories[contextKey] ||= [];
+  if (inputHistory[inputHistory.length - 1] !== question) inputHistory.push(question);
+  chatInputHistoryCursors[contextKey] = inputHistory.length;
+  chatInputDrafts[contextKey] = "";
   const selected = [...chatContextSources.values()];
   const evidence = [...chatContextEvidence.values()];
   const selectedClaimContext = currentReviewContext() === "claims"
     ? selectedClaims()
     : currentReviewContext() === "views"
-      ? activeView()?.claims || [...incomingViewClaimIds]
-        .map((id) => claims.find((claim) => claim.id === id)).filter(Boolean)
+      ? [...new Set([
+          ...(activeWikiPage()?.claim_ids || []),
+          ...incomingViewClaimIds,
+        ])].map((id) => wikiClaimById(id) || claims.find((claim) => claim.id === id)).filter(Boolean)
       : [];
   const artifact = activeReviewArtifact();
   const conversation = reviewConversations[contextKey] || [];
@@ -5327,11 +7115,26 @@ contextChatForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         question,
+        model_profile_id: contextModelSelect.value,
         context: currentReviewContext(),
         sources: selected,
         evidence,
         claims: selectedClaimContext,
+        wiki_context: currentReviewContext() === "views" ? {
+          mode: wikiMode,
+          page: activeWikiPage() ? {
+            title: activeWikiPage().title,
+            summary: activeWikiPage().summary,
+            claim_ids: activeWikiPage().claim_ids,
+          } : null,
+          unorganized_claim_ids: wikiState.unorganized_claim_ids || [],
+          stale_claim_ids: wikiState.stale_claim_ids || [],
+        } : null,
         artifact,
+        search_strategy: currentReviewContext() === "search" ? {
+          intent: input.value.trim(),
+          actions: searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT),
+        } : null,
         conversation: recentConversation,
       }),
     });
@@ -5340,14 +7143,24 @@ contextChatForm.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(data.message || "The review copilot is unavailable.");
     }
-    const answer = data.answer || "The model returned no written assessment.";
-    appendReviewMessage(answer, "assistant", data.recommendations || [], selected);
+    const answer = (data.answer || "The model returned no written assessment.")
+      + (data.structured_output_degraded
+        ? "\n\nStructured suggestions were unavailable, but the model's text response was preserved."
+        : "");
+    appendReviewMessage(
+      answer,
+      "assistant",
+      data.recommendations || [],
+      selected,
+      data.search_actions || [],
+    );
     conversation.push({
       role: "assistant",
       content: answer,
       recommendations: data.recommendations || [],
       sources: selected,
       evidence,
+      search_actions: data.search_actions || [],
     });
   } catch (error) {
     appendReviewMessage(error.message, "error");
@@ -5397,6 +7210,8 @@ const currentPlanPayload = () => {
     year_from: yearFrom || null,
     year_to: yearTo || null,
     sources: activeBackends(),
+    search_actions: searchMode === "smart"
+      ? searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT) : [],
   };
 };
 
@@ -5538,7 +7353,16 @@ const restorePlanAreas = (areas) => {
 
 const loadPlanIntoSearch = (plan) => {
   input.value = plan.query || "";
+  searchStrategyActions = Array.isArray(plan.search_actions)
+    ? plan.search_actions.slice(0, SEARCH_STRATEGY_TOP_LIMIT).map((item) => ({ ...item }))
+    : [];
+  searchStrategyWaitingActions = [];
+  searchStrategyIntent = normalizedSearchIntent();
+  searchStrategyStaleAcknowledged = false;
   setSearchMode(plan.mode === "intelligent" ? "smart" : "keyword");
+  renderSearchStrategy();
+  searchStrategyEl.hidden = searchMode !== "smart"
+    || !(searchStrategyActions.length || searchStrategyWaitingActions.length);
   yearFromInput.value = plan.year_from || "";
   yearToInput.value = plan.year_to || "";
   restorePlanAreas(plan.areas);
@@ -5610,10 +7434,56 @@ navLinks.forEach((link) => {
     if (target === "claims-panel") {
       Promise.all([fetchClaims(), fetchClaimProposals(), fetchEvidenceLibrary()]);
     }
-    if (target === "views-panel") Promise.all([fetchViews(), fetchClaims()]);
+    if (target === "views-panel") Promise.all([fetchWiki(), fetchClaims()]);
     if (target === "create-panel") fetchArtifacts();
   });
 });
+
+wikiModeWikiBtn.addEventListener("click", () => {
+  wikiMode = "wiki";
+  wikiProposalReviewEl.hidden = true;
+  wikiReadingComposerEl.hidden = true;
+  wikiReadingEl.hidden = true;
+  renderWiki();
+});
+
+wikiModeGraphBtn.addEventListener("click", () => {
+  wikiMode = "graph";
+  wikiProposalReviewEl.hidden = true;
+  wikiReadingComposerEl.hidden = true;
+  wikiReadingEl.hidden = true;
+  renderWiki();
+});
+
+wikiOrganizeBtn.addEventListener("click", generateWikiProposal);
+wikiIncomingClearBtn.addEventListener("click", () => {
+  incomingViewClaimIds.clear();
+  renderWikiIncoming();
+  wikiStatusEl.textContent = "Incoming Claims cleared.";
+});
+wikiProposalsToggleBtn.addEventListener("click", () => {
+  wikiProposalReviewEl.hidden = false;
+  wikiReadingComposerEl.hidden = true;
+  wikiReadingEl.hidden = true;
+  renderWiki();
+});
+wikiProposalCloseBtn.addEventListener("click", () => {
+  wikiProposalReviewEl.hidden = true;
+  renderWiki();
+});
+wikiGenerateReadingBtn.addEventListener("click", () => {
+  wikiProposalReviewEl.hidden = true;
+  wikiReadingEl.hidden = true;
+  wikiReadingComposerEl.hidden = false;
+  wikiReadingScopeEl.textContent = `${wikiState.pages.length} Wiki Page${wikiState.pages.length === 1 ? "" : "s"} · model-selected Claims`;
+  renderWiki();
+  wikiReadingGoalInput.focus();
+});
+wikiReadingCloseBtn.addEventListener("click", () => {
+  wikiReadingComposerEl.hidden = true;
+  renderWiki();
+});
+wikiReadingRunBtn.addEventListener("click", generateWikiReading);
 
 [
   emailInput,
@@ -5633,7 +7503,8 @@ navLinks.forEach((link) => {
   aiEmbeddingApiKeyInput,
   aiVerifyBatchSizeInput,
   aiVerifyConcurrencyInput,
-  aiTimeoutInput,
+  aiSearchTimeoutInput,
+  aiStageTimeoutInput,
   aiCopilotInstructionsInput,
   aiCopilotTemperatureInput,
   aiCopilotMaxTokensInput,
@@ -5719,7 +7590,7 @@ const initTheme = () => {
     fetch("/api/companion/theme", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ theme }),
+      body: JSON.stringify({ theme: mode }),
     }).catch(() => {});
   };
 
@@ -5749,7 +7620,8 @@ fetchSearxngStatus();
 fetchArtifacts();
 fetchClaims();
 fetchClaimProposals();
-fetchViews();
+fetchEvidenceProposals();
+fetchWiki().catch((error) => { wikiStatusEl.textContent = error.message; });
 fetchLibrary();
 fetchCompanionInbox();
 window.setInterval(fetchCompanionInbox, 5000);

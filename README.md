@@ -165,29 +165,24 @@ follow after the workflow stabilizes.
 
 ## 🧠 Enable Intelligent Search
 
-Knowte supports services that implement OpenAI-compatible
-`/chat/completions` and `/embeddings` endpoints. The service may be hosted by a
-cloud provider or run locally.
+Knowte can use OpenAI-compatible local services as well as native OpenAI,
+Google Gemini, Anthropic, and custom request formats.
 
-Open **Config → AI Models · OpenAI-compatible** and fill:
+Open **Config → AI Models**, add one Model Profile for each model you want to
+use, and enter its provider, Base URL, exact model ID, optional API key, and
+capabilities. Each profile can use automatic proxy routing, force a direct
+connection, or specify its own HTTP(S) proxy. A local OpenAI-compatible Base URL normally ends in `/v1`, such
+as `http://127.0.0.1:11434/v1`; do not append `/chat/completions`.
 
-- **AI Base URL** — the API root, normally ending in `/v1`, such as
-  `https://provider.example/v1` or `http://127.0.0.1:11434/v1`. Do not append
-  `/chat/completions`.
-- **AI API key** — the provider key. It may be blank when a local service does
-  not require authentication.
-- **Language model** — the provider's exact chat model ID.
-- **Embedding model** — the provider's exact embedding model ID.
-
-By default, both models use the same Base URL and API key. Enable **Use a
-separate connection for Embeddings** only when the embedding model is served
-elsewhere; then also fill **Embedding Base URL** and, when required,
-**Embedding API key**.
+Then assign the exact Model Profile used by each entry under **AI roles**:
+Intelligent Search, Review Copilot, Evidence, Claims, Wiki organization, and
+Article generation. Embedding remains optional. Copilot also offers a temporary
+model selector in the Review panel without changing its saved role assignment.
 
 The result and verification controls balance coverage, cost, and latency:
 
 - **Keyword results** also determines the academic candidate batch used by
-  Intelligent Search. Each original or expanded query requests up to that
+  Intelligent Search. Each confirmed retrieval action requests up to that
   value, capped at each provider's one-request maximum of `100`.
 - **Intelligent results** — target number of results that pass final LLM
   verification; default `20`. Knowte verifies candidates in batches until it
@@ -197,13 +192,14 @@ The result and verification controls balance coverage, cost, and latency:
 
 Select **Save**, return to **Search**, and choose **Intelligent**.
 
-For academic sources, Knowte generates up to two retrieval variants, retrieves
-broad candidates, ranks their titles and abstracts with Embeddings, and asks
-the LLM to verify the strongest candidates. Web results skip expansion and
-Embedding ranking and go from SearXNG recall directly to LLM verification.
+Intelligent Search uses the user's text directly unless the user opens
+**Discuss** and confirms an editable strategy of up to five Academic/Web
+retrieval actions. Academic candidates can be ranked with Embeddings before
+LLM verification. Web results skip Embedding ranking and go from SearXNG
+recall directly to LLM verification.
 When an explicit research area is selected, it remains a hard academic
-filter. Without one, the LLM may infer useful retrieval terminology but does
-not silently save an area filter.
+filter. Copilot may suggest a different strategy, but it does not silently
+change or save an area filter.
 
 API keys are stored only in `~/.knowte/config.yml`; they are not returned by
 the Config API or copied into Plans. The file is written with user-only
