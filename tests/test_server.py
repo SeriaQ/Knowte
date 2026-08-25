@@ -23,6 +23,24 @@ from knowte.server import _import_candidates, create_server
 
 
 class SearchApiTests(unittest.TestCase):
+    def test_wiki_organization_requires_explicit_incoming_claims(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            server = create_server("127.0.0.1", 0, config_path)
+            status, payload = self._request(
+                server,
+                "POST",
+                "/api/wiki/proposals/generate",
+                json.dumps({"claim_ids": []}),
+            )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            payload["message"],
+            "Send at least one Claim to Wiki before organizing",
+        )
+
     def test_article_generation_selects_from_the_complete_global_wiki(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -684,6 +702,72 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(accept_status, 201)
         self.assertEqual(accepted["id"], existing["id"])
         self.assertEqual(len(accepted["evidence"]), 2)
+
+    def test_claim_audit_previews_scope_and_persists_review_proposals(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "config.yml"
+            database_path = temp_path / "knowte.db"
+            usage_path = temp_path / "usage.json"
+            first = create_claim({
+                "statement": "Qwen uses grouped-query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "tags": ["Qwen"],
+            }, database_path)
+            second = create_claim({
+                "statement": "Qwen models use grouped query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "tags": ["Qwen"],
+            }, database_path)
+            client = MagicMock()
+            client.chat_json.return_value = {"assessments": [{
+                "left_claim_id": first["id"],
+                "right_claim_id": second["id"],
+                "judgment": "same",
+                "target_claim_id": first["id"],
+                "source_claim_id": second["id"],
+                "merged_statement": "Qwen models use grouped-query attention.",
+                "rationale": "The statements express the same proposition.",
+                "caveats": [],
+            }]}
+            client.usage_snapshot.return_value = {
+                "chat_requests": 1, "chat_tokens": 90,
+                "embedding_requests": 0, "embedding_tokens": 0,
+            }
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(
+                usage, "USAGE_DIR", temp_path
+            ), patch.object(usage, "USAGE_PATH", usage_path):
+                preview_server = create_server("127.0.0.1", 0, config_path)
+                preview_status, preview = self._request(
+                    preview_server, "POST", "/api/claim-audits/preview",
+                    json.dumps({"scope": {"all_tags": ["Qwen"]}}),
+                )
+                create_audit_server = create_server("127.0.0.1", 0, config_path)
+                create_status, audit = self._request(
+                    create_audit_server, "POST", "/api/claim-audits",
+                    json.dumps({
+                        "scope": {"all_tags": ["Qwen"]},
+                        "model_profile_id": "claims-model",
+                    }),
+                )
+                run_server = create_server("127.0.0.1", 0, config_path)
+                run_status, run = self._request(
+                    run_server, "POST", f"/api/claim-audits/{audit['id']}/run", "{}",
+                )
+                queue_server = create_server("127.0.0.1", 0, config_path)
+                queue_status, queue = self._request(
+                    queue_server, "GET", "/api/claim-proposals",
+                )
+
+        self.assertEqual(preview_status, 200)
+        self.assertEqual(preview["claim_count"], 2)
+        self.assertEqual(preview["candidate_count"], 1)
+        self.assertEqual(create_status, 201)
+        self.assertEqual(run_status, 200)
+        self.assertEqual(run["audit"]["status"], "completed")
+        self.assertEqual(run["proposals"][0]["payload"]["operation"], "merge_claims")
+        self.assertEqual(queue_status, 200)
+        self.assertEqual(queue["proposals"][0]["scope"]["audit_id"], audit["id"])
 
     def test_cached_find_more_does_not_increment_paper_usage(self):
         def papers(prefix, source):

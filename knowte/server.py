@@ -49,6 +49,13 @@ from .knowledge import (
     create_claim,
     create_claim_relation,
     create_claim_proposal,
+    create_claim_audit,
+    preview_claim_audit,
+    get_claim_audit,
+    list_claim_audits,
+    update_claim_audit_status,
+    next_claim_audit_batch,
+    complete_claim_audit_batch,
     create_evidence_proposal,
     create_evidence,
     delete_annotation,
@@ -75,6 +82,7 @@ from .knowledge import (
     list_wiki_proposals,
     list_project_documents,
     set_entity_tags,
+    add_entity_tags_batch,
     save_source,
     revise_claim,
     set_claim_lifecycle,
@@ -157,6 +165,12 @@ _WIKI_ARTICLE_CAPABILITY = "wiki-article-v1"
 
 def _claim_proposal_prompt() -> str:
     return resource_files("knowte.prompts").joinpath("claim_proposal.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def _claim_audit_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath("claim_audit.md").read_text(
         encoding="utf-8"
     )
 
@@ -988,6 +1002,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 {"proposals": list_claim_proposals(self.knowledge_db_path)}
             )
             return
+        if parsed.path.rstrip("/") == "/api/claim-audits":
+            self._send_json({"audits": list_claim_audits(self.knowledge_db_path)})
+            return
         if parsed.path.rstrip("/") == "/api/evidence-proposals":
             self._send_json(
                 {"proposals": list_evidence_proposals(self.knowledge_db_path)}
@@ -1361,6 +1378,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         wiki_proposal_accept_match = re.fullmatch(
             r"/api/wiki/proposals/([0-9a-f]+)/accept", route
         )
+        claim_audit_action_match = re.fullmatch(
+            r"/api/claim-audits/([0-9a-f]+)/(run|pause|resume|cancel)", route
+        )
         if route not in {
             "/api/config",
             "/api/config/default-search-mode",
@@ -1376,18 +1396,21 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/claims",
             "/api/claim-relations",
             "/api/claim-proposals/generate",
+            "/api/claim-audits",
+            "/api/claim-audits/preview",
             "/api/evidence-proposals/generate",
             "/api/wiki/proposals/generate",
             "/api/wiki/articles/generate",
             "/api/project-documents",
             "/api/tags/entity",
+            "/api/tags/batch",
             "/api/annotations",
             "/api/companion/pairing",
             "/api/companion/pair",
             "/api/companion/captures",
             "/api/companion/commit",
             "/api/companion/theme",
-        } and not capture_match and not companion_confirm_match and not proposal_accept_match and not evidence_proposal_accept_match and not wiki_proposal_accept_match:
+        } and not capture_match and not companion_confirm_match and not proposal_accept_match and not evidence_proposal_accept_match and not wiki_proposal_accept_match and not claim_audit_action_match:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -1396,6 +1419,184 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
         except json.JSONDecodeError:
             payload = {}
+        if claim_audit_action_match:
+            audit_id, action = claim_audit_action_match.groups()
+            try:
+                if action != "run":
+                    status = {
+                        "pause": "paused", "resume": "running", "cancel": "cancelled",
+                    }[action]
+                    self._send_json(update_claim_audit_status(
+                        audit_id, status, self.knowledge_db_path,
+                    ))
+                    return
+                audit, batch = next_claim_audit_batch(
+                    audit_id, 8, self.knowledge_db_path,
+                )
+                if not batch:
+                    if audit["status"] in {"ready", "running"}:
+                        audit = complete_claim_audit_batch(
+                            audit_id, [], 0, path=self.knowledge_db_path,
+                        )
+                    self._send_json({"audit": audit, "proposals": []})
+                    return
+                if audit["status"] == "ready":
+                    audit = update_claim_audit_status(
+                        audit_id, "running", self.knowledge_db_path,
+                    )
+                config = load_config(self.config_path)
+                profile_id = audit.get("model_profile_id", "")
+                client = _client_from_config(
+                    config, require_embedding=False, role="claims",
+                    profile_id=profile_id,
+                )
+                pairs_payload = []
+                pair_keys = []
+                for item in batch:
+                    left, right = item["left"], item["right"]
+                    pair_keys.append({
+                        "left_claim_id": left["id"], "right_claim_id": right["id"],
+                    })
+                    pairs_payload.append({
+                        "left": {
+                            "claim_id": left["id"], "statement": left["statement"],
+                            "basis": left["basis"], "review_state": left["review_state"],
+                            "tags": [tag["name"] for tag in left.get("tags", [])],
+                            "grounding": [{
+                                "evidence_id": evidence["evidence_id"],
+                                "stance": evidence["stance"],
+                                "source_title": evidence["source_title"],
+                                "quote": evidence["quote"][:1200],
+                            } for evidence in left.get("evidence", [])[:8]],
+                        },
+                        "right": {
+                            "claim_id": right["id"], "statement": right["statement"],
+                            "basis": right["basis"], "review_state": right["review_state"],
+                            "tags": [tag["name"] for tag in right.get("tags", [])],
+                            "grounding": [{
+                                "evidence_id": evidence["evidence_id"],
+                                "stance": evidence["stance"],
+                                "source_title": evidence["source_title"],
+                                "quote": evidence["quote"][:1200],
+                            } for evidence in right.get("evidence", [])[:8]],
+                        },
+                    })
+                result = client.chat_json(
+                    _claim_audit_prompt(),
+                    json.dumps({"pairs": pairs_payload}, ensure_ascii=False),
+                    temperature=0.05, max_tokens=3200,
+                    allow_text_fallback=True,
+                )
+                if isinstance(result, dict) and result.get("_structured_output_degraded"):
+                    raw = str(result.get("answer") or "")
+                    audit = complete_claim_audit_batch(
+                        audit_id, [], 0, raw_response=raw,
+                        error="The model response could not be parsed as JSON. Nothing was saved.",
+                        path=self.knowledge_db_path,
+                    )
+                    self._send_json({"audit": audit, "proposals": []}, HTTPStatus.BAD_GATEWAY)
+                    return
+                if not isinstance(result, dict) or not isinstance(result.get("assessments"), list):
+                    raise AIError(
+                        "invalid_claim_audit",
+                        "The model did not return a complete Claim audit batch. Nothing was saved.",
+                    )
+                allowed_pairs = {
+                    tuple(sorted((item["left_claim_id"], item["right_claim_id"])))
+                    for item in pair_keys
+                }
+                claims_by_id = {
+                    claim["id"]: claim for item in batch
+                    for claim in (item["left"], item["right"])
+                }
+                proposal_payloads = []
+                assessed_pairs = set()
+                for assessment in (result.get("assessments") or [])[:len(batch)]:
+                    if not isinstance(assessment, dict):
+                        continue
+                    left_id = str(assessment.get("left_claim_id") or "")
+                    right_id = str(assessment.get("right_claim_id") or "")
+                    if tuple(sorted((left_id, right_id))) not in allowed_pairs:
+                        continue
+                    assessed_pairs.add(tuple(sorted((left_id, right_id))))
+                    judgment = str(assessment.get("judgment") or "").lower()
+                    rationale = str(assessment.get("rationale") or "")[:2000]
+                    caveats = assessment.get("caveats") or []
+                    proposal_payload = None
+                    if judgment in {"same", "revises"}:
+                        target_id = str(assessment.get("target_claim_id") or "")
+                        source_id = str(assessment.get("source_claim_id") or "")
+                        if {target_id, source_id} == {left_id, right_id}:
+                            proposal_payload = {
+                                "operation": "merge_claims",
+                                "target_claim_id": target_id,
+                                "target_statement": claims_by_id[target_id]["statement"],
+                                "source_claim_id": source_id,
+                                "source_statement": claims_by_id[source_id]["statement"],
+                                "merged_statement": str(assessment.get("merged_statement") or "")[:4000],
+                                "audit_judgment": judgment,
+                                "rationale": rationale, "caveats": caveats,
+                            }
+                    elif judgment in {"contradicts", "scope_difference"}:
+                        proposal_payload = {
+                            "operation": "create_relation",
+                            "subject_claim_id": left_id,
+                            "subject_statement": claims_by_id[left_id]["statement"],
+                            "object_claim_id": right_id,
+                            "object_statement": claims_by_id[right_id]["statement"],
+                            "relation_type": "contradicts" if judgment == "contradicts" else "related",
+                            "audit_judgment": judgment,
+                            "rationale": rationale, "caveats": caveats,
+                        }
+                    if proposal_payload:
+                        proposal_payloads.append(proposal_payload)
+                if assessed_pairs != allowed_pairs:
+                    raise AIError(
+                        "incomplete_claim_audit",
+                        "The model omitted one or more Claim pairs. Nothing from this batch was saved.",
+                    )
+                proposals = [create_claim_proposal(
+                    proposal_payload, "claim-audit-v1",
+                    _model_name_from_config(config, "claims", profile_id),
+                    {"audit_id": audit_id, "scope": audit.get("scope", {})},
+                    self.knowledge_db_path,
+                ) for proposal_payload in proposal_payloads]
+                snapshot = client.usage_snapshot()
+                usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                audit = complete_claim_audit_batch(
+                    audit_id, pair_keys, len(proposals),
+                    model=_model_name_from_config(config, "claims", profile_id),
+                    path=self.knowledge_db_path,
+                )
+                self._send_json({"audit": audit, "proposals": proposals, "usage": usage})
+            except (AIError, ValueError) as error:
+                try:
+                    audit = complete_claim_audit_batch(
+                        audit_id, [], 0, error=str(error), path=self.knowledge_db_path,
+                    )
+                except ValueError:
+                    audit = None
+                self._send_json(
+                    {"error": getattr(error, "code", "claim_audit_failed"),
+                     "message": str(error), "audit": audit},
+                    HTTPStatus.BAD_GATEWAY,
+                )
+            return
+        if route == "/api/claim-audits/preview":
+            scope = payload.get("scope") if isinstance(payload.get("scope"), dict) else {}
+            self._send_json(preview_claim_audit(scope, self.knowledge_db_path))
+            return
+        if route == "/api/claim-audits":
+            scope = payload.get("scope") if isinstance(payload.get("scope"), dict) else {}
+            audit = create_claim_audit(
+                scope, str(payload.get("model_profile_id") or "")[:80],
+                self.knowledge_db_path,
+            )
+            self._send_json(audit, HTTPStatus.CREATED)
+            return
         if proposal_accept_match:
             try:
                 claim = accept_claim_proposal(
@@ -1564,6 +1765,30 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
             return
+        if route == "/api/tags/batch":
+            names = payload.get("tags")
+            entity_ids = payload.get("entity_ids")
+            if not isinstance(names, list) or not isinstance(entity_ids, list):
+                self._send_json(
+                    {"error": "invalid_tags", "message": "entity_ids and tags must be lists"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                tags_by_entity = add_entity_tags_batch(
+                    str(payload.get("entity_type") or ""), entity_ids, names,
+                    self.knowledge_db_path,
+                )
+                self._send_json({
+                    "updated": len(tags_by_entity),
+                    "tags_by_entity": tags_by_entity,
+                })
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_tags", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
         if route == "/api/annotations":
             try:
                 self._send_json(
@@ -1609,25 +1834,24 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 requested_ids = list(dict.fromkeys(
                     str(item) for item in requested_ids if item
                 ))
+                if not requested_ids:
+                    raise ValueError("Send at least one Claim to Wiki before organizing")
                 active_claims = [
                     claim for claim in wiki["claims"]
                     if claim.get("lifecycle") == "active"
                 ]
-                if requested_ids:
-                    requested = set(requested_ids)
-                    selected_claims = [
-                        claim for claim in active_claims if claim["id"] in requested
-                    ]
-                    existing_ids = {
-                        claim_id for page in wiki["pages"]
-                        for claim_id in page.get("claim_ids", [])
-                    }
-                    selected_ids = {claim["id"] for claim in selected_claims} | existing_ids
-                    selected_claims = [
-                        claim for claim in active_claims if claim["id"] in selected_ids
-                    ]
-                else:
-                    selected_claims = active_claims
+                requested = set(requested_ids)
+                selected_claims = [
+                    claim for claim in active_claims if claim["id"] in requested
+                ]
+                existing_ids = {
+                    claim_id for page in wiki["pages"]
+                    for claim_id in page.get("claim_ids", [])
+                }
+                selected_ids = {claim["id"] for claim in selected_claims} | existing_ids
+                selected_claims = [
+                    claim for claim in active_claims if claim["id"] in selected_ids
+                ]
                 if not selected_claims:
                     raise ValueError("The Wiki needs at least one active Claim to organize")
                 if len(selected_claims) > 200:
@@ -2124,7 +2348,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             if not isinstance(evidence_ids, list):
                 evidence_ids = []
             evidence_ids = list(dict.fromkeys(
-                str(item) for item in evidence_ids[:12] if item
+                str(item) for item in evidence_ids[:30] if item
             ))
             evidence_items = [
                 item for item in list_evidence(self.knowledge_db_path)
@@ -2180,6 +2404,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         *(item["quote"] for item in evidence_context),
                     ]),
                     context_tags, 20, self.knowledge_db_path,
+                    list(dict.fromkeys(item["source_id"] for item in evidence_context)),
                 )
                 scope["comparison_claim_ids"] = [
                     item["claim_id"] for item in related_claims
@@ -2342,6 +2567,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         "summary": str(result.get("summary") or "")[:1000],
                         "skipped": skipped_items,
                         "comparison_claim_count": len(related_claims),
+                        "comparison_scope": {
+                            "total_claim_count": len(list_claims(self.knowledge_db_path)),
+                            "tag_count": len(context_tags),
+                            "source_count": len({item["source_id"] for item in evidence_context}),
+                        },
                         "usage": latest_usage,
                     },
                     HTTPStatus.CREATED if proposals else HTTPStatus.OK,

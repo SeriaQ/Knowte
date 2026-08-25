@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.5.0"
+version = "0.5.1"
 description = "Local-first knowledge workspace for discovering sources, grounding claims in evidence, and organizing reusable knowledge with AI."
 readme = "README.md"
 requires-python = ">=3.9"

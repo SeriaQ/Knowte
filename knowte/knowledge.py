@@ -98,6 +98,11 @@ def _claim_search_tokens(value: str) -> set[str]:
     }
 
 
+def _normalized_claim_statement(value: str) -> str:
+    value = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return re.sub(r"[\s.!?。！？]+$", "", " ".join(value.split()))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -363,6 +368,36 @@ def _connect(path: Path) -> sqlite3.Connection:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS claim_audits (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL CHECK(status IN (
+                    'ready', 'running', 'paused', 'completed', 'cancelled', 'failed'
+                )),
+                scope_json TEXT NOT NULL DEFAULT '{}',
+                model_profile_id TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                claim_count INTEGER NOT NULL DEFAULT 0,
+                candidate_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                proposal_count INTEGER NOT NULL DEFAULT 0,
+                last_response TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS claim_audit_pairs (
+                audit_id TEXT NOT NULL REFERENCES claim_audits(id) ON DELETE CASCADE,
+                left_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                right_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+                score REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (
+                    'pending', 'completed', 'failed'
+                )),
+                PRIMARY KEY (audit_id, left_claim_id, right_claim_id),
+                CHECK(left_claim_id < right_claim_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_captures_source
             ON source_captures(source_id, captured_at DESC);
             CREATE INDEX IF NOT EXISTS idx_evidence_source
@@ -379,6 +414,8 @@ def _connect(path: Path) -> sqlite3.Connection:
             ON evidence_claim_links(claim_id);
             CREATE INDEX IF NOT EXISTS idx_review_proposals_status
             ON review_proposals(status, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_claim_audit_pairs_status
+            ON claim_audit_pairs(audit_id, status, score DESC);
             CREATE INDEX IF NOT EXISTS idx_view_claims_claim
             ON view_claims(claim_id);
 
@@ -1845,7 +1882,7 @@ def link_evidence_to_claim(
 
 def find_related_claims(
     text: str, tags: list[str] | None = None, limit: int = 20,
-    path: Path | None = None,
+    path: Path | None = None, source_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Bound comparison context locally; embeddings remain an optional index."""
     database_path = path or KNOWLEDGE_DB_PATH
@@ -1853,6 +1890,7 @@ def find_related_claims(
     tag_tokens = {
         item.casefold() for item in (tags or []) if isinstance(item, str) and item
     }
+    source_tokens = {str(item) for item in (source_ids or []) if str(item)}
     with _connect(database_path) as connection:
         rows = connection.execute(
             """
@@ -1885,12 +1923,13 @@ def find_related_claims(
         )
         overlap = len(tokens & claim_tokens)
         shared_tags = len(tag_tokens & {tag.casefold() for tag in claim_tags})
-        if overlap == 0 and shared_tags == 0:
+        ground = grounding.get(row["id"], {"sources": set(), "stances": []})
+        shared_sources = len(source_tokens & ground["sources"])
+        if overlap == 0 and shared_tags == 0 and shared_sources == 0:
             continue
-        score = overlap + shared_tags * 4
+        score = overlap + shared_tags * 4 + shared_sources * 6
         if row["lifecycle"] != "active":
             score *= 0.35
-        ground = grounding.get(row["id"], {"sources": set(), "stances": []})
         ranked.append((score, {
             "claim_id": row["id"],
             "statement": row["statement"],
@@ -1904,13 +1943,245 @@ def find_related_claims(
     return [item for _, item in ranked[:max(1, min(int(limit), 40))]]
 
 
+def _claim_audit_candidates(
+    scope: dict[str, Any] | None = None, path: Path | None = None,
+) -> tuple[list[dict[str, Any]], list[tuple[str, str, float]]]:
+    """Cover every scoped Claim while bounding expensive semantic comparisons."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    scope = scope if isinstance(scope, dict) else {}
+    any_tags = {
+        str(tag).strip().casefold() for tag in scope.get("any_tags", []) if str(tag).strip()
+    }
+    all_tags = {
+        str(tag).strip().casefold() for tag in scope.get("all_tags", []) if str(tag).strip()
+    }
+    with _connect(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT claims.id, revisions.statement, claims.basis,
+                   claims.standing, claims.lifecycle
+            FROM claims JOIN claim_revisions AS revisions
+              ON revisions.id = claims.current_revision_id
+            WHERE claims.lifecycle = 'active'
+            ORDER BY claims.updated_at DESC
+            """
+        ).fetchall()
+        claim_ids = [row["id"] for row in rows]
+        tags_by_claim = _tags_by_entity(connection, "claim", claim_ids)
+        source_rows = connection.execute(
+            """
+            SELECT links.claim_id, evidence.source_id
+            FROM evidence_claim_links AS links
+            JOIN evidence ON evidence.id = links.evidence_id
+            """
+        ).fetchall()
+    sources_by_claim: dict[str, set[str]] = {}
+    for row in source_rows:
+        sources_by_claim.setdefault(row["claim_id"], set()).add(row["source_id"])
+    claims = []
+    for row in rows:
+        tag_names = [tag.get("name", "") for tag in tags_by_claim.get(row["id"], [])]
+        normalized_tags = {tag.casefold() for tag in tag_names}
+        if any_tags and not (any_tags & normalized_tags):
+            continue
+        if all_tags and not all_tags.issubset(normalized_tags):
+            continue
+        claims.append({
+            "claim_id": row["id"],
+            "statement": row["statement"],
+            "basis": _CLAIM_BASIS_FROM_STORAGE.get(row["basis"], "inference"),
+            "review_state": "disputed" if row["standing"] == "disputed" else "accepted",
+            "tags": tag_names,
+            "source_ids": sorted(sources_by_claim.get(row["id"], set())),
+        })
+    ranked_by_claim: dict[str, list[tuple[float, str]]] = {
+        claim["claim_id"]: [] for claim in claims
+    }
+    for index, left in enumerate(claims):
+        left_tokens = _claim_search_tokens(left["statement"])
+        left_tags = {tag.casefold() for tag in left["tags"]}
+        left_sources = set(left["source_ids"])
+        for right in claims[index + 1:]:
+            right_tokens = _claim_search_tokens(right["statement"])
+            shared_tokens = len(left_tokens & right_tokens)
+            union_tokens = len(left_tokens | right_tokens) or 1
+            lexical = shared_tokens / union_tokens
+            shared_tags = len(left_tags & {tag.casefold() for tag in right["tags"]})
+            shared_sources = len(left_sources & set(right["source_ids"]))
+            exact = " ".join(left["statement"].casefold().split()) == " ".join(
+                right["statement"].casefold().split()
+            )
+            if not exact and not shared_tags and not shared_sources and lexical < 0.12:
+                continue
+            score = (100 if exact else lexical * 10) + shared_tags * 4 + shared_sources * 6
+            ranked_by_claim[left["claim_id"]].append((score, right["claim_id"]))
+            ranked_by_claim[right["claim_id"]].append((score, left["claim_id"]))
+    pairs: dict[tuple[str, str], float] = {}
+    for claim_id, candidates in ranked_by_claim.items():
+        for score, other_id in sorted(candidates, reverse=True)[:8]:
+            pair = tuple(sorted((claim_id, other_id)))
+            pairs[pair] = max(score, pairs.get(pair, 0))
+    return claims, [(*pair, score) for pair, score in sorted(
+        pairs.items(), key=lambda item: (-item[1], item[0])
+    )]
+
+
+def preview_claim_audit(
+    scope: dict[str, Any] | None = None, path: Path | None = None,
+) -> dict[str, int]:
+    claims, pairs = _claim_audit_candidates(scope, path)
+    return {
+        "claim_count": len(claims), "candidate_count": len(pairs),
+        "estimated_batches": (len(pairs) + 7) // 8,
+    }
+
+
+def create_claim_audit(
+    scope: dict[str, Any] | None = None, model_profile_id: str = "",
+    path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    claims, pairs = _claim_audit_candidates(scope, database_path)
+    now, audit_id = _now(), uuid4().hex
+    with _connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO claim_audits
+                (id, status, scope_json, model_profile_id, claim_count,
+                 candidate_count, created_at, updated_at)
+            VALUES (?, 'ready', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audit_id, json.dumps(scope or {}, ensure_ascii=False),
+                _clean_text(model_profile_id, 80), len(claims), len(pairs), now, now,
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO claim_audit_pairs
+                (audit_id, left_claim_id, right_claim_id, score)
+            VALUES (?, ?, ?, ?)
+            """,
+            [(audit_id, left, right, score) for left, right, score in pairs],
+        )
+    return get_claim_audit(audit_id, database_path)
+
+
+def get_claim_audit(audit_id: str, path: Path | None = None) -> dict[str, Any]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        row = connection.execute(
+            "SELECT * FROM claim_audits WHERE id = ?", (audit_id,)
+        ).fetchone()
+    if row is None:
+        raise ValueError("Claim audit not found")
+    result = dict(row)
+    result["scope"] = json.loads(result.pop("scope_json") or "{}")
+    return result
+
+
+def list_claim_audits(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        ids = [row["id"] for row in connection.execute(
+            "SELECT id FROM claim_audits ORDER BY created_at DESC LIMIT 20"
+        ).fetchall()]
+    return [get_claim_audit(audit_id, path) for audit_id in ids]
+
+
+def update_claim_audit_status(
+    audit_id: str, status: str, path: Path | None = None,
+) -> dict[str, Any]:
+    if status not in {"running", "paused", "cancelled"}:
+        raise ValueError("Unsupported Claim audit status")
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        current = connection.execute(
+            "SELECT status FROM claim_audits WHERE id = ?", (audit_id,)
+        ).fetchone()
+        if current is None:
+            raise ValueError("Claim audit not found")
+        if current["status"] in {"completed", "cancelled"}:
+            raise ValueError("Claim audit is already finished")
+        connection.execute(
+            "UPDATE claim_audits SET status = ?, error = '', updated_at = ? WHERE id = ?",
+            (status, _now(), audit_id),
+        )
+    return get_claim_audit(audit_id, database_path)
+
+
+def next_claim_audit_batch(
+    audit_id: str, limit: int = 8, path: Path | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    audit = get_claim_audit(audit_id, database_path)
+    if audit["status"] not in {"ready", "running"}:
+        return audit, []
+    with _connect(database_path) as connection:
+        pairs = connection.execute(
+            """
+            SELECT left_claim_id, right_claim_id FROM claim_audit_pairs
+            WHERE audit_id = ? AND status = 'pending'
+            ORDER BY score DESC LIMIT ?
+            """,
+            (audit_id, max(1, min(int(limit), 8))),
+        ).fetchall()
+    claim_ids = {item for row in pairs for item in row}
+    by_id = {claim["id"]: claim for claim in list_claims(database_path) if claim["id"] in claim_ids}
+    return audit, [{
+        "left": by_id[row["left_claim_id"]],
+        "right": by_id[row["right_claim_id"]],
+    } for row in pairs if row["left_claim_id"] in by_id and row["right_claim_id"] in by_id]
+
+
+def complete_claim_audit_batch(
+    audit_id: str, pairs: list[dict[str, Any]], proposal_count: int,
+    model: str = "", raw_response: str = "", error: str = "",
+    path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    now = _now()
+    with _connect(database_path) as connection:
+        for pair in pairs:
+            left_id = str(pair.get("left_claim_id") or "")
+            right_id = str(pair.get("right_claim_id") or "")
+            if left_id and right_id:
+                left_id, right_id = sorted((left_id, right_id))
+                connection.execute(
+                    "UPDATE claim_audit_pairs SET status = ? "
+                    "WHERE audit_id = ? AND left_claim_id = ? AND right_claim_id = ?",
+                    ("failed" if error else "completed", audit_id, left_id, right_id),
+                )
+        counts = connection.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN status <> 'pending' THEN 1 ELSE 0 END) AS completed
+            FROM claim_audit_pairs WHERE audit_id = ?
+            """, (audit_id,),
+        ).fetchone()
+        completed = int(counts["completed"] or 0)
+        status = "failed" if error else (
+            "completed" if completed >= int(counts["total"] or 0) else "running"
+        )
+        connection.execute(
+            """
+            UPDATE claim_audits SET status = ?, model = ?, completed_count = ?,
+                proposal_count = proposal_count + ?, last_response = ?, error = ?,
+                updated_at = ? WHERE id = ?
+            """,
+            (status, _clean_text(model, 200), completed, max(0, proposal_count),
+             str(raw_response or "")[:20000], str(error or "")[:2000], now, audit_id),
+        )
+    return get_claim_audit(audit_id, database_path)
+
+
 def create_claim_proposal(
     payload: dict[str, Any], capability_version: str,
     model: str = "", scope: dict[str, Any] | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
     operation = str(payload.get("operation") or "create_claim").strip().lower()
-    if operation not in {"create_claim", "link_evidence", "create_relation"}:
+    if operation not in {
+        "create_claim", "link_evidence", "create_relation", "merge_claims",
+    }:
         raise ValueError("Unsupported Claim proposal operation")
     proposal_payload = {**payload, "operation": operation}
     if operation == "create_claim":
@@ -1928,7 +2199,7 @@ def create_claim_proposal(
         if not target_claim_id:
             raise ValueError("Evidence link proposal requires a target Claim")
         proposal_payload["target_claim_id"] = target_claim_id
-    else:
+    elif operation == "create_relation":
         relation_type = str(payload.get("relation_type") or "").strip().lower()
         if relation_type not in _CLAIM_RELATION_TYPES:
             raise ValueError("unsupported Claim relation type")
@@ -1936,6 +2207,16 @@ def create_claim_proposal(
             "subject_claim_id": _clean_text(payload.get("subject_claim_id"), 80),
             "object_claim_id": _clean_text(payload.get("object_claim_id"), 80),
             "relation_type": relation_type,
+        })
+    else:
+        target_claim_id = _clean_text(payload.get("target_claim_id"), 80)
+        source_claim_id = _clean_text(payload.get("source_claim_id"), 80)
+        if not target_claim_id or not source_claim_id or target_claim_id == source_claim_id:
+            raise ValueError("Claim merge requires two different Claims")
+        proposal_payload.update({
+            "target_claim_id": target_claim_id,
+            "source_claim_id": source_claim_id,
+            "merged_statement": _clean_text(payload.get("merged_statement"), 4000),
         })
     proposal_payload.pop("standing", None)
     caveats = payload.get("caveats")
@@ -2147,6 +2428,34 @@ def accept_claim_proposal(
         result = create_claim_relation(accepted_payload, database_path)
         discard_claim_proposal(proposal_id, database_path)
         return result
+    if operation == "merge_claims":
+        result = merge_claims(
+            str(accepted_payload.get("target_claim_id") or ""),
+            str(accepted_payload.get("source_claim_id") or ""),
+            str(accepted_payload.get("merged_statement") or ""),
+            database_path,
+        )
+        discard_claim_proposal(proposal_id, database_path)
+        return result
+    proposed_statement = _normalized_claim_statement(
+        str(accepted_payload.get("statement") or "")
+    )
+    with _connect(database_path) as connection:
+        existing_statements = connection.execute(
+            """
+            SELECT claims.id, revisions.statement
+            FROM claims JOIN claim_revisions AS revisions
+              ON revisions.id = claims.current_revision_id
+            WHERE claims.lifecycle = 'active'
+            """
+        ).fetchall()
+    if proposed_statement and any(
+        _normalized_claim_statement(item["statement"]) == proposed_statement
+        for item in existing_statements
+    ):
+        raise ValueError(
+            "An equivalent active Claim now exists. Review it before accepting this proposal."
+        )
     accepted_payload.update({
         "created_via": "ai_assisted",
         "created_by": "user",
@@ -2156,6 +2465,103 @@ def accept_claim_proposal(
     claim = create_claim(accepted_payload, database_path)
     discard_claim_proposal(proposal_id, database_path)
     return claim
+
+
+def merge_claims(
+    target_claim_id: str, source_claim_id: str, merged_statement: str = "",
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Merge duplicate identity while preserving grounding and inbound references."""
+    if not target_claim_id or not source_claim_id or target_claim_id == source_claim_id:
+        raise ValueError("Claim merge requires two different Claims")
+    database_path = path or KNOWLEDGE_DB_PATH
+    now = _now()
+    with _connect(database_path) as connection:
+        rows = connection.execute(
+            "SELECT id, current_revision_id FROM claims WHERE id IN (?, ?)",
+            (target_claim_id, source_claim_id),
+        ).fetchall()
+        if len(rows) != 2:
+            raise ValueError("Claim not found")
+        connection.execute(
+            """
+            INSERT INTO evidence_claim_links
+                (evidence_id, claim_id, stance, rationale, created_at)
+            SELECT evidence_id, ?, stance, rationale, created_at
+            FROM evidence_claim_links WHERE claim_id = ?
+            ON CONFLICT(evidence_id, claim_id) DO NOTHING
+            """, (target_claim_id, source_claim_id),
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO artifact_claims (artifact_id, claim_id, added_at)
+            SELECT artifact_id, ?, added_at FROM artifact_claims WHERE claim_id = ?
+            """, (target_claim_id, source_claim_id),
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO entity_tags (entity_type, entity_id, tag_id, created_at)
+            SELECT 'claim', ?, tag_id, created_at FROM entity_tags
+            WHERE entity_type = 'claim' AND entity_id = ?
+            """, (target_claim_id, source_claim_id),
+        )
+        connection.execute(
+            "UPDATE annotations SET target_id = ? WHERE target_type = 'claim' AND target_id = ?",
+            (target_claim_id, source_claim_id),
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO view_claims (view_id, claim_id, ordinal, added_at)
+            SELECT view_id, ?, ordinal, added_at FROM view_claims WHERE claim_id = ?
+            """, (target_claim_id, source_claim_id),
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO wiki_page_claims (page_id, claim_id, ordinal, added_at)
+            SELECT page_id, ?, ordinal, added_at FROM wiki_page_claims WHERE claim_id = ?
+            """, (target_claim_id, source_claim_id),
+        )
+        connection.execute(
+            "UPDATE view_blocks SET claim_id = ? WHERE claim_id = ?",
+            (target_claim_id, source_claim_id),
+        )
+        relation_rows = connection.execute(
+            "SELECT * FROM claim_relations WHERE subject_claim_id = ? OR object_claim_id = ?",
+            (source_claim_id, source_claim_id),
+        ).fetchall()
+        for relation in relation_rows:
+            subject = target_claim_id if relation["subject_claim_id"] == source_claim_id else relation["subject_claim_id"]
+            object_id = target_claim_id if relation["object_claim_id"] == source_claim_id else relation["object_claim_id"]
+            if subject == object_id:
+                continue
+            connection.execute(
+                """
+                INSERT INTO claim_relations
+                    (subject_claim_id, object_claim_id, relation_type, rationale, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(subject_claim_id, object_claim_id, relation_type) DO NOTHING
+                """,
+                (subject, object_id, relation["relation_type"], relation["rationale"], relation["created_at"]),
+            )
+        if merged_statement.strip():
+            revision_id = uuid4().hex
+            connection.execute(
+                """
+                INSERT INTO claim_revisions
+                    (id, claim_id, statement, change_note, created_by, created_at)
+                VALUES (?, ?, ?, 'Merged after Claim audit', 'user', ?)
+                """, (revision_id, target_claim_id, _clean_text(merged_statement, 4000), now),
+            )
+            connection.execute(
+                "UPDATE claims SET current_revision_id = ?, updated_at = ? WHERE id = ?",
+                (revision_id, now, target_claim_id),
+            )
+        connection.execute(
+            "UPDATE claim_revisions SET claim_id = ? WHERE claim_id = ?",
+            (target_claim_id, source_claim_id),
+        )
+        connection.execute("DELETE FROM claims WHERE id = ?", (source_claim_id,))
+    return get_claim(target_claim_id, database_path)
 
 
 def discard_claim_proposal(proposal_id: str, path: Path | None = None) -> bool:
@@ -2786,6 +3192,75 @@ def set_entity_tags(
         )
         tags = _tags_by_entity(connection, normalized_type, [entity_id])
     return tags.get(entity_id, [])
+
+
+def add_entity_tags_batch(
+    entity_type: str,
+    entity_ids: list[Any],
+    names: list[Any],
+    path: Path | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Add Tags to several entities without replacing their existing Tags."""
+    normalized_type = str(entity_type or "").strip().lower()
+    table = _TAGGABLE_ENTITY_TABLES.get(normalized_type)
+    if table is None:
+        raise ValueError("unsupported tag entity type")
+    ids = list(dict.fromkeys(
+        str(raw_id or "").strip() for raw_id in entity_ids if str(raw_id or "").strip()
+    ))
+    if not ids:
+        raise ValueError("select at least one entity")
+    if len(ids) > 200:
+        raise ValueError("at most 200 entities can be tagged at once")
+    clean_names: dict[str, str] = {}
+    for raw_name in names:
+        name = _clean_text(raw_name, 60)
+        normalized = _normalize_tag_name(name)
+        if normalized:
+            clean_names.setdefault(normalized, name)
+    if not clean_names:
+        raise ValueError("add at least one Tag")
+    database_path = path or KNOWLEDGE_DB_PATH
+    placeholders = ",".join("?" for _ in ids)
+    now = _now()
+    with _connect(database_path) as connection:
+        existing_entities = {
+            row["id"] for row in connection.execute(
+                f"SELECT id FROM {table} WHERE id IN ({placeholders})", ids
+            ).fetchall()
+        }
+        if existing_entities != set(ids):
+            raise ValueError(f"one or more {normalized_type} items were not found")
+        existing_tags = _tags_by_entity(connection, normalized_type, ids)
+        for entity_id in ids:
+            existing_names = {
+                _normalize_tag_name(str(tag.get("name") or ""))
+                for tag in existing_tags.get(entity_id, [])
+            }
+            if len(existing_names | set(clean_names)) > 20:
+                raise ValueError("an entity can have at most 20 Tags")
+        tag_ids = []
+        for normalized, name in clean_names.items():
+            row = connection.execute(
+                "SELECT id FROM tags WHERE normalized_name = ?", (normalized,)
+            ).fetchone()
+            tag_id = row["id"] if row else uuid4().hex
+            if row is None:
+                connection.execute(
+                    "INSERT INTO tags "
+                    "(id, name, normalized_name, created_at) VALUES (?, ?, ?, ?)",
+                    (tag_id, name, normalized, now),
+                )
+            tag_ids.append(tag_id)
+        connection.executemany(
+            "INSERT OR IGNORE INTO entity_tags "
+            "(entity_type, entity_id, tag_id, created_at) VALUES (?, ?, ?, ?)",
+            [
+                (normalized_type, entity_id, tag_id, now)
+                for entity_id in ids for tag_id in tag_ids
+            ],
+        )
+        return _tags_by_entity(connection, normalized_type, ids)
 
 
 def delete_evidence(evidence_id: str, path: Path | None = None) -> bool:

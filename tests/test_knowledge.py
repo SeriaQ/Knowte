@@ -8,12 +8,18 @@ from pathlib import Path
 from knowte.knowledge import (
     accept_claim_proposal,
     accept_evidence_proposal,
+    add_entity_tags_batch,
     canonical_source_key,
     create_annotation,
     create_artifact,
     create_claim,
     create_claim_relation,
     create_claim_proposal,
+    create_claim_audit,
+    preview_claim_audit,
+    next_claim_audit_batch,
+    complete_claim_audit_batch,
+    get_claim_audit,
     create_evidence,
     create_evidence_proposal,
     create_view,
@@ -46,6 +52,40 @@ from knowte.knowledge import (
 
 
 class KnowledgeStoreTests(unittest.TestCase):
+    def test_batch_tags_add_without_replacing_existing_evidence_tags(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            source, _, _ = save_source(
+                {"title": "Report", "url": "https://example.test/report"},
+                path=database,
+            )
+            workspace = store_capture(source["id"], {
+                "url": source["url"], "media_type": "text/html", "sha256": "batch-tags",
+                "raw_path": str(Path(temp_dir) / "report.html"),
+                "segments": ["First exact quotation. Second exact quotation."],
+            }, database)
+            segment = workspace["segments"][0]
+            first = create_evidence({
+                "segment_id": segment["id"], "quote": "First exact quotation.",
+                "start_offset": 0, "end_offset": len("First exact quotation."),
+            }, database)
+            second_start = segment["text"].index("Second")
+            second = create_evidence({
+                "segment_id": segment["id"], "quote": "Second exact quotation.",
+                "start_offset": second_start,
+                "end_offset": second_start + len("Second exact quotation."),
+            }, database)
+            set_entity_tags("evidence", first["id"], ["Existing"], database)
+            updated = add_entity_tags_batch(
+                "evidence", [first["id"], second["id"]], ["Shared"], database
+            )
+        self.assertEqual(
+            [tag["name"] for tag in updated[first["id"]]], ["Existing", "Shared"]
+        )
+        self.assertEqual(
+            [tag["name"] for tag in updated[second["id"]]], ["Shared"]
+        )
+
     def test_global_wiki_patch_organizes_claims_and_graph_is_deterministic(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"
@@ -357,6 +397,24 @@ class KnowledgeStoreTests(unittest.TestCase):
             self.assertEqual(claim["statement"], "An accepted durable Claim.")
             self.assertEqual(list_claim_proposals(database), [])
 
+    def test_claim_proposal_accept_rechecks_exact_live_duplicates(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            create_claim({
+                "statement": "Qwen uses grouped-query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+            }, database)
+            proposal = create_claim_proposal({
+                "statement": "QWEN uses grouped-query attention",
+                "basis": "background", "intentionally_ungrounded": True,
+            }, "claim-proposal-v3", "test-model", {}, database)
+
+            with self.assertRaisesRegex(ValueError, "equivalent active Claim"):
+                accept_claim_proposal(proposal["id"], {}, database)
+
+            self.assertEqual(len(list_claims(database)), 1)
+            self.assertEqual(len(list_claim_proposals(database)), 1)
+
     def test_claim_change_proposals_can_link_evidence_and_create_relations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"
@@ -420,6 +478,91 @@ class KnowledgeStoreTests(unittest.TestCase):
             relation = accept_claim_proposal(relation_proposal["id"], {}, database)
             self.assertEqual(relation["relation_type"], "supports")
             self.assertEqual(list_claim_proposals(database), [])
+
+    def test_claim_audit_scope_and_progress_persist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            first = create_claim({
+                "statement": "Qwen uses grouped-query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "tags": ["Qwen"],
+            }, database)
+            second = create_claim({
+                "statement": "Qwen models use grouped query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "tags": ["Qwen"],
+            }, database)
+            create_claim({
+                "statement": "Llama uses a decoder-only architecture.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "tags": ["Llama"],
+            }, database)
+
+            preview = preview_claim_audit({"all_tags": ["Qwen"]}, database)
+            self.assertEqual(preview["claim_count"], 2)
+            self.assertEqual(preview["candidate_count"], 1)
+            audit = create_claim_audit(
+                {"all_tags": ["Qwen"]}, "claims-model", database,
+            )
+            _, batch = next_claim_audit_batch(audit["id"], path=database)
+            self.assertEqual(
+                {batch[0]["left"]["id"], batch[0]["right"]["id"]},
+                {first["id"], second["id"]},
+            )
+            completed = complete_claim_audit_batch(
+                audit["id"], [{
+                    "left_claim_id": first["id"],
+                    "right_claim_id": second["id"],
+                }], 1, model="test-model", path=database,
+            )
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(get_claim_audit(audit["id"], database)["proposal_count"], 1)
+
+    def test_audited_claim_merge_preserves_links_tags_and_history(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            project = create_artifact(
+                {"title": "Qwen", "purpose": "Understand Qwen."}, database,
+            )
+            target = create_claim({
+                "statement": "Qwen uses grouped-query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "artifact_ids": [project["id"]], "tags": ["Qwen"],
+            }, database)
+            source = create_claim({
+                "statement": "Qwen models use grouped query attention.",
+                "basis": "background", "intentionally_ungrounded": True,
+                "tags": ["Attention"],
+            }, database)
+            related = create_claim({
+                "statement": "Grouped-query attention reduces KV-cache size.",
+                "basis": "background", "intentionally_ungrounded": True,
+            }, database)
+            create_claim_relation({
+                "subject_claim_id": source["id"],
+                "object_claim_id": related["id"],
+                "relation_type": "supports",
+            }, database)
+            proposal = create_claim_proposal({
+                "operation": "merge_claims",
+                "target_claim_id": target["id"],
+                "source_claim_id": source["id"],
+                "merged_statement": "Qwen models use grouped-query attention.",
+                "rationale": "The statements have the same identity.",
+            }, "claim-audit-v1", "test-model", {}, database)
+
+            merged = accept_claim_proposal(proposal["id"], {}, database)
+
+            self.assertEqual(merged["statement"], "Qwen models use grouped-query attention.")
+            self.assertEqual([tag["name"] for tag in merged["tags"]], ["Attention", "Qwen"])
+            self.assertEqual(merged["artifacts"][0]["id"], project["id"])
+            self.assertEqual(len(merged["revisions"]), 3)
+            self.assertTrue(any(
+                relation["subject_claim_id"] == target["id"]
+                and relation["object_claim_id"] == related["id"]
+                for relation in merged["relations"]
+            ))
+            self.assertEqual(len(list_claims(database)), 2)
 
     def test_claim_vocabulary_exposes_background_disputed_and_minimal_stances(self):
         with tempfile.TemporaryDirectory() as temp_dir:

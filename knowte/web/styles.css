@@ -207,6 +207,10 @@ body[data-theme="light"] .side-logo img {
 }
 
 .side-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
@@ -216,6 +220,57 @@ body[data-theme="light"] .side-logo img {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   cursor: pointer;
+}
+
+.side-link-signal {
+  display: none;
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.side-link.is-processing .side-link-signal,
+.side-link.has-result .side-link-signal {
+  display: inline-grid;
+  place-items: center;
+}
+
+.side-link.is-processing .side-link-signal::before {
+  width: 8px;
+  height: 8px;
+  content: "";
+  border: 2px solid rgba(84, 224, 193, 0.25);
+  border-top-color: var(--glow);
+  border-radius: 50%;
+  animation: side-task-spin 0.8s linear infinite;
+}
+
+.side-link.is-processing .side-link-signal svg {
+  display: none;
+}
+
+.side-link.has-result .side-link-signal {
+  color: var(--glow);
+  animation: tab-result-pulse 1.2s ease-in-out infinite;
+}
+
+.side-link.has-result .side-link-signal svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes tab-result-pulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; filter: drop-shadow(0 0 5px rgba(84, 224, 193, 0.55)); }
+}
+
+@keyframes side-task-spin {
+  to { transform: rotate(360deg); }
 }
 
 .side-count {
@@ -406,9 +461,9 @@ form {
 }
 
 .search-run-actions button {
-  min-height: 48px;
+  min-height: 40px;
   padding: 0 20px;
-  border-radius: 14px;
+  border-radius: 12px;
   white-space: nowrap;
 }
 
@@ -1153,6 +1208,8 @@ body[data-theme="light"] .search-strategy-purpose textarea { color: rgba(23, 33,
 }
 
 .review-copilot {
+  display: flex;
+  flex-direction: column;
   min-height: 120px;
   flex: 1;
   margin-top: 4px;
@@ -1243,12 +1300,15 @@ body[data-theme="light"] .search-strategy-purpose textarea { color: rgba(23, 33,
 
 .chat-context-status {
   display: block;
+  flex: none;
   min-width: 0;
   min-height: 0;
-  margin-top: 5px;
+  margin: 2px 0 4px;
+  padding: 0 2px;
   overflow-wrap: anywhere;
   color: rgba(232, 240, 255, 0.58);
   font-size: 0.66rem;
+  line-height: 1.4;
 }
 
 .chat-context-status:empty {
@@ -2446,10 +2506,12 @@ input:disabled {
 }
 
 button {
+  overflow: hidden;
   padding: 0 28px;
   border-radius: 16px;
   border: none;
   background: linear-gradient(120deg, var(--glow), var(--violet));
+  background-clip: padding-box;
   color: #071320;
   font-weight: 600;
   font-size: 1rem;
@@ -2457,6 +2519,7 @@ button {
   min-height: 56px;
   box-shadow: 0 12px 30px rgba(84, 224, 193, 0.35);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  isolation: isolate;
 }
 
 button:hover {
@@ -2671,6 +2734,151 @@ button:hover {
   background: rgba(6, 10, 21, 0.64);
   color: var(--mist);
   font: inherit;
+}
+
+.tag-multiselect > span {
+  white-space: nowrap;
+}
+
+.tag-multiselect details {
+  position: relative;
+}
+
+.tag-multiselect summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: auto;
+  min-width: 108px;
+  max-width: 180px;
+  min-height: 32px;
+  padding: 5px 27px 5px 9px;
+  overflow: hidden;
+  border: 1px solid rgba(232, 240, 255, 0.13);
+  border-radius: 9px;
+  background: rgba(6, 10, 21, 0.64);
+  color: var(--mist);
+  cursor: pointer;
+  list-style: none;
+  box-sizing: border-box;
+}
+
+.tag-multiselect summary::-webkit-details-marker {
+  display: none;
+}
+
+.tag-multiselect summary::after {
+  position: absolute;
+  right: 10px;
+  content: "⌄";
+  color: currentColor;
+  font-size: 0.78rem;
+}
+
+.tag-multiselect summary > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-multiselect-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: 3px;
+  width: 218px;
+  max-height: 260px;
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid rgba(232, 240, 255, 0.14);
+  border-radius: 11px;
+  background: rgba(8, 14, 28, 0.98);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
+}
+
+.tag-multiselect-menu > small {
+  padding: 2px 4px 6px;
+  color: var(--muted);
+  font-size: 0.64rem;
+}
+
+.tag-multiselect-menu label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: 7px;
+  color: var(--mist);
+  font-size: 0.7rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.tag-multiselect-menu label:hover {
+  background: rgba(84, 224, 193, 0.08);
+}
+
+.tag-multiselect-menu input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.tag-multiselect-menu button {
+  justify-self: end;
+  width: auto;
+  min-height: 27px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(232, 240, 255, 0.12);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 0.66rem;
+}
+
+.tag-multiselect-menu button:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+}
+
+.entity-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin: -2px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(232, 240, 255, 0.09);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.entity-filter-title {
+  flex: 0 0 auto;
+  color: rgba(232, 240, 255, 0.46);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.entity-filter-fields {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.entity-filter-fields > .tag-filter-control:last-child select {
+  min-width: 72px;
 }
 
 .claims-toolbar {
@@ -3550,8 +3758,195 @@ button.review-queue-action:disabled {
   background: rgba(12, 19, 35, 0.58);
 }
 
+.claim-audit-board {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(125, 112, 255, 0.26);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(125, 112, 255, 0.07), rgba(84, 224, 193, 0.025));
+}
+
+.claim-audit-head,
+.claim-audit-head > div,
+.claim-audit-progress > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.claim-audit-head > div {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.claim-audit-head strong {
+  color: var(--text);
+  font-size: 0.94rem;
+}
+
+.claim-audit-head small,
+.claim-audit-estimate,
+.claim-audit-progress {
+  color: var(--mist);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.claim-audit-config {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(240px, 1.3fr);
+  gap: 10px;
+}
+
+.claim-audit-config label {
+  display: grid;
+  gap: 6px;
+  color: rgba(232, 240, 255, 0.58);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.claim-audit-config select {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 7px 10px;
+  border: 1px solid rgba(232, 240, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(6, 10, 21, 0.64);
+  color: var(--mist);
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.claim-audit-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.claim-audit-tags .tag-multiselect {
+  min-width: min(240px, 100%);
+}
+
+.claim-audit-estimate {
+  padding: 10px 12px;
+  border: 1px solid rgba(232, 240, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(6, 10, 21, 0.28);
+}
+
+.claim-audit-progress {
+  display: grid;
+  gap: 7px;
+}
+
+.claim-audit-progress strong {
+  color: var(--text);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.claim-audit-progress progress {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--glow);
+}
+
+.claim-audit-raw {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 11px;
+  border: 1px solid rgba(255, 104, 122, 0.2);
+  border-radius: 10px;
+  color: var(--mist);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.claim-audit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.claim-audit-actions button {
+  width: auto;
+  min-height: 32px;
+  padding: 5px 11px;
+  font-size: 0.72rem;
+  box-shadow: none;
+}
+
+.claims-workspace.is-auditing > .entity-filter-row,
+.claims-workspace.is-auditing > .handoff-return,
+.claims-workspace.is-auditing > .incoming-tray,
+.claims-workspace.is-auditing > .claim-create-card,
+.claims-workspace.is-auditing > .claims-list-controls,
+.claims-workspace.is-auditing > .claim-proposal-report,
+.claims-workspace.is-auditing > .claim-proposal-board,
+.claims-workspace.is-auditing > .claims-list,
+.claims-workspace.is-auditing > .knowledge-status {
+  display: none !important;
+}
+
+.claims-workspace.is-auditing > .claims-toolbar {
+  justify-content: flex-end;
+}
+
+.claims-workspace.is-auditing > .claims-toolbar .claim-selection-actions {
+  display: none;
+}
+
+body[data-theme="light"] .claim-audit-board {
+  border-color: rgba(91, 76, 191, 0.2);
+  background: linear-gradient(145deg, rgba(91, 76, 191, 0.055), rgba(84, 224, 193, 0.03));
+}
+
+body[data-theme="light"] .claim-audit-head strong,
+body[data-theme="light"] .claim-audit-progress strong {
+  color: #172b49;
+}
+
+body[data-theme="light"] .claim-audit-head small,
+body[data-theme="light"] .claim-audit-estimate,
+body[data-theme="light"] .claim-audit-progress,
+body[data-theme="light"] .claim-audit-config label,
+body[data-theme="light"] .claim-audit-raw {
+  color: rgba(40, 59, 88, 0.7);
+}
+
+body[data-theme="light"] .claim-audit-config select,
+body[data-theme="light"] .claim-audit-estimate {
+  border-color: rgba(40, 59, 88, 0.15);
+  background: rgba(255, 255, 255, 0.72);
+  color: #263959;
+}
+
+@media (max-width: 760px) {
+  .claim-audit-config { grid-template-columns: 1fr; }
+  .claim-audit-actions { flex-wrap: wrap; }
+}
+
 .claim-create-card {
   margin-bottom: 12px;
+}
+
+.claims-list-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-height: 28px;
+  margin: -4px 0 8px;
 }
 
 .claim-proposal-focus {
@@ -3688,6 +4083,52 @@ button.review-queue-action:disabled {
   border-radius: 9px;
 }
 
+.evidence-library-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.evidence-library-card-footer > small {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.evidence-library-card-footer .evidence-icon-action {
+  display: inline-flex;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.evidence-library-card-footer .evidence-icon-action svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.evidence-library-card-footer .evidence-icon-action:hover {
+  transform: none;
+  background: rgba(84, 224, 193, 0.1);
+  box-shadow: none;
+}
+
 .claim-create-card textarea,
 .claim-proposal-card textarea {
   width: 100%;
@@ -3812,6 +4253,18 @@ button.review-queue-action:disabled {
   border-color: rgba(125, 112, 255, 0.27) !important;
   background: rgba(125, 112, 255, 0.07) !important;
   color: rgba(201, 195, 255, 0.9) !important;
+}
+
+.semantic-action.is-audit {
+  border-color: rgba(240, 173, 78, 0.4) !important;
+  border-radius: 10px;
+  background: rgba(240, 173, 78, 0.12) !important;
+  color: #f2bd68 !important;
+}
+
+.semantic-action.is-audit:hover {
+  border-color: rgba(240, 173, 78, 0.58) !important;
+  background: rgba(240, 173, 78, 0.18) !important;
 }
 
 .semantic-action.is-destructive,
@@ -3960,6 +4413,31 @@ body[data-theme="light"] .tag-filter-control select {
   color: rgba(23, 43, 72, 0.92);
 }
 
+body[data-theme="light"] .tag-multiselect summary {
+  border-color: rgba(40, 59, 88, 0.18);
+  background: rgba(255, 255, 255, 0.78);
+  color: #263959;
+}
+
+body[data-theme="light"] .tag-multiselect-menu {
+  border-color: rgba(40, 59, 88, 0.16);
+  background: rgba(250, 252, 255, 0.99);
+  box-shadow: 0 14px 30px rgba(31, 48, 78, 0.16);
+}
+
+body[data-theme="light"] .tag-multiselect-menu label {
+  color: #263959;
+}
+
+body[data-theme="light"] .entity-filter-row {
+  border-color: rgba(40, 59, 88, 0.12);
+  background: rgba(255, 255, 255, 0.38);
+}
+
+body[data-theme="light"] .entity-filter-title {
+  color: rgba(40, 59, 88, 0.56);
+}
+
 .claim-statement {
   margin: 0;
   color: var(--mist);
@@ -4003,6 +4481,44 @@ body[data-theme="light"] .tag-filter-control select {
   gap: 4px;
   padding-left: 10px;
   border-left: 2px solid rgba(84, 224, 193, 0.22);
+}
+
+.proposal-evidence-link {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mist);
+  box-shadow: none;
+  text-align: left;
+}
+
+button.proposal-evidence-link:hover {
+  transform: none;
+  background: rgba(84, 224, 193, 0.08);
+  box-shadow: none;
+}
+
+.proposal-evidence-link > span {
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: capitalize;
+}
+
+.proposal-evidence-link > small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-library-card.is-located {
+  animation: located-passage-pulse 0.8s ease-out 2;
 }
 
 .claim-card.is-withdrawn {
@@ -4186,6 +4702,12 @@ body[data-theme="light"] .semantic-action.is-navigate {
   border-color: rgba(91, 76, 191, 0.24) !important;
   background: rgba(91, 76, 191, 0.08) !important;
   color: #5145a7 !important;
+}
+
+body[data-theme="light"] .semantic-action.is-audit {
+  border-color: rgba(172, 108, 23, 0.3) !important;
+  background: rgba(224, 151, 53, 0.11) !important;
+  color: #9b6118 !important;
 }
 
 body[data-theme="light"] .semantic-action.is-destructive,
@@ -4964,9 +5486,11 @@ body[data-theme="light"] .copilot-prompt-label {
 .side-link.has-unsaved::after {
   content: "";
   display: inline-block;
+  flex: 0 0 7px;
   width: 7px;
   height: 7px;
-  margin-left: 8px;
+  margin-left: 1px;
+  margin-right: 4px;
   border-radius: 50%;
   background: var(--glow);
   box-shadow: 0 0 9px rgba(84, 224, 193, 0.7);
@@ -5838,11 +6362,11 @@ body[data-theme="light"] .time-filter input {
   }
 
   .shell {
-    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-columns: 88px minmax(0, 1fr);
   }
 
   .side-panel {
-    padding: 16px 10px;
+    padding: 16px 8px;
   }
 
   .side-brand {
@@ -5861,8 +6385,9 @@ body[data-theme="light"] .time-filter input {
 
   .side-link {
     padding: 8px 2px;
-    font-size: 0.6rem;
-    letter-spacing: 0.05em;
+    gap: 3px;
+    font-size: 0.57rem;
+    letter-spacing: 0.03em;
   }
 
   .theme-toggle {
@@ -7488,6 +8013,26 @@ body[data-theme="light"] .review-evidence-item.is-active {
   box-shadow: 0 6px 16px rgba(84, 224, 193, 0.11);
 }
 
+.wiki-toolbar #wiki-organize.is-unavailable {
+  opacity: 0.62;
+}
+
+.wiki-toolbar #wiki-organize.is-attention {
+  animation: wiki-organize-attention 0.45s ease-in-out 2;
+}
+
+.wiki-action-status {
+  display: block;
+  margin: -5px 0 10px;
+}
+
+@keyframes wiki-organize-attention {
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 3px rgba(255, 139, 91, 0.18);
+  }
+}
+
 .wiki-toolbar #wiki-proposals-toggle {
   background: rgba(125, 112, 255, 0.055);
 }
@@ -8075,6 +8620,17 @@ body[data-theme="light"] .ai-action-model select {
 #evidence-panel .stage-toolbar-tools {
   gap: 7px;
   margin-left: auto;
+}
+
+#evidence-batch-tag,
+#claims-batch-tag {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 58px;
+  height: 32px;
+  min-height: 32px;
+  padding: 5px 10px;
+  white-space: nowrap;
 }
 
 .source-evidence-proposer button {

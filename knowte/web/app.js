@@ -125,6 +125,18 @@ const pageNextTop = document.querySelector("#page-next-top");
 const scrollTopBtn = document.querySelector("#scroll-top");
 const navLinks = document.querySelectorAll(".side-link");
 const panels = document.querySelectorAll(".panel-view");
+
+const setTabActivity = (target, state = "idle") => {
+  const link = [...navLinks].find((item) => item.dataset.target === target);
+  if (!link) return;
+  link.classList.toggle("is-processing", state === "processing");
+  link.classList.toggle("has-result", state === "result" && !link.classList.contains("is-active"));
+  link.title = state === "processing"
+    ? "Proposal in progress"
+    : state === "result" && !link.classList.contains("is-active")
+      ? "New proposals ready for review"
+      : "";
+};
 const themeToggleBtn = document.querySelector("#theme-toggle");
 const configTab = document.querySelector('[data-target="config-panel"]');
 const plansTab = document.querySelector('[data-target="plans-panel"]');
@@ -139,6 +151,7 @@ const evidenceLibraryListEl = document.querySelector("#evidence-library-list");
 const libraryProposeClaimsBtn = document.querySelector("#library-propose-claims");
 const claimProposalFocusInput = document.querySelector("#claim-proposal-focus");
 const evidenceCreateClaimBtn = document.querySelector("#evidence-create-claim");
+const evidenceBatchTagBtn = document.querySelector("#evidence-batch-tag");
 const evidenceStatusEl = document.querySelector("#evidence-status");
 const resultsSelectAllInput = document.querySelector("#results-select-all");
 const librarySelectAllInput = document.querySelector("#library-select-all");
@@ -149,8 +162,12 @@ const evidenceProposalBoardEl = document.querySelector("#evidence-proposal-board
 const evidenceProposalListEl = document.querySelector("#evidence-proposal-list");
 const evidenceLibrarySelectAllInput = document.querySelector("#evidence-library-select-all");
 const evidenceTagFilterInput = document.querySelector("#evidence-tag-filter");
+const evidenceTagAllFilterInput = document.querySelector("#evidence-tag-all-filter");
 const claimsSelectAllInput = document.querySelector("#claims-select-all");
+const claimsListControlsEl = document.querySelector("#claims-list-controls");
+const claimsBatchTagBtn = document.querySelector("#claims-batch-tag");
 const claimsTagFilterInput = document.querySelector("#claims-tag-filter");
+const claimsTagAllFilterInput = document.querySelector("#claims-tag-all-filter");
 const claimsReviewFilterInput = document.querySelector("#claims-review-filter");
 const evidenceSelectAllInput = document.querySelector("#evidence-select-all");
 const sourceReaderEl = document.querySelector("#source-reader");
@@ -263,6 +280,25 @@ const claimArtifactInput = document.querySelector("#claim-artifact");
 const claimCreateBtn = document.querySelector("#claim-create");
 const claimCreateStatusEl = document.querySelector("#claim-create-status");
 const claimsProposalsToggleBtn = document.querySelector("#claims-proposals-toggle");
+const claimsAuditToggleBtn = document.querySelector("#claims-audit-toggle");
+const claimAuditBoardEl = document.querySelector("#claim-audit-board");
+const claimAuditCloseBtn = document.querySelector("#claim-audit-close");
+const claimAuditScopeInput = document.querySelector("#claim-audit-scope");
+const claimAuditModelSelect = document.querySelector("#claim-audit-model");
+const claimAuditTagsEl = document.querySelector("#claim-audit-tags");
+const claimAuditAnyTagsEl = document.querySelector("#claim-audit-any-tags");
+const claimAuditAllTagsEl = document.querySelector("#claim-audit-all-tags");
+const claimAuditEstimateEl = document.querySelector("#claim-audit-estimate");
+const claimAuditProgressEl = document.querySelector("#claim-audit-progress");
+const claimAuditProgressLabelEl = document.querySelector("#claim-audit-progress-label");
+const claimAuditProgressCountEl = document.querySelector("#claim-audit-progress-count");
+const claimAuditProgressBarEl = document.querySelector("#claim-audit-progress-bar");
+const claimAuditRawEl = document.querySelector("#claim-audit-raw");
+const claimAuditPreviewBtn = document.querySelector("#claim-audit-preview");
+const claimAuditStartBtn = document.querySelector("#claim-audit-start");
+const claimAuditPauseBtn = document.querySelector("#claim-audit-pause");
+const claimAuditResumeBtn = document.querySelector("#claim-audit-resume");
+const claimAuditCancelBtn = document.querySelector("#claim-audit-cancel");
 const claimsRelateBtn = document.querySelector("#claims-relate");
 const claimsBuildViewBtn = document.querySelector("#claims-build-view");
 const claimsSelectedCountEl = document.querySelector("#claims-selected-count");
@@ -428,6 +464,11 @@ let libraryEvidence = [];
 let claims = [];
 let claimProposals = [];
 let latestClaimProposalReport = null;
+let claimAudits = [];
+let activeClaimAudit = null;
+let claimAuditBoardOpen = false;
+let claimAuditAdvancing = false;
+let claimAuditPreviewKey = "";
 let evidenceProposals = [];
 let claimProposalQueueOpen = false;
 let evidenceProposalQueueOpen = false;
@@ -439,6 +480,7 @@ let viewAddingClaims = false;
 let activeGraphClaimId = "";
 let wikiState = { pages: [], claims: [], graph: { nodes: [], edges: [] }, unorganized_claim_ids: [], stale_claim_ids: [], awaiting_review: 0 };
 let wikiProposals = [];
+let wikiProposalRunning = false;
 let activeWikiPageId = "";
 let wikiMode = "wiki";
 let currentWikiReading = null;
@@ -447,6 +489,12 @@ const selectedResultKeys = new Set();
 const selectedLibrarySourceKeys = new Set();
 const selectedEvidenceIds = new Set();
 const selectedClaimIds = new Set();
+const selectedEvidenceTagFilters = new Set();
+const selectedEvidenceAllTagFilters = new Set();
+const selectedClaimTagFilters = new Set();
+const selectedClaimAllTagFilters = new Set();
+const selectedClaimAuditAnyTags = new Set();
+const selectedClaimAuditAllTags = new Set();
 const incomingClaimEvidenceIds = new Set();
 const incomingClaimEvidenceStances = new Map();
 const incomingViewClaimIds = new Set();
@@ -802,6 +850,7 @@ const renderActionModelSelectors = () => {
     [searchModelSelect, "intelligent_search", "Select a Search model"],
     [evidenceModelSelect, "evidence", "Select an Evidence model"],
     [claimsModelSelect, "claims", "Select a Claims model"],
+    [claimAuditModelSelect, "claims", "Select a Claims model"],
     [wikiModelSelect, "wiki", "Select a Wiki model"],
     [articleModelSelect, "article", "Select an Article model"],
   ];
@@ -1942,9 +1991,39 @@ evidenceLibrarySelectAllInput.addEventListener("change", () => {
 evidenceTagFilterInput.addEventListener("change", () => {
   renderEvidenceLibrary();
   const filtered = visibleEvidence();
-  evidenceStatusEl.textContent = evidenceTagFilterInput.value
-    ? `${filtered.length} of ${libraryEvidence.length} Evidence · Tag: ${evidenceTagFilterInput.value}`
+  evidenceStatusEl.textContent = selectedEvidenceTagFilters.size || selectedEvidenceAllTagFilters.size
+    ? `${filtered.length} of ${libraryEvidence.length} Evidence · Any: ${[...selectedEvidenceTagFilters].join(", ") || "—"} · All: ${[...selectedEvidenceAllTagFilters].join(", ") || "—"}`
     : `${libraryEvidence.length} Evidence`;
+});
+
+evidenceTagAllFilterInput.addEventListener("change", () => {
+  evidenceTagFilterInput.dispatchEvent(new Event("change"));
+});
+
+evidenceBatchTagBtn.addEventListener("click", () => {
+  const ids = libraryEvidence
+    .filter((item) => selectedEvidenceIds.has(item.id))
+    .map((item) => item.id);
+  if (!ids.length) return;
+  openBatchTagEditor("evidence", ids, async () => {
+    await fetchEvidenceLibrary();
+    renderEvidenceLibrary();
+    renderReviewWorkspace();
+    evidenceStatusEl.textContent = `Added Tags to ${ids.length} Evidence`;
+  });
+});
+
+claimsBatchTagBtn.addEventListener("click", () => {
+  const ids = claims
+    .filter((item) => selectedClaimIds.has(item.id))
+    .map((item) => item.id);
+  if (!ids.length) return;
+  openBatchTagEditor("claim", ids, async () => {
+    await fetchClaims();
+    renderClaims();
+    renderReviewWorkspace();
+    claimsStatusEl.textContent = `Added Tags to ${ids.length} Claims`;
+  });
 });
 
 claimsSelectAllInput.addEventListener("change", () => {
@@ -1962,9 +2041,19 @@ claimsTagFilterInput.addEventListener("change", () => {
   updateClaimsStatus();
 });
 
+claimsTagAllFilterInput.addEventListener("change", () => {
+  claimsTagFilterInput.dispatchEvent(new Event("change"));
+});
+
 claimsReviewFilterInput.addEventListener("change", () => {
   renderClaims();
   updateClaimsStatus();
+});
+
+document.addEventListener("click", (event) => {
+  document.querySelectorAll(".tag-multiselect details[open]").forEach((details) => {
+    if (!details.contains(event.target)) details.open = false;
+  });
 });
 
 const copySelectedEvidenceToClaimDraft = () => {
@@ -3619,6 +3708,26 @@ const openTagEditor = async (entityType, entityId, tags, afterSave) => {
   tagEditorInput.focus();
 };
 
+const openBatchTagEditor = async (entityType, entityIds, afterSave) => {
+  activeTagEditor = {
+    entityType, entityIds: [...entityIds], names: [], additive: true, afterSave,
+  };
+  const entityLabel = entityType === "evidence" ? "Evidence"
+    : entityType === "claim" ? "Claims" : "items";
+  tagEditorTypeEl.textContent = `${entityIds.length} selected ${entityLabel} · add Tags`;
+  const response = await fetch("/api/tags");
+  const data = response.ok ? await response.json() : { tags: [] };
+  tagEditorSuggestions.replaceChildren();
+  (data.tags || []).forEach((tag) => {
+    const option = document.createElement("option");
+    option.value = tag.name;
+    tagEditorSuggestions.appendChild(option);
+  });
+  renderTagEditor();
+  tagEditorDialog.showModal();
+  tagEditorInput.focus();
+};
+
 const renderTagEditor = () => {
   if (!activeTagEditor) return;
   tagEditorSelectedEl.replaceChildren();
@@ -3638,16 +3747,23 @@ const renderTagEditor = () => {
     empty.textContent = "No Tags";
     tagEditorSelectedEl.appendChild(empty);
   }
+  tagEditorSaveBtn.disabled = Boolean(activeTagEditor.additive)
+    && activeTagEditor.names.length === 0;
 };
 
 const saveTagEditor = async () => {
   if (!activeTagEditor) return;
   tagEditorSaveBtn.disabled = true;
   try {
-    const response = await fetch("/api/tags/entity", {
+    const response = await fetch(
+      activeTagEditor.additive ? "/api/tags/batch" : "/api/tags/entity", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(activeTagEditor.additive ? {
+        entity_type: activeTagEditor.entityType,
+        entity_ids: activeTagEditor.entityIds,
+        tags: activeTagEditor.names,
+      } : {
         entity_type: activeTagEditor.entityType,
         entity_id: activeTagEditor.entityId,
         tags: activeTagEditor.names,
@@ -3802,29 +3918,205 @@ const fetchArtifacts = async () => {
   }
 };
 
-const syncTagFilterOptions = (select, items) => {
-  const previous = select.value;
+const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags) => {
   const names = [...new Set(items.flatMap(
     (item) => (item.tags || []).map((tag) => tag.name).filter(Boolean),
   ))].sort((left, right) => left.localeCompare(right));
-  select.replaceChildren(new Option("All Tags", ""));
-  names.forEach((name) => select.appendChild(new Option(name, name)));
-  select.value = names.includes(previous) ? previous : "";
+  [...selectedTags].forEach((name) => {
+    if (!names.includes(name)) selectedTags.delete(name);
+  });
+  const details = control.querySelector("details");
+  const summary = details.querySelector("summary span");
+  const menu = details.querySelector(".tag-multiselect-menu");
+  const updateState = () => {
+    summary.textContent = `${selectedTags.size} selected`;
+    menu.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+      checkbox.checked = selectedTags.has(checkbox.value);
+    });
+    const clear = menu.querySelector("button");
+    if (clear) clear.disabled = selectedTags.size === 0;
+  };
+  const signature = JSON.stringify(names);
+  if (control.dataset.tagOptions === signature) {
+    updateState();
+    return;
+  }
+  control.dataset.tagOptions = signature;
+  const wasOpen = details.open;
+  menu.replaceChildren();
+  const note = document.createElement("small");
+  note.textContent = "Choose one or more Tags";
+  menu.appendChild(note);
+  names.forEach((name) => {
+    const option = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = name;
+    checkbox.checked = selectedTags.has(name);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedTags.add(name);
+        otherSelectedTags.delete(name);
+      } else selectedTags.delete(name);
+      control.dispatchEvent(new Event("change"));
+    });
+    option.append(checkbox, document.createTextNode(name));
+    menu.appendChild(option);
+  });
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.textContent = "Clear";
+  clear.disabled = selectedTags.size === 0;
+  clear.addEventListener("click", () => {
+    selectedTags.clear();
+    control.dispatchEvent(new Event("change"));
+  });
+  menu.appendChild(clear);
+  updateState();
+  details.open = wasOpen;
 };
 
-const matchesTagFilter = (item, selectedTag) => (
-  !selectedTag || (item.tags || []).some((tag) => tag.name === selectedTag)
-);
+const matchesTagFilter = (item, anyTags, allTags) => {
+  const itemTags = new Set((item.tags || []).map((tag) => tag.name));
+  const matchesAny = anyTags.size === 0
+    || [...anyTags].some((name) => itemTags.has(name));
+  const matchesAll = [...allTags].every((name) => itemTags.has(name));
+  return matchesAny && matchesAll;
+};
 
 const visibleEvidence = () => libraryEvidence.filter(
-  (item) => matchesTagFilter(item, evidenceTagFilterInput.value),
+  (item) => matchesTagFilter(
+    item, selectedEvidenceTagFilters, selectedEvidenceAllTagFilters,
+  ),
 );
 
 const visibleClaims = () => claims.filter(
-  (item) => matchesTagFilter(item, claimsTagFilterInput.value)
+  (item) => matchesTagFilter(
+    item, selectedClaimTagFilters, selectedClaimAllTagFilters,
+  )
     && (!claimsReviewFilterInput.value
       || item.review_state === claimsReviewFilterInput.value),
 );
+
+const claimAuditScope = () => claimAuditScopeInput.value === "tags" ? {
+  any_tags: [...selectedClaimAuditAnyTags],
+  all_tags: [...selectedClaimAuditAllTags],
+} : {};
+
+const renderClaimAudit = () => {
+  claimAuditBoardEl.hidden = !claimAuditBoardOpen;
+  document.querySelector(".claims-workspace")?.classList.toggle(
+    "is-auditing", claimAuditBoardOpen,
+  );
+  if (!claimAuditBoardOpen) return;
+  claimAuditTagsEl.hidden = claimAuditScopeInput.value !== "tags";
+  syncTagFilterOptions(
+    claimAuditAnyTagsEl, claims,
+    selectedClaimAuditAnyTags, selectedClaimAuditAllTags,
+  );
+  syncTagFilterOptions(
+    claimAuditAllTagsEl, claims,
+    selectedClaimAuditAllTags, selectedClaimAuditAnyTags,
+  );
+  const audit = activeClaimAudit;
+  const running = ["ready", "running"].includes(audit?.status);
+  const paused = audit?.status === "paused";
+  const finished = ["completed", "cancelled", "failed"].includes(audit?.status);
+  claimAuditPreviewBtn.hidden = Boolean(audit && !finished);
+  claimAuditStartBtn.hidden = Boolean(audit && !finished);
+  claimAuditPauseBtn.hidden = !running;
+  claimAuditResumeBtn.hidden = !paused && audit?.status !== "failed";
+  claimAuditCancelBtn.hidden = !running && !paused && audit?.status !== "failed";
+  claimAuditProgressEl.hidden = !audit;
+  claimAuditRawEl.hidden = !audit?.last_response;
+  claimAuditRawEl.textContent = audit?.last_response || "";
+  if (audit) {
+    claimAuditProgressBarEl.max = Math.max(1, Number(audit.candidate_count || 0));
+    claimAuditProgressBarEl.value = Number(audit.completed_count || 0);
+    claimAuditProgressCountEl.textContent = `${audit.completed_count} / ${audit.candidate_count} pairs`;
+    claimAuditProgressLabelEl.textContent = ({
+      ready: "Ready to scan",
+      running: "Auditing likely Claim pairs…",
+      paused: "Audit paused",
+      completed: `Audit complete · ${audit.proposal_count} change${audit.proposal_count === 1 ? "" : "s"} proposed`,
+      cancelled: "Audit cancelled",
+      failed: audit.error || "Audit failed",
+    })[audit.status] || audit.status;
+    claimAuditEstimateEl.textContent = `${audit.claim_count} Claims in scope · ${audit.candidate_count} likely pairs · ${Math.ceil(audit.candidate_count / 8)} model batch${Math.ceil(audit.candidate_count / 8) === 1 ? "" : "es"}.`;
+  }
+};
+
+const fetchClaimAudits = async () => {
+  const response = await fetch("/api/claim-audits");
+  if (!response.ok) throw new Error("Could not load Claim audits.");
+  claimAudits = (await response.json()).audits || [];
+  activeClaimAudit = claimAudits.find(
+    (audit) => ["ready", "running", "paused", "failed"].includes(audit.status),
+  ) || claimAudits[0] || null;
+  renderClaimAudit();
+  if (["ready", "running"].includes(activeClaimAudit?.status)) advanceClaimAudit();
+};
+
+let claimAuditPendingAction = "";
+const setClaimAuditStatus = async (action) => {
+  if (!activeClaimAudit) return;
+  if (claimAuditAdvancing) {
+    claimAuditPendingAction = action;
+    claimAuditProgressLabelEl.textContent = action === "pause"
+      ? "Pausing after the current batch…" : "Cancelling after the current batch…";
+    return;
+  }
+  const response = await fetch(`/api/claim-audits/${activeClaimAudit.id}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    claimAuditEstimateEl.textContent = data.message || `Could not ${action} audit.`;
+    return;
+  }
+  activeClaimAudit = data;
+  renderClaimAudit();
+  if (action === "resume") advanceClaimAudit();
+};
+
+const advanceClaimAudit = async () => {
+  if (claimAuditAdvancing || !["ready", "running"].includes(activeClaimAudit?.status)) return;
+  claimAuditAdvancing = true;
+  setTabActivity("claims-panel", "processing");
+  renderClaimAudit();
+  try {
+    const response = await fetch(`/api/claim-audits/${activeClaimAudit.id}/run`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const data = await response.json().catch(() => ({}));
+    updateUsage(data.usage);
+    if (data.audit) activeClaimAudit = data.audit;
+    const returned = Array.isArray(data.proposals) ? data.proposals : [];
+    if (returned.length) {
+      claimProposals = [...new Map(
+        [...returned, ...claimProposals].map((proposal) => [proposal.id, proposal]),
+      ).values()];
+      renderClaimProposals();
+    }
+    if (!response.ok) throw new Error(data.message || "Claim audit failed.");
+  } catch (error) {
+    claimAuditEstimateEl.textContent = error.message;
+  } finally {
+    claimAuditAdvancing = false;
+    if (claimAuditPendingAction) {
+      const action = claimAuditPendingAction;
+      claimAuditPendingAction = "";
+      await setClaimAuditStatus(action);
+    }
+    renderClaimAudit();
+    if (["ready", "running"].includes(activeClaimAudit?.status)) {
+      window.setTimeout(advanceClaimAudit, 250);
+    } else {
+      setTabActivity("claims-panel", activeClaimAudit?.status === "completed" ? "result" : "idle");
+      if (activeClaimAudit?.status === "completed") await fetchClaimProposals();
+    }
+  }
+};
 
 const updateClaimsStatus = () => {
   const filtered = visibleClaims();
@@ -3832,7 +4124,12 @@ const updateClaimsStatus = () => {
   if (claimsReviewFilterInput.value) filters.push(
     claimsReviewFilterInput.value === "disputed" ? "Disputed" : "Accepted",
   );
-  if (claimsTagFilterInput.value) filters.push(`Tag: ${claimsTagFilterInput.value}`);
+  if (selectedClaimTagFilters.size) filters.push(
+    `Any: ${[...selectedClaimTagFilters].join(", ")}`,
+  );
+  if (selectedClaimAllTagFilters.size) filters.push(
+    `All: ${[...selectedClaimAllTagFilters].join(", ")}`,
+  );
   claimsStatusEl.textContent = filters.length
     ? `${filtered.length} of ${claims.length} Claims · ${filters.join(" · ")}`
     : `${claims.length} Claim${claims.length === 1 ? "" : "s"}`;
@@ -3840,7 +4137,14 @@ const updateClaimsStatus = () => {
 
 const renderEvidenceLibrary = () => {
   evidenceLibraryListEl.replaceChildren();
-  syncTagFilterOptions(evidenceTagFilterInput, libraryEvidence);
+  syncTagFilterOptions(
+    evidenceTagFilterInput, libraryEvidence,
+    selectedEvidenceTagFilters, selectedEvidenceAllTagFilters,
+  );
+  syncTagFilterOptions(
+    evidenceTagAllFilterInput, libraryEvidence,
+    selectedEvidenceAllTagFilters, selectedEvidenceTagFilters,
+  );
   const filteredEvidence = visibleEvidence();
   const selectedCount = libraryEvidence.filter(
     (item) => selectedEvidenceIds.has(item.id),
@@ -3853,6 +4157,7 @@ const renderEvidenceLibrary = () => {
   );
   libraryProposeClaimsBtn.disabled = selectedCount === 0;
   evidenceCreateClaimBtn.disabled = selectedCount === 0;
+  evidenceBatchTagBtn.disabled = selectedCount === 0;
   libraryProposeClaimsBtn.textContent = selectedCount
     ? `Propose Claims via LLM · ${selectedCount}` : "Propose Claims via LLM";
   evidenceCreateClaimBtn.textContent = selectedCount
@@ -3868,7 +4173,7 @@ const renderEvidenceLibrary = () => {
   if (!filteredEvidence.length) {
     const empty = document.createElement("div");
     empty.className = "knowledge-empty";
-    empty.textContent = `No Evidence tagged “${evidenceTagFilterInput.value}”.`;
+    empty.textContent = `No Evidence matches Any: ${[...selectedEvidenceTagFilters].join(", ") || "—"} · All: ${[...selectedEvidenceAllTagFilters].join(", ") || "—"}.`;
     evidenceLibraryListEl.appendChild(empty);
     return;
   }
@@ -3908,8 +4213,38 @@ const renderEvidenceLibrary = () => {
       .filter(Boolean).join(" · ");
     const tags = document.createElement("div");
     renderTagChips(tags, item.tags || []);
-    card.append(selection, source, content, meta, tags);
+    const footer = document.createElement("div");
+    footer.className = "evidence-library-card-footer";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "evidence-icon-action";
+    open.appendChild(createControlIcon("inspect"));
+    open.title = "Open Evidence";
+    open.setAttribute("aria-label", "Open Evidence");
+    open.addEventListener("click", () => openEvidenceDetail(item.id));
+    footer.append(meta, open);
+    card.append(selection, source, content, footer, tags);
     evidenceLibraryListEl.appendChild(card);
+  });
+};
+
+const openEvidenceInWorkspace = (evidenceId) => {
+  const item = libraryEvidence.find((evidence) => evidence.id === evidenceId);
+  if (!item) return;
+  claimProposalQueueOpen = false;
+  selectedEvidenceTagFilters.clear();
+  selectedEvidenceAllTagFilters.clear();
+  renderClaimProposals();
+  renderEvidenceLibrary();
+  showPanel("evidence-panel");
+  window.requestAnimationFrame(() => {
+    const card = evidenceLibraryListEl.querySelector(
+      `[data-evidence-id="${CSS.escape(evidenceId)}"]`,
+    );
+    if (!card) return;
+    card.classList.add("is-located");
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => card.classList.remove("is-located"), 1800);
   });
 };
 
@@ -4032,7 +4367,14 @@ const syncProposalQueueButton = (button, count, isOpen) => {
 
 const renderClaims = () => {
   claimsListEl.replaceChildren();
-  syncTagFilterOptions(claimsTagFilterInput, claims);
+  syncTagFilterOptions(
+    claimsTagFilterInput, claims,
+    selectedClaimTagFilters, selectedClaimAllTagFilters,
+  );
+  syncTagFilterOptions(
+    claimsTagAllFilterInput, claims,
+    selectedClaimAllTagFilters, selectedClaimTagFilters,
+  );
   const filteredClaims = visibleClaims();
   const selectableClaims = viewAddingClaims
     ? filteredClaims.filter((claim) => !viewDraftClaimIds.includes(claim.id))
@@ -4044,6 +4386,7 @@ const renderClaims = () => {
   claimsSelectAllInput.disabled = selectableClaims.length === 0;
   claimsRelateBtn.disabled = selectedClaimIds.size !== 2;
   claimsBuildViewBtn.disabled = selectedClaimIds.size === 0;
+  claimsBatchTagBtn.disabled = selectedClaimIds.size === 0;
   claimsSelectedCountEl.textContent = `${selectedClaimIds.size} selected`;
   claimsBuildViewBtn.textContent = selectedClaimIds.size
     ? `Send to Wiki · ${selectedClaimIds.size}` : "Send to Wiki";
@@ -4065,14 +4408,15 @@ const renderClaims = () => {
   } else if (!filteredClaims.length) {
     const empty = document.createElement("div");
     empty.className = "knowledge-empty";
-    if (claimsReviewFilterInput.value && claimsTagFilterInput.value) {
+    if (claimsReviewFilterInput.value
+      && (selectedClaimTagFilters.size || selectedClaimAllTagFilters.size)) {
       empty.textContent = "No Claims match the selected Status and Tag.";
     } else if (claimsReviewFilterInput.value === "disputed") {
       empty.textContent = "No disputed Claims yet.";
     } else if (claimsReviewFilterInput.value === "accepted") {
       empty.textContent = "No accepted Claims yet.";
     } else {
-      empty.textContent = `No Claims tagged “${claimsTagFilterInput.value}”.`;
+      empty.textContent = `No Claims match Any: ${[...selectedClaimTagFilters].join(", ") || "—"} · All: ${[...selectedClaimAllTagFilters].join(", ") || "—"}.`;
     }
     claimsListEl.appendChild(empty);
   }
@@ -4168,13 +4512,16 @@ const renderClaimProposals = () => {
   if (!claimProposals.length) claimProposalQueueOpen = false;
   claimProposalBoardEl.hidden = !claimProposalQueueOpen || claimProposals.length === 0;
   claimsListEl.hidden = claimProposalQueueOpen && claimProposals.length > 0;
+  claimsListControlsEl.hidden = claimProposalQueueOpen && claimProposals.length > 0;
   syncProposalQueueButton(
     claimsProposalsToggleBtn, claimProposals.length, claimProposalQueueOpen,
   );
   claimProposalReportEl.hidden = !latestClaimProposalReport;
   claimProposalReportBodyEl.replaceChildren();
   if (latestClaimProposalReport) {
-    const { summary, skipped = [], comparisonClaimCount = 0 } = latestClaimProposalReport;
+    const {
+      summary, skipped = [], comparisonClaimCount = 0, comparisonScope = {},
+    } = latestClaimProposalReport;
     claimProposalReportSummaryEl.textContent = `Latest run · ${skipped.length} skipped`;
     if (summary) {
       const paragraph = document.createElement("p");
@@ -4182,7 +4529,7 @@ const renderClaimProposals = () => {
       claimProposalReportBodyEl.appendChild(paragraph);
     }
     const context = document.createElement("small");
-    context.textContent = `${comparisonClaimCount} existing Claim${comparisonClaimCount === 1 ? "" : "s"} compared locally.`;
+    context.textContent = `${comparisonClaimCount} relevant Claim${comparisonClaimCount === 1 ? "" : "s"} compared locally from ${comparisonScope.total_claim_count || claims.length} total · matched through selected Evidence text, ${comparisonScope.tag_count || 0} Tag${comparisonScope.tag_count === 1 ? "" : "s"}, and ${comparisonScope.source_count || 0} Source${comparisonScope.source_count === 1 ? "" : "s"}.`;
     claimProposalReportBodyEl.appendChild(context);
     skipped.forEach((item) => {
       const row = document.createElement("div");
@@ -4203,10 +4550,14 @@ const renderClaimProposals = () => {
       create_claim: payload.basis === "inference" ? "New inference" : "New reported Claim",
       link_evidence: "Update existing Claim",
       create_relation: "New Claim relation",
+      merge_claims: payload.audit_judgment === "revises"
+        ? "Audited revision" : "Possible duplicate",
     })[operation] || "Claim change";
     const statement = document.createElement("textarea");
     statement.rows = 3;
-    statement.value = payload.statement || "";
+    statement.value = operation === "merge_claims"
+      ? (payload.merged_statement || payload.target_statement || "")
+      : (payload.statement || "");
     const fields = document.createElement("div");
     fields.className = "claim-proposal-fields";
     const basis = document.createElement("select");
@@ -4235,13 +4586,33 @@ const renderClaimProposals = () => {
       const object = document.createElement("strong");
       object.textContent = payload.object_statement || payload.object_claim_id || "Claim";
       target.append(subject, relation, object);
+    } else if (operation === "merge_claims") {
+      const targetLabel = document.createElement("small");
+      targetLabel.textContent = "Keep and consolidate into";
+      const targetStatement = document.createElement("strong");
+      targetStatement.textContent = payload.target_statement || payload.target_claim_id;
+      const sourceLabel = document.createElement("small");
+      sourceLabel.textContent = "Merge redundant Claim";
+      const sourceStatement = document.createElement("strong");
+      sourceStatement.textContent = payload.source_statement || payload.source_claim_id;
+      target.append(targetLabel, targetStatement, sourceLabel, sourceStatement);
     }
     const evidence = document.createElement("div");
     evidence.className = "proposal-evidence-list";
     (payload.evidence || []).forEach((link) => {
       const sourceItem = libraryEvidence.find((item) => item.id === link.evidence_id);
-      const row = document.createElement("small");
-      row.textContent = `${link.stance || "supports"} · ${sourceItem?.source_title || link.evidence_id} · ${sourceItem?.locator || ""}`;
+      const row = document.createElement(sourceItem ? "button" : "div");
+      row.className = "proposal-evidence-link";
+      if (sourceItem) row.type = "button";
+      const heading = document.createElement("span");
+      heading.textContent = `${link.stance || "supports"} · ${sourceItem?.source_title || "Evidence unavailable"}`;
+      const detail = document.createElement("small");
+      detail.textContent = sourceItem
+        ? [sourceItem.locator, sourceItem.evidence_type === "snapshot"
+          ? "Snapshot" : sourceItem.quote].filter(Boolean).join(" · ")
+        : String(link.evidence_id || "Unknown Evidence");
+      row.append(heading, detail);
+      if (sourceItem) row.addEventListener("click", () => openEvidenceInWorkspace(sourceItem.id));
       evidence.appendChild(row);
     });
     const rationale = document.createElement("section");
@@ -4273,6 +4644,8 @@ const renderClaimProposals = () => {
       const edits = operation === "create_claim" ? {
         statement: statement.value.trim(), basis: basis.value, review_state: reviewState,
         artifact_ids: artifact?.id ? [artifact.id] : [],
+      } : operation === "merge_claims" ? {
+        merged_statement: statement.value.trim(),
       } : {};
       const response = await fetch(`/api/claim-proposals/${proposal.id}/accept`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -4297,7 +4670,8 @@ const renderClaimProposals = () => {
     keepDisputed.hidden = operation !== "create_claim";
     acceptLabel.textContent = operation === "link_evidence"
       ? "Attach Evidence"
-      : operation === "create_relation" ? "Create relation" : "Accept";
+      : operation === "create_relation" ? "Create relation"
+        : operation === "merge_claims" ? "Merge Claims" : "Accept";
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "proposal-discard";
@@ -4312,6 +4686,7 @@ const renderClaimProposals = () => {
     actions.append(discard, keepDisputed, accept);
     card.append(operationLabel);
     if (operation === "create_claim") card.append(statement, fields);
+    else if (operation === "merge_claims") card.append(target, statement);
     else card.append(target);
     if (payload.evidence?.length) card.append(evidence);
     card.append(rationale);
@@ -4532,6 +4907,12 @@ const renderWikiIncoming = () => {
     .map((claimId) => claims.find((claim) => claim.id === claimId) || wikiClaimById(claimId))
     .filter(Boolean);
   wikiIncomingTrayEl.hidden = incoming.length === 0;
+  wikiOrganizeBtn.disabled = wikiProposalRunning;
+  wikiOrganizeBtn.setAttribute("aria-disabled", String(incoming.length === 0));
+  wikiOrganizeBtn.classList.toggle("is-unavailable", incoming.length === 0);
+  wikiOrganizeBtn.title = incoming.length
+    ? "Propose a Wiki Patch from incoming Claims"
+    : "Send Claims to Wiki before organizing";
   wikiIncomingTitleEl.textContent = `Incoming Claims · ${incoming.length}`;
   wikiIncomingItemsEl.replaceChildren();
   incoming.forEach((claim) => {
@@ -4784,8 +5165,17 @@ const fetchWiki = async () => {
 };
 
 const generateWikiProposal = async () => {
+  if (!incomingViewClaimIds.size) {
+    wikiStatusEl.textContent = "Select Claims in the Claims Tab, then choose Send to Wiki before organizing.";
+    wikiOrganizeBtn.classList.remove("is-attention");
+    window.requestAnimationFrame(() => wikiOrganizeBtn.classList.add("is-attention"));
+    window.setTimeout(() => wikiOrganizeBtn.classList.remove("is-attention"), 1000);
+    return;
+  }
   wikiStatusEl.textContent = "Organizing the global Wiki…";
+  wikiProposalRunning = true;
   wikiOrganizeBtn.disabled = true;
+  setTabActivity("views-panel", "processing");
   try {
     const response = await fetch("/api/wiki/proposals/generate", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -4797,15 +5187,19 @@ const generateWikiProposal = async () => {
     const body = await response.json();
     if (!response.ok) throw new Error(body.message || "Could not propose a Wiki structure.");
     incomingViewClaimIds.clear();
+    setTabActivity("views-panel", "idle");
+    setTabActivity("views-panel", "result");
     wikiProposalReviewEl.hidden = false;
     wikiReadingComposerEl.hidden = true;
     wikiReadingEl.hidden = true;
     await fetchWiki();
     wikiStatusEl.textContent = "Wiki Patch ready for review.";
   } catch (error) {
+    setTabActivity("views-panel", "idle");
     wikiStatusEl.textContent = error.message;
   } finally {
-    wikiOrganizeBtn.disabled = false;
+    wikiProposalRunning = false;
+    renderWikiIncoming();
   }
 };
 
@@ -6383,12 +6777,13 @@ const fetchLibrary = async () => {
 
 libraryProposeClaimsBtn.addEventListener("click", async () => {
   if (!selectedEvidenceIds.size) return;
-  if (selectedEvidenceIds.size > 12) {
-    evidenceStatusEl.textContent = "Select at most 12 Evidence items for one Claim proposal run.";
+  if (selectedEvidenceIds.size > 30) {
+    evidenceStatusEl.textContent = "Select at most 30 Evidence items for one Claim proposal run.";
     return;
   }
   libraryProposeClaimsBtn.disabled = true;
   libraryProposeClaimsBtn.textContent = "Proposing…";
+  setTabActivity("evidence-panel", "processing");
   copySelectedEvidenceToClaimDraft();
   evidenceStatusEl.textContent = "The model is developing Claim proposals from selected Evidence…";
   try {
@@ -6417,17 +6812,19 @@ libraryProposeClaimsBtn.addEventListener("click", async () => {
       summary: data.summary || "",
       skipped: Array.isArray(data.skipped) ? data.skipped : [],
       comparisonClaimCount: Number(data.comparison_claim_count || 0),
+      comparisonScope: data.comparison_scope || {},
     };
     renderClaimProposals();
-    showPanel("claims-panel");
+    setTabActivity("evidence-panel", "idle");
+    setTabActivity("claims-panel", "result");
     claimsStatusEl.textContent = returned.length
       ? `${returned.length} Claim change${returned.length === 1 ? "" : "s"} awaiting review.`
       : `${latestClaimProposalReport.skipped.length} item${latestClaimProposalReport.skipped.length === 1 ? "" : "s"} examined; no durable Claim change proposed.`;
     await fetchClaimProposals().catch(() => {
       claimsStatusEl.textContent += " The background queue refresh failed; the returned proposals remain visible.";
     });
-    scrollClaimProposalQueueToStart();
   } catch (error) {
+    setTabActivity("evidence-panel", "idle");
     evidenceStatusEl.textContent = error instanceof TypeError
       ? "Connection to Knowte was interrupted before Claims could be proposed. Restart Knowte, then try again."
       : error.message;
@@ -6450,6 +6847,7 @@ proposeEvidenceBtn.addEventListener("click", async () => {
   }
   proposeEvidenceBtn.disabled = true;
   proposeEvidenceBtn.textContent = "Proposing…";
+  setTabActivity("sources-panel", "processing");
   const modelName = evidenceModelSelect?.selectedOptions?.[0]?.textContent
     || "selected model";
   const startedAt = Date.now();
@@ -6477,12 +6875,14 @@ proposeEvidenceBtn.addEventListener("click", async () => {
     );
     evidenceProposals = [...byId.values()];
     renderEvidenceProposals();
-    showPanel("evidence-panel");
+    setTabActivity("sources-panel", "idle");
+    setTabActivity("evidence-panel", "result");
     evidenceStatusEl.textContent = `${returned.length} Evidence proposal${returned.length === 1 ? "" : "s"} awaiting review.`;
     fetchEvidenceProposals().catch(() => {
       evidenceStatusEl.textContent += " The background queue refresh failed; the returned proposals remain visible.";
     });
   } catch (error) {
+    setTabActivity("sources-panel", "idle");
     libraryStatusEl.textContent = error instanceof TypeError
       ? "Connection to Knowte was interrupted before Evidence could be proposed."
       : error.message;
@@ -6538,6 +6938,100 @@ claimsProposalsToggleBtn.addEventListener("click", () => {
   renderClaimProposals();
   if (claimProposalQueueOpen) {
     scrollClaimProposalQueueToStart();
+  }
+});
+
+claimsAuditToggleBtn.addEventListener("click", () => {
+  claimAuditBoardOpen = true;
+  claimProposalQueueOpen = false;
+  renderClaimProposals();
+  renderClaimAudit();
+  claimAuditBoardEl.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+claimAuditCloseBtn.addEventListener("click", () => {
+  claimAuditBoardOpen = false;
+  renderClaimAudit();
+});
+
+claimAuditScopeInput.addEventListener("change", () => {
+  activeClaimAudit = ["ready", "running", "paused"].includes(activeClaimAudit?.status)
+    ? activeClaimAudit : null;
+  claimAuditEstimateEl.textContent = "Preview the scope before starting.";
+  claimAuditPreviewKey = "";
+  renderClaimAudit();
+});
+[claimAuditAnyTagsEl, claimAuditAllTagsEl].forEach((control) => {
+  control.addEventListener("change", () => {
+    claimAuditPreviewKey = "";
+    claimAuditEstimateEl.textContent = "Scope changed. Preview it before starting.";
+    renderClaimAudit();
+  });
+});
+
+claimAuditPreviewBtn.addEventListener("click", async () => {
+  if (claimAuditScopeInput.value === "tags"
+      && !selectedClaimAuditAnyTags.size && !selectedClaimAuditAllTags.size) {
+    claimAuditEstimateEl.textContent = "Select at least one Tag for a scoped audit.";
+    return;
+  }
+  claimAuditPreviewBtn.disabled = true;
+  claimAuditEstimateEl.textContent = "Building a local candidate estimate…";
+  try {
+    const response = await fetch("/api/claim-audits/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: claimAuditScope() }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not preview audit.");
+    claimAuditPreviewKey = JSON.stringify(claimAuditScope());
+    claimAuditEstimateEl.textContent = `${data.claim_count} Claims in scope · ${data.candidate_count} likely pairs · ${data.estimated_batches} model batch${data.estimated_batches === 1 ? "" : "es"}. Every scoped Claim is considered locally; unrelated pairs are not sent to the model.`;
+  } catch (error) {
+    claimAuditEstimateEl.textContent = error.message;
+  } finally {
+    claimAuditPreviewBtn.disabled = false;
+  }
+});
+
+claimAuditStartBtn.addEventListener("click", async () => {
+  if (claimAuditScopeInput.value === "tags"
+      && !selectedClaimAuditAnyTags.size && !selectedClaimAuditAllTags.size) {
+    claimAuditEstimateEl.textContent = "Select at least one Tag for a scoped audit.";
+    return;
+  }
+  if (!claimAuditModelSelect.value) {
+    claimAuditEstimateEl.textContent = "Select a model for this audit.";
+    return;
+  }
+  if (claimAuditPreviewKey !== JSON.stringify(claimAuditScope())) {
+    claimAuditEstimateEl.textContent = "Preview this scope before starting the audit.";
+    return;
+  }
+  claimAuditStartBtn.disabled = true;
+  try {
+    const response = await fetch("/api/claim-audits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: claimAuditScope(), model_profile_id: claimAuditModelSelect.value,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not start audit.");
+    activeClaimAudit = data;
+    renderClaimAudit();
+    advanceClaimAudit();
+  } catch (error) {
+    claimAuditEstimateEl.textContent = error.message;
+  } finally {
+    claimAuditStartBtn.disabled = false;
+  }
+});
+
+claimAuditPauseBtn.addEventListener("click", () => setClaimAuditStatus("pause"));
+claimAuditResumeBtn.addEventListener("click", () => setClaimAuditStatus("resume"));
+claimAuditCancelBtn.addEventListener("click", () => {
+  if (window.confirm("Cancel this Claim audit? Completed review proposals will be kept.")) {
+    setClaimAuditStatus("cancel");
   }
 });
 
@@ -7427,12 +7921,24 @@ navLinks.forEach((link) => {
   link.addEventListener("click", () => {
     const target = link.dataset.target;
     if (!target) return;
+    const hadResult = link.classList.contains("has-result");
+    setTabActivity(target, "idle");
     showPanel(target);
+    if (hadResult) {
+      window.requestAnimationFrame(() => {
+        if (target === "evidence-panel") {
+          evidenceProposalBoardEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        if (target === "claims-panel") scrollClaimProposalQueueToStart();
+      });
+    }
     if (target === "plans-panel") fetchPlans();
     if (target === "sources-panel") fetchLibrary();
     if (target === "evidence-panel") fetchEvidenceLibrary();
     if (target === "claims-panel") {
-      Promise.all([fetchClaims(), fetchClaimProposals(), fetchEvidenceLibrary()]);
+      Promise.all([
+        fetchClaims(), fetchClaimProposals(), fetchEvidenceLibrary(), fetchClaimAudits(),
+      ]);
     }
     if (target === "views-panel") Promise.all([fetchWiki(), fetchClaims()]);
     if (target === "create-panel") fetchArtifacts();
@@ -7620,6 +8126,7 @@ fetchSearxngStatus();
 fetchArtifacts();
 fetchClaims();
 fetchClaimProposals();
+fetchClaimAudits();
 fetchEvidenceProposals();
 fetchWiki().catch((error) => { wikiStatusEl.textContent = error.message; });
 fetchLibrary();

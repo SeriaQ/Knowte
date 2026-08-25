@@ -27,10 +27,10 @@
         </div>
         <nav class="side-nav">
           <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
-          <button class="side-link" type="button" data-target="sources-panel">Sources</button>
-          <button class="side-link" type="button" data-target="evidence-panel">Evidence</button>
-          <button class="side-link" type="button" data-target="claims-panel">Claims</button>
-          <button class="side-link" type="button" data-target="views-panel">Views</button>
+          <button class="side-link" type="button" data-target="sources-panel"><span>Sources</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
+          <button class="side-link" type="button" data-target="evidence-panel"><span>Evidence</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
+          <button class="side-link" type="button" data-target="claims-panel"><span>Claims</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
+          <button class="side-link" type="button" data-target="views-panel"><span>Views</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="create-panel">Projects</button>
           <button class="side-link" type="button" data-target="plans-panel">Plans</button>
           <button class="side-link" type="button" data-target="config-panel">Config</button>
@@ -318,8 +318,15 @@
                 </div>
                 <div class="stage-toolbar-tools">
                   <button class="review-queue-action" type="button" id="evidence-proposals-toggle" aria-controls="evidence-proposal-board" aria-expanded="false">Awaiting review · 0</button>
-                  <label class="tag-filter-control">Tag<select id="evidence-tag-filter" aria-label="Filter Evidence by Tag"><option value="">All Tags</option></select></label>
+                  <button type="button" class="semantic-action" id="evidence-batch-tag" disabled>+ Tag</button>
                   <label class="master-select" title="Select all visible Evidence"><input type="checkbox" id="evidence-library-select-all" /> Select all</label>
+                </div>
+              </div>
+              <div class="entity-filter-row">
+                <span class="entity-filter-title">Tag Filter</span>
+                <div class="entity-filter-fields">
+                  <div class="tag-filter-control tag-multiselect" id="evidence-tag-filter"><span>Any of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
+                  <div class="tag-filter-control tag-multiselect" id="evidence-tag-all-filter"><span>All of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
                 </div>
               </div>
               <label class="claim-proposal-focus"><span>Focus <small>optional</small></span><input id="claim-proposal-focus" type="text" maxlength="2000" placeholder="What should become durable knowledge from the selected Evidence?" /></label>
@@ -353,10 +360,16 @@
                 <button class="primary-action" type="button" id="claims-build-view" disabled>Send to Wiki</button>
               </div>
               <div class="claims-toolbar-end">
-                <label class="tag-filter-control">Status<select id="claims-review-filter" aria-label="Filter Claims by review status"><option value="">All Claims</option><option value="accepted">Accepted</option><option value="disputed">Disputed</option></select></label>
-                <label class="tag-filter-control">Tag<select id="claims-tag-filter" aria-label="Filter Claims by Tag"><option value="">All Tags</option></select></label>
+                <button class="semantic-action is-audit" type="button" id="claims-audit-toggle">Audit Claims</button>
                 <button class="review-queue-action" type="button" id="claims-proposals-toggle" aria-controls="claim-proposal-board" aria-expanded="false">Awaiting review · 0</button>
-                <label class="master-select" title="Select all visible Claims"><input type="checkbox" id="claims-select-all" /> Select all</label>
+              </div>
+            </div>
+            <div class="entity-filter-row">
+              <span class="entity-filter-title">Tag Filter</span>
+              <div class="entity-filter-fields">
+                <label class="tag-filter-control">Status<select id="claims-review-filter" aria-label="Filter Claims by review status"><option value="">All Claims</option><option value="accepted">Accepted</option><option value="disputed">Disputed</option></select></label>
+                <div class="tag-filter-control tag-multiselect" id="claims-tag-filter"><span>Any of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
+                <div class="tag-filter-control tag-multiselect" id="claims-tag-all-filter"><span>All of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
               </div>
             </div>
             <section class="handoff-return" id="claims-handoff-return" hidden>
@@ -387,7 +400,35 @@
               </div>
               <small id="claim-create-status" role="status"></small>
             </div>
+            <div class="claims-list-controls" id="claims-list-controls">
+              <button type="button" class="semantic-action" id="claims-batch-tag" disabled>+ Tag</button>
+              <label class="master-select" title="Select all visible Claims"><input type="checkbox" id="claims-select-all" /> Select all</label>
+            </div>
             <details class="claim-proposal-report" id="claim-proposal-report" hidden><summary id="claim-proposal-report-summary">Latest proposal run</summary><div id="claim-proposal-report-body"></div></details>
+            <section class="claim-audit-board" id="claim-audit-board" hidden>
+              <div class="claim-audit-head">
+                <div><strong>Audit Claims</strong><small>Scan every Claim in the selected scope; only likely pairs are sent to the model.</small></div>
+                <button type="button" class="reader-toolbar-btn" id="claim-audit-close">× <span>Close</span></button>
+              </div>
+              <div class="claim-audit-config" id="claim-audit-config">
+                <label>Scope<select id="claim-audit-scope"><option value="library">Entire Library</option><option value="tags">Under selected Tags</option></select></label>
+                <label>Model<select id="claim-audit-model" aria-label="Model for Claim audit"></select></label>
+              </div>
+              <div class="claim-audit-tags" id="claim-audit-tags" hidden>
+                <div class="tag-filter-control tag-multiselect" id="claim-audit-any-tags"><span>Any of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
+                <div class="tag-filter-control tag-multiselect" id="claim-audit-all-tags"><span>All of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
+              </div>
+              <div class="claim-audit-estimate" id="claim-audit-estimate">Preview the scope before starting.</div>
+              <div class="claim-audit-progress" id="claim-audit-progress" hidden><div><span id="claim-audit-progress-label">Preparing audit…</span><strong id="claim-audit-progress-count"></strong></div><progress id="claim-audit-progress-bar" max="1" value="0"></progress></div>
+              <pre class="claim-audit-raw" id="claim-audit-raw" hidden></pre>
+              <div class="claim-audit-actions">
+                <button type="button" class="save-plan-btn stage-save-action" id="claim-audit-preview">Preview</button>
+                <button type="button" class="primary-action" id="claim-audit-start">Start audit</button>
+                <button type="button" class="semantic-action is-edit" id="claim-audit-pause" hidden>Pause</button>
+                <button type="button" class="semantic-action is-edit" id="claim-audit-resume" hidden>Resume</button>
+                <button type="button" class="semantic-action is-destructive" id="claim-audit-cancel" hidden>Cancel</button>
+              </div>
+            </section>
             <section class="claim-proposal-board" id="claim-proposal-board" hidden>
               <div class="claim-section-head"><strong>Awaiting review</strong><small>Kept until you Accept, Keep disputed, or Discard.</small></div>
               <div id="claim-proposal-list"></div>
@@ -419,6 +460,7 @@
                   <button type="button" class="review-queue-action" id="wiki-proposals-toggle" aria-expanded="false">Awaiting review · 0</button>
                 </div>
               </div>
+              <small class="knowledge-status wiki-action-status" id="wiki-status" role="status"></small>
               <section class="incoming-tray wiki-incoming" id="wiki-incoming-tray" hidden>
                 <div class="incoming-tray-head"><div><strong id="wiki-incoming-title">Incoming Claims · 0</strong><small>These Claims remain global and will be included in the next Wiki proposal.</small></div><button type="button" class="incoming-clear-action" id="wiki-incoming-clear">Clear</button></div>
                 <div class="incoming-items" id="wiki-incoming-items"></div>
@@ -439,7 +481,6 @@
                 <div class="wiki-reading-actions"><small id="wiki-reading-scope"></small><label class="ai-action-model"><span>Model</span><select id="article-model-select" aria-label="Model for Article generation"></select></label><button type="button" class="primary-action" id="wiki-reading-run">Generate</button></div>
               </section>
               <article class="wiki-reading" id="wiki-reading" hidden></article>
-              <small class="knowledge-status" id="wiki-status" role="status"></small>
             </section>
             <section class="view-detail legacy-views-compat" id="view-detail" hidden>
               <div class="view-detail-toolbar">

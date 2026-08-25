@@ -5,6 +5,47 @@ All notable changes to Knowte will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-26
+
+### Added
+
+- Evidence cards provide a consistent magnifying-glass action for opening the
+  full Evidence detail view.
+- Selected Evidence can receive Tags in one batch without replacing Tags
+  already attached to individual items.
+- Selected Claims can receive Tags in one batch from the list controls shared
+  with Select all.
+- Evidence and Claims use dedicated, composable Any-of and All-of Tag menus
+  with consistent selection counts.
+- Proposed Claims show their grounding Evidence and link back to the matching
+  item in the Evidence workspace.
+- Claim proposal runs compare likely existing Claims for duplicates,
+  contradictions, and related knowledge before presenting reviewable changes.
+- Claims can be audited across the entire Library or a Tag-defined scope, with
+  a local candidate preview, bounded model batches, and resumable progress.
+
+### Changed
+
+- Cross-stage AI proposals now leave the user in the working Tab, show a
+  spinner there while processing, and notify the destination Tab when review
+  results are ready instead of forcing an immediate navigation.
+- Claims Select all now sits below the Manual Claim editor and stays out of
+  the action toolbar and proposal-review state.
+- Wiki organization now requires explicitly incoming Claims, reports progress
+  on the Views Tab, and no longer silently falls back to every active Claim.
+- Claim proposal runs accept up to 30 selected Evidence items.
+- Search actions use a more compact height, and the Claim audit entry is
+  visually distinguished from routine Claim actions.
+
+### Fixed
+
+- Copilot context-status messages no longer overlap the first chat response in
+  the compact review panel.
+- Evidence card open actions retain their compact icon treatment, and the
+  batch Tag control no longer shifts the Evidence toolbar when selection changes.
+- Rounded gradient buttons no longer expose a hard-colored edge at their
+  right boundary.
+
 ## [0.5.0] - 2026-08-25
 
 ### Added
