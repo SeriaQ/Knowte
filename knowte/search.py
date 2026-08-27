@@ -403,8 +403,7 @@ def search_papers(
     filtered_web = [
         paper
         for paper in web_results
-        if (not strict_match or _matches(query, paper))
-        and (
+        if (
             web_ignore_year_filter
             or _matches_year(paper, year_from, year_to)
         )

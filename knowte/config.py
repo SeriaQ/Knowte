@@ -217,6 +217,37 @@ def save_config(config: Dict[str, str], path: Path | None = None) -> None:
         pass
 
 
+def export_config(path: Path | None = None, redact_secrets: bool = True) -> bytes:
+    config = load_config(path)
+    secret_markers = ("api_key", "token", "secret", "password", "credential")
+
+    def redact(value):
+        if isinstance(value, dict):
+            return {
+                key: ("*" if any(marker in str(key).lower() for marker in secret_markers)
+                      and item not in (None, "") else redact(item))
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        return value
+
+    exported = dict(config)
+    if redact_secrets:
+        for key, value in list(exported.items()):
+            if any(marker in key.lower() for marker in secret_markers):
+                if value:
+                    exported[key] = "*"
+                continue
+            if key in {"ai_model_profiles", "ai_custom_recipe"}:
+                try:
+                    exported[key] = json.dumps(redact(json.loads(value)), ensure_ascii=False)
+                except (TypeError, json.JSONDecodeError):
+                    pass
+    lines = [f"{key}: {str(value).replace(chr(10), ' ')}" for key, value in exported.items()]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def set_email(email: str, path: Path | None = None) -> Dict[str, str]:
     config = load_config(path)
     if email:
@@ -236,6 +267,17 @@ def set_searxng_url(url: str, path: Path | None = None) -> Dict[str, str]:
         config.pop("searxng_url", None)
     save_config(config, path)
     return config
+
+
+def set_searxng_proxy(proxy: str, path: Path | None = None) -> Dict[str, str]:
+    config = load_config(path)
+    if proxy:
+        config["searxng_proxy"] = proxy.strip()
+    else:
+        config.pop("searxng_proxy", None)
+    save_config(config, path)
+    return config
+
 
 def set_semanticscholar_key(api_key: str, path: Path | None = None) -> Dict[str, str]:
     config = load_config(path)

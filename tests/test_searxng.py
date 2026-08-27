@@ -9,6 +9,52 @@ from knowte import searxng
 
 
 class ManagedSearxngTests(unittest.TestCase):
+    def test_managed_proxy_is_written_and_running_service_restarts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            managed_dir = Path(temp_dir) / "searxng"
+            config_dir = managed_dir / "config"
+            config_dir.mkdir(parents=True)
+            settings_path = config_dir / "settings.yml"
+            compose_path = managed_dir / "compose.yml"
+            metadata_path = managed_dir / "managed.json"
+            settings_path.write_text("use_default_settings: true\n", encoding="utf-8")
+            compose_path.write_text("services: {}\n", encoding="utf-8")
+            metadata_path.write_text(json.dumps({"port": 8888, "image": "image"}), encoding="utf-8")
+            completed = subprocess.CompletedProcess([], 0, "", "")
+            with patch.object(searxng, "MANAGED_DIR", managed_dir), patch.object(
+                searxng, "CONFIG_DIR", config_dir
+            ), patch.object(searxng, "SETTINGS_PATH", settings_path), patch.object(
+                searxng, "COMPOSE_PATH", compose_path
+            ), patch.object(searxng, "METADATA_PATH", metadata_path), patch(
+                "knowte.searxng._docker_state", return_value={"running": True}
+            ), patch("knowte.searxng._run_docker", return_value=completed) as restart:
+                self.assertTrue(searxng.configure_searxng_proxy("socks5://proxy.test:1080"))
+
+            settings = settings_path.read_text(encoding="utf-8")
+            self.assertIn("all://", settings)
+            self.assertIn("socks5://proxy.test:1080", settings)
+            restart.assert_called_once()
+
+    def test_pull_falls_back_to_official_ghcr_registry(self):
+        failed = subprocess.CompletedProcess(
+            args=["docker"], returncode=1, stdout="", stderr="timeout"
+        )
+        succeeded = subprocess.CompletedProcess(
+            args=["docker"], returncode=0, stdout="pulled", stderr=""
+        )
+        with patch("knowte.searxng._write_managed_files") as write_files, patch(
+            "knowte.searxng._run_docker_streaming", side_effect=[failed, succeeded]
+        ) as pull:
+            image, result = searxng._pull_searxng_image(8888)
+
+        self.assertEqual(image, "ghcr.io/searxng/searxng:latest")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(write_files.call_args_list, [
+            call(8888, "docker.io/searxng/searxng:latest"),
+            call(8888, "ghcr.io/searxng/searxng:latest"),
+        ])
+        self.assertEqual(pull.call_count, 2)
+
     def test_health_check_uses_local_healthz_without_searching(self):
         response = MagicMock()
         response.read.return_value = b"OK"

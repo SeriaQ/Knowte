@@ -11,6 +11,7 @@ import json
 import os
 import re
 import socketserver
+import sys
 import sysconfig
 import threading
 import time
@@ -21,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import (
     CONFIG_PATH,
+    export_config,
     load_config,
     set_default_search_mode,
     set_email,
@@ -35,11 +37,20 @@ from .config import (
     ai_profile_for_role,
     set_semanticscholar_key,
     set_searxng_url,
+    set_searxng_proxy,
     set_web_ignore_year_filter,
 )
 from .ai import AIError
 from .capture import CaptureError, capture_source_content
 from .companion import CompanionStore
+from .exports import build_knowledge_export
+from .imports import (
+    accept_project_import,
+    accept_wiki_import,
+    discard_wiki_import,
+    stage_project_package_import,
+    stage_wiki_package_import,
+)
 from .intelligent import _client_from_config, _model_name_from_config, intelligent_search
 from .knowledge import (
     KNOWLEDGE_DB_PATH,
@@ -52,11 +63,13 @@ from .knowledge import (
     create_claim_audit,
     preview_claim_audit,
     get_claim_audit,
+    get_project,
     list_claim_audits,
     update_claim_audit_status,
     next_claim_audit_batch,
     complete_claim_audit_batch,
     create_evidence_proposal,
+    create_project_claim_recommendations,
     create_evidence,
     delete_annotation,
     discard_claim_proposal,
@@ -72,6 +85,7 @@ from .knowledge import (
     find_related_claims,
     list_claim_proposals,
     list_evidence_proposals,
+    list_project_claim_recommendations,
     list_claims,
     list_evidence,
     list_artifacts,
@@ -80,6 +94,8 @@ from .knowledge import (
     list_sources,
     list_views,
     list_wiki_proposals,
+    list_wiki_imports,
+    link_project_knowledge,
     list_project_documents,
     set_entity_tags,
     add_entity_tags_batch,
@@ -88,9 +104,14 @@ from .knowledge import (
     set_claim_lifecycle,
     store_capture,
     accept_evidence_proposal,
+    accept_project_claim_recommendation,
     update_view,
     create_wiki_proposal,
+    create_manual_wiki_proposal,
+    update_wiki_proposal,
     accept_wiki_proposal,
+    accept_project_wiki_proposal,
+    list_project_wiki_proposals,
     save_project_document,
 )
 from .plans import PLANS_PATH, create_plan, delete_plan, list_plans, update_plan
@@ -107,6 +128,7 @@ from .searxng import (
     get_searxng_status,
     manage_searxng,
     start_searxng_job,
+    configure_searxng_proxy,
 )
 from .usage import can_request, get_usage, record_ai_usage, record_request
 
@@ -161,6 +183,7 @@ _CLAIM_PROPOSAL_CAPABILITY = "claim-proposal-v3"
 _EVIDENCE_PROPOSAL_CAPABILITY = "evidence-proposal-v2"
 _WIKI_PROPOSAL_CAPABILITY = "wiki-maintainer-v1"
 _WIKI_ARTICLE_CAPABILITY = "wiki-article-v1"
+_PROJECT_CLAIM_RECOMMENDATION_CAPABILITY = "project-claim-recommendation-v1"
 
 
 def _claim_proposal_prompt() -> str:
@@ -202,6 +225,12 @@ def _wiki_article_prompt() -> str:
 def _wiki_article_selection_prompt() -> str:
     return resource_files("knowte.prompts").joinpath(
         "wiki_article_selection.md"
+    ).read_text(encoding="utf-8")
+
+
+def _project_claim_recommendation_prompt() -> str:
+    return resource_files("knowte.prompts").joinpath(
+        "project_claim_recommendation.md"
     ).read_text(encoding="utf-8")
 
 
@@ -530,6 +559,14 @@ class KnowteTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+    def handle_error(self, request, client_address):
+        error = sys.exc_info()[1]
+        if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        if isinstance(error, OSError) and getattr(error, "winerror", None) in {10053, 10054}:
+            return
+        super().handle_error(request, client_address)
+
 
 class KnowteHandler(SimpleHTTPRequestHandler):
     config_path = CONFIG_PATH
@@ -748,6 +785,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     config.get("semanticscholar_api_key", "")
                 ),
                 "searxng_url": config.get("searxng_url", ""),
+                "searxng_proxy": config.get("searxng_proxy", ""),
                 "enabled_backends": self._parse_backends(config.get("enabled_backends")),
                 "max_papers": self._parse_max_papers(config.get("max_papers")),
                 "intelligent_max_results": self._parse_bounded_int(
@@ -760,7 +798,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     else "keyword"
                 ),
                 "web_ignore_year_filter": self._parse_bool(
-                    config.get("web_ignore_year_filter")
+                    config.get("web_ignore_year_filter", "true")
                 ),
                 "ai_model_profiles": public_profiles,
                 "ai_role_assignments": profile_roles,
@@ -814,6 +852,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     "evidence_proposal": _evidence_proposal_prompt(),
                     "claim_proposal": _claim_proposal_prompt(),
                     "wiki_maintenance": _wiki_maintainer_prompt(),
+                    "project_claim_recommendation": _project_claim_recommendation_prompt(),
                     "article_selection": _wiki_article_selection_prompt(),
                     "article_writing": _wiki_article_prompt(),
                     **review_copilot_stage_prompt_previews(),
@@ -983,6 +1022,28 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 {"artifacts": list_artifacts(self.knowledge_db_path)}
             )
             return
+        project_match = re.fullmatch(
+            r"/api/projects/([0-9a-f]+)", parsed.path.rstrip("/")
+        )
+        if project_match:
+            try:
+                self._send_json(get_project(
+                    project_match.group(1), self.knowledge_db_path,
+                ))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "project_not_found", "message": str(error)},
+                    HTTPStatus.NOT_FOUND,
+                )
+            return
+        if parsed.path.rstrip("/") == "/api/project-claim-recommendations":
+            query = parse_qs(parsed.query)
+            self._send_json({
+                "proposals": list_project_claim_recommendations(
+                    str(query.get("project_id", [""])[0]), self.knowledge_db_path
+                )
+            })
+            return
         if parsed.path.rstrip("/") == "/api/tags":
             self._send_json({"tags": list_tags(self.knowledge_db_path)})
             return
@@ -1020,6 +1081,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self._send_json(
                 {"proposals": list_wiki_proposals(self.knowledge_db_path)}
             )
+            return
+        if parsed.path.rstrip("/") == "/api/wiki/imports":
+            self._send_json({"imports": list_wiki_imports(self.knowledge_db_path)})
             return
         if parsed.path.rstrip("/") == "/api/project-documents":
             query = parse_qs(parsed.query)
@@ -1224,7 +1288,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 year_to=year_to,
                 searxng_url=config.get("searxng_url"),
                 web_ignore_year_filter=self._parse_bool(
-                    config.get("web_ignore_year_filter")
+                    config.get("web_ignore_year_filter", "true")
                 ),
                 web_pages=web_pages,
                 allow_paper_external=bool(usage.get("allowed_paper", usage["allowed"])),
@@ -1298,7 +1362,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             if (
                 "websearch" in effective_backends
                 and (year_from is not None or year_to is not None)
-                and not self._parse_bool(config.get("web_ignore_year_filter"))
+                and not self._parse_bool(config.get("web_ignore_year_filter", "true"))
             ):
                 warnings.append("websearch_strict_year_filter")
             paper_blocked = (
@@ -1372,11 +1436,29 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         proposal_accept_match = re.fullmatch(
             r"/api/claim-proposals/([0-9a-f]+)/accept", route
         )
+        project_claim_recommendation_accept_match = re.fullmatch(
+            r"/api/project-claim-recommendations/([0-9a-f]+)/accept", route
+        )
+        project_wiki_proposal_accept_match = re.fullmatch(
+            r"/api/project-wiki-proposals/([0-9a-f]+)/accept", route
+        )
         evidence_proposal_accept_match = re.fullmatch(
             r"/api/evidence-proposals/([0-9a-f]+)/accept", route
         )
         wiki_proposal_accept_match = re.fullmatch(
             r"/api/wiki/proposals/([0-9a-f]+)/accept", route
+        )
+        wiki_proposal_update_match = re.fullmatch(
+            r"/api/wiki/proposals/([0-9a-f]+)", route
+        )
+        project_import_accept_match = re.fullmatch(
+            r"/api/projects/([0-9a-f]+)/import/accept", route
+        )
+        wiki_import_accept_match = re.fullmatch(
+            r"/api/wiki/imports/([0-9a-f]+)/accept", route
+        )
+        project_claims_match = re.fullmatch(
+            r"/api/projects/([0-9a-f]+)/claims", route
         )
         claim_audit_action_match = re.fullmatch(
             r"/api/claim-audits/([0-9a-f]+)/(run|pause|resume|cancel)", route
@@ -1400,8 +1482,14 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/claim-audits/preview",
             "/api/evidence-proposals/generate",
             "/api/wiki/proposals/generate",
+            "/api/wiki/proposals/edit",
             "/api/wiki/articles/generate",
+            "/api/project-articles/generate",
             "/api/project-documents",
+            "/api/exports",
+            "/api/config/export",
+            "/api/project-imports",
+            "/api/wiki/imports",
             "/api/tags/entity",
             "/api/tags/batch",
             "/api/annotations",
@@ -1410,7 +1498,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/companion/captures",
             "/api/companion/commit",
             "/api/companion/theme",
-        } and not capture_match and not companion_confirm_match and not proposal_accept_match and not evidence_proposal_accept_match and not wiki_proposal_accept_match and not claim_audit_action_match:
+            "/api/project-claim-recommendations/generate",
+            "/api/project-wiki-proposals/generate",
+        } and not capture_match and not companion_confirm_match and not proposal_accept_match and not evidence_proposal_accept_match and not wiki_proposal_accept_match and not wiki_proposal_update_match and not project_claim_recommendation_accept_match and not project_wiki_proposal_accept_match and not project_import_accept_match and not wiki_import_accept_match and not project_claims_match and not claim_audit_action_match:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -1419,6 +1509,244 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
         except json.JSONDecodeError:
             payload = {}
+        if route == "/api/exports":
+            try:
+                filename, export_body = build_knowledge_export(
+                    str(payload.get("type") or ""),
+                    payload.get("ids") if isinstance(payload.get("ids"), list) else [],
+                    self.knowledge_db_path,
+                    self.content_dir,
+                )
+                self._send_bytes(
+                    export_body,
+                    "application/zip",
+                    filename,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_export", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/config/export":
+            self._send_bytes(
+                export_config(
+                    self.config_path,
+                    bool(payload.get("redact_secrets", True)),
+                ),
+                "application/x-yaml",
+                "knowte-config.yml",
+            )
+            return
+        if route in {"/api/project-imports", "/api/wiki/imports"}:
+            try:
+                self._send_json(
+                    (stage_project_package_import if route == "/api/project-imports"
+                     else stage_wiki_package_import)(
+                        str(payload.get("data") or ""),
+                        str(payload.get("filename") or "knowte-import.zip"),
+                        self.knowledge_db_path,
+                        self.content_dir,
+                    ),
+                    HTTPStatus.CREATED,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_import", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if project_import_accept_match:
+            try:
+                self._send_json(accept_project_import(
+                    project_import_accept_match.group(1),
+                    self.knowledge_db_path,
+                    self.content_dir,
+                ))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_import", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if wiki_import_accept_match:
+            try:
+                self._send_json(accept_wiki_import(
+                    wiki_import_accept_match.group(1),
+                    self.knowledge_db_path,
+                    self.content_dir,
+                ))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_import", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if project_claims_match:
+            claim_ids = payload.get("claim_ids")
+            if not isinstance(claim_ids, list) or not claim_ids:
+                self._send_json(
+                    {"error": "invalid_project_claims", "message": "Select at least one Claim"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                for claim_id in dict.fromkeys(str(item) for item in claim_ids if item):
+                    link_project_knowledge(
+                        project_claims_match.group(1), "claim", claim_id,
+                        self.knowledge_db_path,
+                    )
+                self._send_json({"linked": len(set(claim_ids))})
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_project_claims", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if project_claim_recommendation_accept_match:
+            try:
+                self._send_json(accept_project_claim_recommendation(
+                    project_claim_recommendation_accept_match.group(1),
+                    self.knowledge_db_path,
+                ))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_project_recommendation", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if project_wiki_proposal_accept_match:
+            try:
+                self._send_json(accept_project_wiki_proposal(
+                    project_wiki_proposal_accept_match.group(1), self.knowledge_db_path,
+                ))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_project_wiki", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route == "/api/project-wiki-proposals/generate":
+            project_id = str(payload.get("project_id") or "").strip()
+            try:
+                project = get_project(project_id, self.knowledge_db_path)
+                project_claims = [
+                    claim for claim in project.get("claims", [])
+                    if claim.get("lifecycle") == "active"
+                ]
+                if not project_claims:
+                    raise ValueError("Add at least one active Claim before organizing the Project Wiki")
+                config = load_config(self.config_path)
+                profile_id = str(payload.get("model_profile_id") or "")[:80]
+                client = _client_from_config(
+                    config, require_embedding=False, role="wiki", profile_id=profile_id,
+                )
+                _, temperature, max_tokens, advanced = _copilot_settings(config, "artifact")
+                current_pages = (project.get("wiki") or {}).get("graph_state", {}).get("pages", [])
+                result = client.chat_json(
+                    _wiki_maintainer_prompt(),
+                    json.dumps({
+                        "instruction": "Organize only this Project's Claims into a compact Project Wiki.",
+                        "project": {"title": project["title"], "purpose": project["purpose"]},
+                        "current_wiki": current_pages,
+                        "claims": [_wiki_claim_context(claim) for claim in project_claims],
+                    }, ensure_ascii=False),
+                    temperature=min(temperature, 0.3),
+                    max_tokens=max(3000, max_tokens), extra_parameters=advanced,
+                )
+                proposal = create_wiki_proposal(
+                    result, _WIKI_PROPOSAL_CAPABILITY,
+                    _model_name_from_config(config, "wiki", profile_id),
+                    {"project_id": project_id, "claim_ids": [claim["id"] for claim in project_claims]},
+                    self.knowledge_db_path, proposal_type="project_wiki_patch",
+                )
+                snapshot = client.usage_snapshot()
+                usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json({"proposal": proposal, "usage": usage}, HTTPStatus.CREATED)
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_project_wiki", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error), "usage": get_usage()},
+                    HTTPStatus.BAD_REQUEST if error.code in {"ai_unconfigured", "chat_model_missing"}
+                    else HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return
+        if route == "/api/project-claim-recommendations/generate":
+            project_id = str(payload.get("project_id") or "").strip()
+            candidate_ids = payload.get("candidate_ids")
+            if not project_id or not isinstance(candidate_ids, list):
+                self._send_json(
+                    {"error": "invalid_project_scope", "message": "Choose a Project and Claim scope."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                project = get_project(project_id, self.knowledge_db_path)
+                allowed_ids = set(dict.fromkeys(str(item) for item in candidate_ids[:200] if item))
+                linked_ids = {item["id"] for item in project.get("claims", [])}
+                candidates = [
+                    _wiki_claim_context(claim, include_evidence=True)
+                    for claim in list_claims(self.knowledge_db_path)
+                    if claim["id"] in allowed_ids
+                    and claim.get("lifecycle") == "active"
+                    and claim["id"] not in linked_ids
+                ]
+                if not candidates:
+                    raise ValueError("The selected scope contains no available Claims")
+                config = load_config(self.config_path)
+                profile_id = str(payload.get("model_profile_id") or "")[:80]
+                client = _client_from_config(
+                    config, require_embedding=False, role="article", profile_id=profile_id,
+                )
+                _, temperature, max_tokens, advanced = _copilot_settings(config, "artifact")
+                result = client.chat_json(
+                    _project_claim_recommendation_prompt(),
+                    json.dumps({
+                        "project": {"title": project["title"], "purpose": project["purpose"]},
+                        "candidate_claims": candidates,
+                    }, ensure_ascii=False),
+                    temperature=min(temperature, 0.3),
+                    max_tokens=max(1800, max_tokens),
+                    extra_parameters=advanced,
+                )
+                recommendations = (
+                    result.get("recommendations", []) if isinstance(result, dict) else []
+                )
+                valid = [
+                    item for item in recommendations if isinstance(item, dict)
+                    and str(item.get("claim_id") or "") in {claim["id"] for claim in candidates}
+                ]
+                proposals = create_project_claim_recommendations(
+                    project_id, valid, _PROJECT_CLAIM_RECOMMENDATION_CAPABILITY,
+                    _model_name_from_config(config, "article", profile_id),
+                    {"candidate_ids": [claim["id"] for claim in candidates]},
+                    self.knowledge_db_path,
+                )
+                snapshot = client.usage_snapshot()
+                usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", 0),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json({"proposals": proposals, "usage": usage}, HTTPStatus.CREATED)
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_project_scope", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error), "usage": get_usage()},
+                    HTTPStatus.BAD_REQUEST if error.code in {"ai_unconfigured", "chat_model_missing"}
+                    else HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return
         if claim_audit_action_match:
             audit_id, action = claim_audit_action_match.groups()
             try:
@@ -1635,6 +1963,18 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
             return
+        if wiki_proposal_update_match:
+            try:
+                self._send_json(update_wiki_proposal(
+                    wiki_proposal_update_match.group(1), payload,
+                    self.knowledge_db_path,
+                ))
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_wiki_proposal", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
         if route == "/api/companion/pairing":
             self._send_json(
                 self.companion_store.create_pairing(str(payload.get("theme") or "auto")),
@@ -1828,35 +2168,15 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         if route == "/api/wiki/proposals/generate":
             try:
                 wiki = get_wiki(self.knowledge_db_path)
-                requested_ids = payload.get("claim_ids")
-                if not isinstance(requested_ids, list):
-                    requested_ids = []
-                requested_ids = list(dict.fromkeys(
-                    str(item) for item in requested_ids if item
-                ))
-                if not requested_ids:
-                    raise ValueError("Send at least one Claim to Wiki before organizing")
                 active_claims = [
                     claim for claim in wiki["claims"]
                     if claim.get("lifecycle") == "active"
                 ]
-                requested = set(requested_ids)
-                selected_claims = [
-                    claim for claim in active_claims if claim["id"] in requested
-                ]
-                existing_ids = {
-                    claim_id for page in wiki["pages"]
-                    for claim_id in page.get("claim_ids", [])
-                }
-                selected_ids = {claim["id"] for claim in selected_claims} | existing_ids
-                selected_claims = [
-                    claim for claim in active_claims if claim["id"] in selected_ids
-                ]
-                if not selected_claims:
+                if not active_claims:
                     raise ValueError("The Wiki needs at least one active Claim to organize")
-                if len(selected_claims) > 200:
+                if len(active_claims) > 200:
                     raise ValueError(
-                        "Select a smaller Claim subset; one Wiki review can organize at most 200 Claims"
+                        "Global Wiki organization currently supports up to 200 active Claims"
                     )
                 config = load_config(self.config_path)
                 client = _client_from_config(
@@ -1877,7 +2197,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         for page in wiki["pages"]
                     ],
                     "claims": [
-                        _wiki_claim_context(claim) for claim in selected_claims
+                        _wiki_claim_context(claim) for claim in active_claims
                     ],
                 }, ensure_ascii=False)
                 result = client.chat_json(
@@ -1893,7 +2213,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         config, "wiki",
                         str(payload.get("model_profile_id") or "")[:80],
                     ),
-                    {"claim_ids": [claim["id"] for claim in selected_claims]},
+                    {"claim_ids": [claim["id"] for claim in active_claims]},
                     self.knowledge_db_path,
                 )
                 snapshot = client.usage_snapshot()
@@ -1918,7 +2238,19 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     else HTTPStatus.SERVICE_UNAVAILABLE,
                 )
             return
-        if route == "/api/wiki/articles/generate":
+        if route == "/api/wiki/proposals/edit":
+            try:
+                self._send_json(
+                    {"proposal": create_manual_wiki_proposal(self.knowledge_db_path)},
+                    HTTPStatus.CREATED,
+                )
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_wiki_proposal", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return
+        if route in {"/api/wiki/articles/generate", "/api/project-articles/generate"}:
             goal = str(payload.get("goal") or "").strip()[:2000]
             if not goal:
                 self._send_json(
@@ -1927,40 +2259,33 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 )
                 return
             try:
-                wiki = get_wiki(self.knowledge_db_path)
-                claim_ids = {
-                    claim_id for page in wiki["pages"]
-                    for claim_id in page.get("claim_ids", [])
-                }
+                project_id = str(payload.get("project_id") or "").strip()
+                if not project_id:
+                    raise ValueError("Choose a Project before generating an Article")
+                project = get_project(project_id, self.knowledge_db_path)
+                claim_ids = {claim["id"] for claim in project.get("claims", [])}
                 selected_claims = [
-                    claim for claim in wiki["claims"]
+                    claim for claim in project.get("claims", [])
                     if claim["id"] in claim_ids and claim.get("lifecycle") == "active"
                 ]
                 if not selected_claims:
-                    raise ValueError("The global Wiki has no organized Claims for this Article")
+                    raise ValueError("This Project has no active Claims for an Article")
                 if len(selected_claims) > 200:
-                    raise ValueError("Article generation currently supports up to 200 Wiki Claims")
+                    raise ValueError("Article generation currently supports up to 200 Project Claims")
                 config = load_config(self.config_path)
                 client = _client_from_config(
                     config, require_embedding=False, role="article",
                     profile_id=str(payload.get("model_profile_id") or "")[:80],
                 )
                 _, temperature, max_tokens, advanced = _copilot_settings(config, "views")
-                wiki_pages = [
-                    {
-                        "id": page["id"],
-                        "title": page["title"],
-                        "parent_id": page["parent_id"],
-                        "summary": page["summary"],
-                        "claim_ids": page["claim_ids"],
-                    }
-                    for page in wiki["pages"]
-                ]
                 selection = client.chat_json(
                     _wiki_article_selection_prompt(),
                     json.dumps({
                         "goal": goal,
-                        "wiki_pages": wiki_pages,
+                        "project": {
+                            "title": project["title"],
+                            "purpose": project["purpose"],
+                        },
                         "claims": [
                             _wiki_claim_context(claim) for claim in selected_claims
                         ],
@@ -1980,7 +2305,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 if not chosen_ids:
                     raise AIError(
                         "no_article_material",
-                        "The model selected no valid Wiki Claims for this Article.",
+                        "The model selected no valid Project Claims for this Article.",
                     )
                 chosen_set = set(chosen_ids)
                 chosen_claims = sorted(
@@ -3038,8 +3363,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         api_key_supplied = "semanticscholar_api_key" in payload
         api_key = (payload.get("semanticscholar_api_key") or "").strip()
         searxng_url = (payload.get("searxng_url") or "").strip()
+        searxng_proxy = (payload.get("searxng_proxy") or "").strip()
         web_ignore_year_filter = self._parse_bool(
-            payload.get("web_ignore_year_filter", False)
+            payload.get("web_ignore_year_filter", True)
         )
         requested_backends = payload.get("enabled_backends", self.default_backends)
         if not isinstance(requested_backends, list):
@@ -3066,6 +3392,14 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         if api_key_supplied:
             config = set_semanticscholar_key(api_key, self.config_path)
         config = set_searxng_url(searxng_url, self.config_path)
+        try:
+            configure_searxng_proxy(searxng_proxy)
+        except SearxngManagerError as error:
+            self._send_json(
+                {"error": error.code, "message": str(error)}, HTTPStatus.BAD_REQUEST
+            )
+            return
+        config = set_searxng_proxy(searxng_proxy, self.config_path)
         config = set_enabled_backends(enabled_backends, self.config_path)
         config = set_max_papers(max_papers, self.config_path)
         config = set_intelligent_max_results(
@@ -3152,6 +3486,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 config.get("semanticscholar_api_key", "")
             ),
             "searxng_url": config.get("searxng_url", ""),
+            "searxng_proxy": config.get("searxng_proxy", ""),
             "enabled_backends": self._parse_backends(config.get("enabled_backends")),
             "max_papers": self._parse_max_papers(config.get("max_papers")),
             "intelligent_max_results": self._parse_bounded_int(
@@ -3164,7 +3499,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 else "keyword"
             ),
             "web_ignore_year_filter": self._parse_bool(
-                config.get("web_ignore_year_filter")
+                config.get("web_ignore_year_filter", "true")
             ),
             "ai_model_profiles": public_profiles,
             "ai_role_assignments": profile_roles,
@@ -3218,6 +3553,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "evidence_proposal": _evidence_proposal_prompt(),
                 "claim_proposal": _claim_proposal_prompt(),
                 "wiki_maintenance": _wiki_maintainer_prompt(),
+                "project_claim_recommendation": _project_claim_recommendation_prompt(),
                 "article_selection": _wiki_article_selection_prompt(),
                 "article_writing": _wiki_article_prompt(),
                 **review_copilot_stage_prompt_previews(),
@@ -3304,6 +3640,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
+        wiki_import_match = re.fullmatch(
+            r"/api/wiki/imports/([0-9a-f]+)", parsed.path.rstrip("/")
+        )
+        if wiki_import_match:
+            try:
+                discard_wiki_import(wiki_import_match.group(1), self.knowledge_db_path)
+                self._send_json({"deleted": True})
+            except ValueError:
+                self._send_json({"deleted": False}, HTTPStatus.NOT_FOUND)
+            return
         wiki_proposal_match = re.fullmatch(
             r"/api/wiki/proposals/([0-9a-f]+)", parsed.path.rstrip("/")
         )
@@ -3335,11 +3681,15 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             )
             return
         proposal_match = re.fullmatch(
-            r"/api/(?:claim|evidence)-proposals/([0-9a-f]+)", parsed.path.rstrip("/")
+            r"/api/(?:claim|evidence)-proposals/([0-9a-f]+)|"
+            r"/api/project-claim-recommendations/([0-9a-f]+)|"
+            r"/api/project-wiki-proposals/([0-9a-f]+)",
+            parsed.path.rstrip("/")
         )
         if proposal_match:
             deleted = discard_claim_proposal(
-                proposal_match.group(1), self.knowledge_db_path
+                proposal_match.group(1) or proposal_match.group(2) or proposal_match.group(3),
+                self.knowledge_db_path,
             )
             self._send_json(
                 {"deleted": deleted},
@@ -3407,6 +3757,15 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_bytes(self, body: bytes, media_type: str, filename: str):
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", media_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 

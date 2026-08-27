@@ -5,6 +5,57 @@ All notable changes to Knowte will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-27
+
+### Added
+
+- Projects now provide one shared global Claim selector for manual inclusion
+  and model-assisted, reviewable Claim recommendations.
+- Projects can organize their Claims into a durable, reviewable mini-Wiki and
+  keep goal-specific generated Articles that can be reopened for reading.
+- Config can apply an outgoing HTTP/SOCKS proxy to a Knowte-managed SearXNG
+  instance.
+- The global Wiki and individual Projects can be exported as portable ZIP
+  packages containing readable Markdown, structured provenance JSON, a
+  versioned manifest, and included Snapshot Evidence images.
+- Wiki packages can be reviewed once in Wiki and merged with their complete
+  page structure and dependent knowledge; Project packages remain isolated in
+  a Project review. The two package types cannot be cross-imported.
+- Config can be exported with API keys and other stored secrets redacted by
+  default.
+- Managed SearXNG setup falls back from Docker Hub to the official GitHub
+  Container Registry when the primary image pull fails.
+- Wiki structure can be edited as a persistent reviewable Patch, including
+  nested Pages, canonical Claim placement, and direct navigation to Claims.
+
+### Changed
+
+- Projects explicitly include only Claims; supporting Evidence and Sources are
+  derived through Claim provenance rather than selected as Working Materials.
+- New installations ignore the year filter for Web Search by default so
+  undated Web results are not silently excluded.
+- Web results now trust SearXNG's relevance ranking instead of requiring every
+  literal query token to appear in each result title or snippet.
+- User documentation now reflects the complete Source-to-View workflow,
+  current AI model routing, Claim auditing, and browser companion behavior.
+- Every reviewed active Claim belongs to the global Wiki automatically;
+  unassigned knowledge appears under Unorganized instead of an incoming queue.
+- Article generation now belongs to Projects and uses only the selected
+  Project's Claims.
+- Local client disconnects no longer print misleading server tracebacks after
+  a capture or other request has already completed its work.
+- Wiki Pages and Claims can be reordered or nested by drag and drop, with
+  precise button controls retained as a fallback.
+- The deterministic Claim Graph now uses relation-driven two-dimensional
+  placement, directional edges, compact nodes, and stable neighborhood
+  highlighting.
+
+### Fixed
+
+- Discarding a Wiki edit draft no longer temporarily hides the accepted Wiki.
+- Wiki Patch Claim rows no longer clip long text or overflow horizontally.
+- Claim Graph nodes no longer jump when hovered.
+
 ## [0.5.1] - 2026-08-26
 
 ### Added

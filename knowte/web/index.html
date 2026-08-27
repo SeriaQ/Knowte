@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260823a" />
+    <link rel="stylesheet" href="styles.css?v=20260827o" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -30,7 +30,7 @@
           <button class="side-link" type="button" data-target="sources-panel"><span>Sources</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="evidence-panel"><span>Evidence</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="claims-panel"><span>Claims</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
-          <button class="side-link" type="button" data-target="views-panel"><span>Views</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
+          <button class="side-link" type="button" data-target="views-panel"><span>Wiki</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="create-panel">Projects</button>
           <button class="side-link" type="button" data-target="plans-panel">Plans</button>
           <button class="side-link" type="button" data-target="config-panel">Config</button>
@@ -357,7 +357,6 @@
                   <option value="related">related</option>
                 </select>
                 <button class="save-plan-btn stage-save-action" type="button" id="claims-relate" disabled>Create relation</button>
-                <button class="primary-action" type="button" id="claims-build-view" disabled>Send to Wiki</button>
               </div>
               <div class="claims-toolbar-end">
                 <button class="semantic-action is-audit" type="button" id="claims-audit-toggle">Audit Claims</button>
@@ -442,8 +441,8 @@
           <div class="panel views-workspace">
             <div class="knowledge-panel-head">
               <div>
-                <div class="knowledge-panel-label">Views</div>
-                <small>Maintain one global Wiki, explore its Claim graph, and generate purpose-specific Articles when needed.</small>
+                <div class="knowledge-panel-label">Wiki</div>
+                <small>All reviewed active Claims belong to this global encyclopedia; organize their structure or explore their graph.</small>
               </div>
             </div>
             <section class="wiki-workspace" id="wiki-workspace">
@@ -455,32 +454,34 @@
                 </div>
                 <div class="stage-toolbar-tools">
                   <label class="ai-action-model"><span>Model</span><select id="wiki-model-select" aria-label="Model for Wiki organization"></select></label>
-                  <button type="button" class="save-plan-btn stage-save-action" id="wiki-generate-reading">Generate Article</button>
                   <button type="button" class="primary-action" id="wiki-organize">Organize with AI</button>
+                  <button type="button" class="semantic-action is-edit" id="wiki-edit-structure">Edit structure</button>
                   <button type="button" class="review-queue-action" id="wiki-proposals-toggle" aria-expanded="false">Awaiting review · 0</button>
                 </div>
               </div>
               <small class="knowledge-status wiki-action-status" id="wiki-status" role="status"></small>
-              <section class="incoming-tray wiki-incoming" id="wiki-incoming-tray" hidden>
-                <div class="incoming-tray-head"><div><strong id="wiki-incoming-title">Incoming Claims · 0</strong><small>These Claims remain global and will be included in the next Wiki proposal.</small></div><button type="button" class="incoming-clear-action" id="wiki-incoming-clear">Clear</button></div>
-                <div class="incoming-items" id="wiki-incoming-items"></div>
+              <div class="wiki-health-row">
+                <div class="wiki-health" id="wiki-health"></div>
+                <div class="wiki-portability-actions">
+                  <button type="button" class="review-queue-action" id="wiki-imports-toggle" disabled>Awaiting imports · 0</button>
+                  <label class="semantic-action is-export is-import" for="wiki-import-file">⇧ Import Wiki</label>
+                  <input id="wiki-import-file" type="file" accept=".zip,application/zip" hidden />
+                  <button type="button" class="semantic-action is-export" id="wiki-export">⇩ Export Wiki</button>
+                </div>
+              </div>
+              <section class="wiki-import-review" id="wiki-import-review" hidden>
+                <div class="wiki-review-head"><div><strong>Wiki import awaiting review</strong><small>Accept once to merge the complete trusted Wiki package and all of its knowledge.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-import-close">× <span>Close</span></button></div>
+                <div id="wiki-import-list"></div>
               </section>
-              <div class="wiki-health" id="wiki-health"></div>
               <section class="wiki-main" id="wiki-main">
                 <nav class="wiki-tree" id="wiki-tree" aria-label="Wiki pages"></nav>
                 <article class="wiki-page" id="wiki-page"></article>
               </section>
               <section class="wiki-graph" id="wiki-graph" hidden></section>
               <section class="wiki-proposal-review" id="wiki-proposal-review" hidden>
-                <div class="wiki-review-head"><div><strong>Awaiting review</strong><small>Compare the proposed complete Wiki structure before applying it.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-proposal-close">× <span>Close</span></button></div>
+                <div class="wiki-review-head"><div><strong>Awaiting review</strong><small>Review and adjust the proposed structure before applying it.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-proposal-close">× <span>Close</span></button></div>
                 <div id="wiki-proposal-list"></div>
               </section>
-              <section class="wiki-reading-composer" id="wiki-reading-composer" hidden>
-                <div class="wiki-review-head"><div><strong>Generate an Article</strong><small>The model selects relevant Claims across the global Wiki for one concrete goal.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-reading-close">× <span>Close</span></button></div>
-                <textarea id="wiki-reading-goal" rows="3" placeholder="What should this Article help you understand, decide, or explain?"></textarea>
-                <div class="wiki-reading-actions"><small id="wiki-reading-scope"></small><label class="ai-action-model"><span>Model</span><select id="article-model-select" aria-label="Model for Article generation"></select></label><button type="button" class="primary-action" id="wiki-reading-run">Generate</button></div>
-              </section>
-              <article class="wiki-reading" id="wiki-reading" hidden></article>
             </section>
             <section class="view-detail legacy-views-compat" id="view-detail" hidden>
               <div class="view-detail-toolbar">
@@ -553,6 +554,17 @@
               <button type="submit" id="artifact-create">Create Project</button>
             </form>
             <div class="knowledge-status" id="artifact-status" role="status"></div>
+            <div class="project-portability">
+              <label class="semantic-action is-export is-import" for="project-import-file">⇧ Import Project</label>
+              <input id="project-import-file" type="file" accept=".zip,application/zip" hidden />
+              <small>Only Knowte Project packages can be reviewed here.</small>
+            </div>
+            <section class="wiki-reading-composer project-reading-composer" id="wiki-reading-composer" hidden>
+              <div class="wiki-review-head"><div><strong id="project-reading-title">Generate an Article</strong><small>The model works only from the active Project's Claims.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-reading-close">× <span>Close</span></button></div>
+              <textarea id="wiki-reading-goal" rows="3" placeholder="What should this Article help you understand, decide, or explain?"></textarea>
+              <div class="wiki-reading-actions"><small id="wiki-reading-scope"></small><label class="ai-action-model"><span>Model</span><select id="article-model-select" aria-label="Model for Article generation"></select></label><button type="button" class="primary-action" id="wiki-reading-run">Generate</button></div>
+            </section>
+            <article class="wiki-reading project-reading" id="wiki-reading" hidden></article>
             <div class="artifact-list" id="artifact-list"></div>
           </div>
         </section>
@@ -686,9 +698,10 @@
                         <option value="evidence">Evidence</option>
                         <option value="claim_proposal">Evidence · Claim proposal</option>
                         <option value="claims">Claims</option>
-                        <option value="wiki_maintenance">Views · Wiki maintenance</option>
-                        <option value="article_selection">Views · Article selection</option>
-                        <option value="article_writing">Views · Article writing</option>
+                        <option value="wiki_maintenance">Wiki · Organization</option>
+                        <option value="project_claim_recommendation">Projects · Claim recommendation</option>
+                        <option value="article_selection">Projects · Article selection</option>
+                        <option value="article_writing">Projects · Article writing</option>
                         <option value="views">Views</option>
                         <option value="artifact">Projects</option>
                       </select>
@@ -742,10 +755,18 @@
                   placeholder="http://127.0.0.1:8888/search"
                   aria-label="SearXNG base search URL"
                 />
+                <label for="searxng-proxy">Managed SearXNG proxy</label>
+                <input
+                  type="text"
+                  id="searxng-proxy"
+                  name="searxng-proxy"
+                  placeholder="Optional · http://host.docker.internal:7890"
+                  aria-label="Outgoing proxy for managed SearXNG"
+                />
                 <label class="config-check">
-                  <input type="checkbox" id="web-ignore-year-filter" /> Ignore year filter for Web Search
+                  <input type="checkbox" id="web-ignore-year-filter" checked /> Ignore year filter for Web Search
                 </label>
-                <small>A SearXNG service must be running at this URL. Managed setup prefers port 8888 and automatically chooses 8889–8898 if needed.</small>
+                <small>The proxy applies only to Knowte-managed SearXNG and restarts a running container when saved. Inside Docker, 127.0.0.1 refers to the container itself.</small>
                   </div>
                   <div class="managed-service" aria-labelledby="managed-searxng-title">
                 <div>
@@ -785,6 +806,8 @@
               </fieldset>
               <div class="config-actions">
                 <button class="config-save" type="button" id="save-config">Save</button>
+                <button class="config-save config-export" type="button" id="export-config">⇩ Export Config</button>
+                <label class="config-export-redact"><input type="checkbox" id="export-config-redact" checked /> Hide API keys and secrets</label>
                 <span class="config-status" id="config-status" role="status" aria-live="polite"></span>
               </div>
             </div>
@@ -845,10 +868,6 @@
             </div>
           </section>
           <section class="review-section review-actions" id="review-actions-section">
-            <label class="context-label" for="collect-artifact">Collection target</label>
-            <select id="collect-artifact">
-              <option value="">Sources only</option>
-            </select>
             <div class="context-action-row">
               <button class="context-primary-action" type="button" id="context-collect-selected">Add selected Sources</button>
             </div>
@@ -856,6 +875,8 @@
           </section>
           <section class="review-section" id="review-stage-actions" hidden>
             <span class="context-label">Next stage</span>
+            <label class="context-label" for="collect-artifact">Project target</label>
+            <select id="collect-artifact"><option value="">Choose a Project</option></select>
             <button class="context-primary-action" type="button" id="review-stage-advance" disabled>Continue</button>
             <small id="review-stage-status" role="status"></small>
           </section>
@@ -864,8 +885,7 @@
             <small id="evidence-selection-location">Select text in the Source reader.</small>
             <blockquote id="evidence-selection-quote" hidden></blockquote>
             <img id="evidence-snapshot-preview" alt="Selected Source region" hidden />
-            <label class="context-label" for="evidence-artifact">Attach to Project</label>
-            <select id="evidence-artifact"><option value="">Evidence only</option></select>
+            <select id="evidence-artifact" hidden><option value="">Evidence only</option></select>
             <button class="context-primary-action" type="button" id="create-evidence" disabled>Create Evidence</button>
             <div class="review-evidence-list" id="review-evidence-list"></div>
             <div class="review-section-head"><span class="context-label">Annotation</span><small id="annotation-target-label">Source</small></div>
@@ -937,12 +957,12 @@
     <section class="evidence-quick-editor" id="evidence-quick-editor" hidden>
       <div class="evidence-quick-head"><strong id="evidence-quick-title">Evidence</strong><small id="evidence-quick-kind"></small></div>
       <p id="evidence-quick-preview"></p>
-      <label>Destination<select id="evidence-quick-artifact"><option value="">Evidence only</option></select></label>
+      <select id="evidence-quick-artifact" hidden><option value="">Evidence only</option></select>
       <label>Tags<input id="evidence-quick-tags" placeholder="Comma-separated" /></label>
       <label>Annotation<textarea id="evidence-quick-annotation" rows="2" placeholder="Optional note, question, or warning"></textarea></label>
       <div class="evidence-quick-actions"><button type="button" id="evidence-quick-discard">Discard</button><button type="button" id="evidence-quick-save">Save</button></div>
       <small id="evidence-quick-status" role="status"></small>
     </section>
-    <script src="app.js?v=20260823b"></script>
+    <script src="app.js?v=20260827o"></script>
   </body>
 </html>

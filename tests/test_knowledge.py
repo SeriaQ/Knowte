@@ -22,8 +22,13 @@ from knowte.knowledge import (
     get_claim_audit,
     create_evidence,
     create_evidence_proposal,
+    create_project_claim_recommendations,
+    list_project_claim_recommendations,
+    accept_project_claim_recommendation,
+    accept_project_wiki_proposal,
     create_view,
     create_wiki_proposal,
+    create_manual_wiki_proposal,
     delete_view,
     delete_annotation,
     delete_evidence,
@@ -44,6 +49,7 @@ from knowte.knowledge import (
     set_entity_tags,
     store_capture,
     update_view,
+    update_wiki_proposal,
     accept_wiki_proposal,
     list_wiki_proposals,
     save_project_document,
@@ -52,6 +58,80 @@ from knowte.knowledge import (
 
 
 class KnowledgeStoreTests(unittest.TestCase):
+    def test_manual_wiki_patch_is_editable_and_rejects_duplicate_claim_placement(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            claim = create_claim(
+                {"statement": "A reviewed Claim.", "basis": "background",
+                 "intentionally_ungrounded": True}, database,
+            )
+            initial = create_wiki_proposal({"pages": [{
+                "key": "root", "title": "Root", "claim_ids": [claim["id"]],
+            }]}, "test", path=database)
+            accept_wiki_proposal(initial["id"], database)
+            draft = create_manual_wiki_proposal(database)
+            updated = update_wiki_proposal(draft["id"], {"pages": [
+                {"key": "root", "title": "Renamed", "claim_ids": []},
+                {"key": "child", "title": "Child", "parent_key": "root",
+                 "claim_ids": [claim["id"]]},
+            ]}, database)
+            self.assertEqual(updated["payload"]["pages"][0]["title"], "Renamed")
+            with self.assertRaisesRegex(ValueError, "only one Wiki Page"):
+                update_wiki_proposal(draft["id"], {"pages": [
+                    {"key": "root", "title": "Root", "claim_ids": [claim["id"]]},
+                    {"key": "other", "title": "Other", "claim_ids": [claim["id"]]},
+                ]}, database)
+
+    def test_project_wiki_patch_replaces_claim_list_with_durable_structure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            project = create_artifact(
+                {"title": "Qwen", "purpose": "Understand architecture evolution."}, database
+            )
+            claim = create_claim(
+                {"statement": "Qwen uses grouped-query attention.", "basis": "background"},
+                database,
+            )
+            from knowte.knowledge import link_project_knowledge, get_project
+            link_project_knowledge(project["id"], "claim", claim["id"], database)
+            proposal = create_wiki_proposal({
+                "summary": "One-section structure.",
+                "pages": [{
+                    "key": "architecture", "title": "Architecture",
+                    "parent_key": "", "summary": "Core model design.",
+                    "claim_ids": [claim["id"]],
+                }],
+            }, "test-v1", scope={"project_id": project["id"]}, path=database,
+               proposal_type="project_wiki_patch")
+
+            wiki = accept_project_wiki_proposal(proposal["id"], database)
+            self.assertEqual(wiki["artifact_id"], project["id"])
+            self.assertEqual(wiki["graph_state"]["pages"][0]["title"], "Architecture")
+            self.assertEqual(get_project(project["id"], database)["wiki"]["id"], wiki["id"])
+
+    def test_project_claim_recommendation_requires_review_before_linking(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            project = create_artifact(
+                {"title": "Qwen", "purpose": "Explain long-context optimization."}, database
+            )
+            claim = create_claim(
+                {"statement": "Qwen extends context using position scaling.", "basis": "background"},
+                database,
+            )
+            created = create_project_claim_recommendations(
+                project["id"], [{"claim_id": claim["id"], "rationale": "Core mechanism."}],
+                "test-v1", "test-model", path=database,
+            )
+            self.assertEqual(len(created), 1)
+            self.assertEqual(list_artifacts(database)[0]["claim_count"], 0)
+            queued = list_project_claim_recommendations(project["id"], database)
+            self.assertEqual(queued[0]["claim"]["id"], claim["id"])
+
+            accept_project_claim_recommendation(created[0]["id"], database)
+            self.assertEqual(list_artifacts(database)[0]["claim_count"], 1)
+            self.assertEqual(list_project_claim_recommendations(project["id"], database), [])
+
     def test_batch_tags_add_without_replacing_existing_evidence_tags(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"
@@ -664,7 +744,9 @@ class KnowledgeStoreTests(unittest.TestCase):
             self.assertEqual(first["id"], second["id"])
             self.assertEqual(second["title"], "Updated title")
             self.assertEqual(len(list_sources(database)), 1)
-            self.assertEqual(list_artifacts(database)[0]["source_count"], 1)
+            # Project membership is Claim-only; a legacy Source link does not
+            # make the Source part of the Project.
+            self.assertEqual(list_artifacts(database)[0]["source_count"], 0)
 
     def test_canonical_key_prefers_doi_then_arxiv_then_url(self):
         self.assertEqual(

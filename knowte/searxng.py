@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import secrets
 import shutil
 import socket
@@ -13,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Dict
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlparse, urlsplit, urlunsplit
 from urllib.request import ProxyHandler, build_opener
 
 MANAGED_DIR = Path.home() / ".knowte" / "searxng"
@@ -27,6 +28,10 @@ DEFAULT_PORT = 8888
 MAX_PORT = 8898
 SEARCH_URL = "http://127.0.0.1:8888/search"
 IMAGE_PULL_TIMEOUT = 10 * 60
+SEARXNG_IMAGES = (
+    "docker.io/searxng/searxng:latest",
+    "ghcr.io/searxng/searxng:latest",
+)
 CONTAINER_START_TIMEOUT = 2 * 60
 _MANAGER_LOCK = threading.RLock()
 _JOBS: Dict[str, Dict[str, object]] = {}
@@ -380,7 +385,31 @@ def _select_available_port() -> int:
     )
 
 
-def _write_managed_files(port: int) -> None:
+def _proxy_settings(proxy: str = "") -> str:
+    proxy = str(proxy or "").strip()
+    if not proxy:
+        return "\n# knowte-proxy-start\n# knowte-proxy-end\n"
+    parsed = urlparse(proxy)
+    if parsed.scheme not in {"http", "https", "socks5", "socks5h"} or not parsed.netloc:
+        raise SearxngManagerError(
+            "invalid_proxy", "SearXNG proxy must be an HTTP, HTTPS, SOCKS5, or SOCKS5H URL."
+        )
+    return (
+        "\n# knowte-proxy-start\n"
+        "outgoing:\n"
+        "  proxies:\n"
+        "    all://:\n"
+        f"      - {json.dumps(proxy)}\n"
+        "# knowte-proxy-end\n"
+    )
+
+
+def _write_managed_files(
+    port: int, image: str = SEARXNG_IMAGES[0], proxy: str | None = None,
+) -> None:
+    if proxy is None:
+        from .config import load_config
+        proxy = load_config().get("searxng_proxy", "")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     MANAGED_DIR.chmod(0o700)
     CONFIG_DIR.chmod(0o700)
@@ -394,14 +423,15 @@ def _write_managed_files(port: int) -> None:
             "    - json\n\n"
             "server:\n"
             "  limiter: false\n"
-            f'  secret_key: "{secret_key}"\n',
+            f'  secret_key: "{secret_key}"\n'
+            + _proxy_settings(proxy),
             encoding="utf-8",
         )
         SETTINGS_PATH.chmod(0o600)
     COMPOSE_PATH.write_text(
         "services:\n"
         "  searxng:\n"
-        "    image: docker.io/searxng/searxng:latest\n"
+        f"    image: {image}\n"
         f"    container_name: {CONTAINER_NAME}\n"
         "    restart: unless-stopped\n"
         "    labels:\n"
@@ -421,10 +451,55 @@ def _write_managed_files(port: int) -> None:
     )
     COMPOSE_PATH.chmod(0o600)
     METADATA_PATH.write_text(
-        json.dumps({"port": port, "url": _search_url(port)}),
+        json.dumps({"port": port, "url": _search_url(port), "image": image}),
         encoding="utf-8",
     )
     METADATA_PATH.chmod(0o600)
+
+
+def configure_searxng_proxy(proxy: str) -> bool:
+    """Update the managed instance settings. Return False for external instances."""
+    block = _proxy_settings(proxy)
+    try:
+        metadata = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+    except (OSError, TypeError, json.JSONDecodeError):
+        metadata = {}
+    if not metadata or not COMPOSE_PATH.exists():
+        return False
+    text = SETTINGS_PATH.read_text(encoding="utf-8") if SETTINGS_PATH.exists() else ""
+    pattern = re.compile(
+        r"\n?# knowte-proxy-start\n.*?# knowte-proxy-end\n?", re.DOTALL
+    )
+    text = pattern.sub("\n", text).rstrip() + block
+    SETTINGS_PATH.write_text(text, encoding="utf-8")
+    SETTINGS_PATH.chmod(0o600)
+    state = _docker_state()
+    if state.get("running"):
+        restarted = _run_docker(
+            ["compose", "-f", str(COMPOSE_PATH), "restart", "searxng"],
+            timeout=CONTAINER_START_TIMEOUT,
+        )
+        if restarted.returncode != 0:
+            raise SearxngManagerError(
+                "restart_failed", _friendly_docker_error(restarted) or "Could not restart SearXNG."
+            )
+    return True
+
+
+def _pull_searxng_image(port: int, progress=None) -> tuple[str, subprocess.CompletedProcess]:
+    last = None
+    for index, image in enumerate(SEARXNG_IMAGES):
+        _write_managed_files(port, image)
+        if progress and index:
+            progress("pulling", f"Previous image source failed; trying {image}")
+        last = _run_docker_streaming(
+            ["compose", "-f", str(COMPOSE_PATH), "pull", "searxng"],
+            timeout=IMAGE_PULL_TIMEOUT,
+            on_output=((lambda line: progress("pulling", line)) if progress else None),
+        )
+        if last.returncode == 0:
+            return image, last
+    return SEARXNG_IMAGES[-1], last
 
 
 def _cleanup_managed_files() -> None:
@@ -490,27 +565,21 @@ def setup_searxng(wait_seconds: float = 30.0, progress=None) -> Dict[str, object
     if existing is None and _is_healthy(SEARCH_URL):
         return get_searxng_status()
 
-    image_before_pull = _latest_image_id()
+    image_before_pull = _latest_image_id(SEARXNG_IMAGES[0])
     managed_dir_existed = MANAGED_DIR.exists()
     port = _managed_port() if existing is not None else _select_available_port()
     _write_managed_files(port)
     try:
         if progress:
             progress("pulling")
-        pull = _run_docker_streaming(
-            ["compose", "-f", str(COMPOSE_PATH), "pull", "searxng"],
-            timeout=IMAGE_PULL_TIMEOUT,
-            on_output=(
-                (lambda line: progress("pulling", line)) if progress else None
-            ),
-        )
+        selected_image, pull = _pull_searxng_image(port, progress)
         if pull.returncode != 0:
             raise SearxngManagerError(
                 "image_pull_failed",
                 (pull.stdout or pull.stderr).strip()
                 or "Docker could not download SearXNG.",
             )
-        image_after_pull = _latest_image_id()
+        image_after_pull = _latest_image_id(selected_image)
         if image_before_pull and image_before_pull == image_after_pull:
             image_pull_status = "already_cached"
         elif image_after_pull:
@@ -635,14 +704,14 @@ def _container_image_id() -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _latest_image_id() -> str:
+def _latest_image_id(image: str = SEARXNG_IMAGES[0]) -> str:
     result = _run_docker(
         [
             "image",
             "inspect",
             "--format",
             "{{.Id}}",
-            "docker.io/searxng/searxng:latest",
+            image,
         ],
         timeout=15,
     )
@@ -681,20 +750,16 @@ def update_searxng(wait_seconds: float = 30.0, progress=None) -> Dict[str, objec
     _require_managed_container()
     old_image_id = _container_image_id()
     rotation_configured = _container_log_rotation_configured()
-    _write_managed_files(_managed_port())
+    port = _managed_port()
     if progress:
         progress("pulling")
-    pull = _run_docker_streaming(
-        ["compose", "-f", str(COMPOSE_PATH), "pull", "searxng"],
-        timeout=IMAGE_PULL_TIMEOUT,
-        on_output=((lambda line: progress("pulling", line)) if progress else None),
-    )
+    selected_image, pull = _pull_searxng_image(port, progress)
     if pull.returncode != 0:
         raise SearxngManagerError(
             "update_failed",
             (pull.stdout or pull.stderr).strip() or "Could not update SearXNG.",
         )
-    new_image_id = _latest_image_id()
+    new_image_id = _latest_image_id(selected_image)
     image_unchanged = (
         bool(old_image_id) and bool(new_image_id) and old_image_id == new_image_id
     )

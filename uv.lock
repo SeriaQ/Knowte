@@ -4,7 +4,7 @@ requires-python = ">=3.9"
 
 [[package]]
 name = "knowte"
-version = "0.5.1"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "pypdf" },

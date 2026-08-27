@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Knowte Web Companion",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Read on the original web and send Sources and Evidence to local Knowte.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*"],

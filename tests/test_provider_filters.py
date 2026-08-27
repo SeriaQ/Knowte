@@ -210,6 +210,22 @@ class ProviderYearFilterTests(unittest.TestCase):
         self.assertEqual(strict, [])
         self.assertEqual([result["id"] for result in exempt], [undated_web_result.id])
 
+    def test_web_results_trust_searxng_relevance_instead_of_requiring_every_word(self):
+        result = Paper(
+            id="https://example.test/alphago",
+            title="AlphaGo combines reinforcement learning and tree search",
+            authors="Web", year=2016,
+            abstract="An overview of the system architecture.",
+            url="https://example.test/alphago", keywords=[], source="Web",
+        )
+        with patch("knowte.search.search_web", return_value=[result]):
+            selected = search_papers(
+                "How does AlphaGo combine reinforcement learning with tree search",
+                backends=["websearch"],
+                searxng_url="http://127.0.0.1:8888/search",
+            )
+        self.assertEqual([item["id"] for item in selected], [result.id])
+
     def test_arxiv_receives_year_range_and_capped_limit(self):
         with patch("knowte.providers.arxiv.urlopen", side_effect=OSError) as urlopen:
             search_arxiv("alpha", limit=300, year_from=2010, year_to=2018)

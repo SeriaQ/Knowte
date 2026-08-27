@@ -16,14 +16,24 @@ from knowte.knowledge import (
     create_claim,
     create_evidence,
     create_wiki_proposal,
+    link_project_knowledge,
     save_source,
     store_capture,
 )
-from knowte.server import _import_candidates, create_server
+from knowte.server import KnowteTCPServer, _import_candidates, create_server
 
 
 class SearchApiTests(unittest.TestCase):
-    def test_wiki_organization_requires_explicit_incoming_claims(self):
+    def test_client_disconnect_does_not_print_a_server_traceback(self):
+        server = object.__new__(KnowteTCPServer)
+        with patch("socketserver.ThreadingTCPServer.handle_error") as parent:
+            try:
+                raise ConnectionAbortedError("browser closed the local request")
+            except ConnectionAbortedError:
+                server.handle_error(None, ("127.0.0.1", 12345))
+        parent.assert_not_called()
+
+    def test_wiki_organization_reads_global_reviewed_claims(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config_path = temp_path / "config.yml"
@@ -32,16 +42,16 @@ class SearchApiTests(unittest.TestCase):
                 server,
                 "POST",
                 "/api/wiki/proposals/generate",
-                json.dumps({"claim_ids": []}),
+                json.dumps({}),
             )
 
         self.assertEqual(status, 400)
         self.assertEqual(
             payload["message"],
-            "Send at least one Claim to Wiki before organizing",
+            "The Wiki needs at least one active Claim to organize",
         )
 
-    def test_article_generation_selects_from_the_complete_global_wiki(self):
+    def test_article_generation_selects_from_the_project_claims(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config_path = temp_path / "config.yml"
@@ -55,11 +65,12 @@ class SearchApiTests(unittest.TestCase):
                 {"statement": "Qwen uses RMSNorm.", "basis": "background", "intentionally_ungrounded": True},
                 database_path,
             )
-            proposal = create_wiki_proposal({"pages": [
-                {"key": "architecture", "title": "Architecture", "parent_key": "", "claim_ids": [first["id"]]},
-                {"key": "normalization", "title": "Normalization", "parent_key": "architecture", "claim_ids": [second["id"]]},
-            ]}, "wiki-maintainer-v1", path=database_path)
-            accept_wiki_proposal(proposal["id"], database_path)
+            project = create_artifact({
+                "title": "Qwen architecture",
+                "purpose": "Explain how Qwen architecture evolved.",
+            }, database_path)
+            link_project_knowledge(project["id"], "claim", first["id"], database_path)
+            link_project_knowledge(project["id"], "claim", second["id"], database_path)
             client = MagicMock()
             article_result = {
                 "title": "Qwen architecture",
@@ -90,16 +101,19 @@ class SearchApiTests(unittest.TestCase):
             ), patch.object(usage, "USAGE_PATH", usage_path):
                 server = create_server("127.0.0.1", 0, config_path)
                 status, payload = self._request(
-                    server, "POST", "/api/wiki/articles/generate",
-                    json.dumps({"goal": "Explain Qwen architecture."}),
+                    server, "POST", "/api/project-articles/generate",
+                    json.dumps({
+                        "goal": "Explain Qwen architecture.",
+                        "project_id": project["id"],
+                    }),
                 )
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["article"]["capability_version"], "wiki-article-v1")
         selection_input = client.chat_json.call_args_list[0].args[1]
         article_input = client.chat_json.call_args_list[1].args[1]
-        self.assertIn("Architecture", selection_input)
-        self.assertIn("Normalization", selection_input)
+        self.assertIn(project["title"], selection_input)
+        self.assertIn(project["purpose"], selection_input)
         self.assertIn(first["statement"], selection_input)
         self.assertIn(second["statement"], selection_input)
         self.assertIn(first["id"], article_input)
@@ -330,7 +344,7 @@ class SearchApiTests(unittest.TestCase):
             artifact["id"],
         )
         self.assertEqual(list_status, 200)
-        self.assertEqual(artifact_list["artifacts"][0]["source_count"], 1)
+        self.assertEqual(artifact_list["artifacts"][0]["source_count"], 0)
 
     def test_source_workspace_capture_evidence_and_annotation_api(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -842,6 +856,7 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(payload["max_papers"], 100)
         self.assertEqual(payload["intelligent_max_results"], 20)
         self.assertEqual(payload["default_search_mode"], "keyword")
+        self.assertTrue(payload["web_ignore_year_filter"])
         self.assertFalse(payload["ai_enable_thinking"])
 
     def test_default_search_mode_is_saved_independently(self):
@@ -1071,7 +1086,8 @@ class SearchApiTests(unittest.TestCase):
             usage_path = temp_path / "usage.json"
             config_path.write_text(
                 "enabled_backends: arxiv,websearch\n"
-                "searxng_url: http://127.0.0.1:8888/search\n",
+                "searxng_url: http://127.0.0.1:8888/search\n"
+                "web_ignore_year_filter: false\n",
                 encoding="utf-8",
             )
             results = [

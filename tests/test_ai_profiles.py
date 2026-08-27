@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from knowte.config import (
     ai_profile_for_role,
     ai_role_assignments,
     load_config,
+    export_config,
     save_config,
     set_ai_model_profiles,
 )
@@ -15,6 +17,23 @@ from knowte.server import _map_document_quote
 
 
 class AIModelProfileTests(unittest.TestCase):
+    def test_config_export_can_redact_top_level_and_profile_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.yml"
+            save_config({
+                "semanticscholar_api_key": "paper-secret",
+                "ai_model_profiles": json.dumps([
+                    {"name": "Model", "api_key": "model-secret", "model": "m"}
+                ]),
+            }, path)
+            redacted = export_config(path, True).decode()
+            plain = export_config(path, False).decode()
+        self.assertNotIn("paper-secret", redacted)
+        self.assertNotIn("model-secret", redacted)
+        self.assertIn('\"api_key\": \"*\"', redacted)
+        self.assertIn("paper-secret", plain)
+        self.assertIn("model-secret", plain)
+
     def test_provider_model_and_endpoint_lock_advanced_capabilities(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.yml"

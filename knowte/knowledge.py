@@ -461,6 +461,27 @@ def _connect(path: Path) -> sqlite3.Connection:
             ON wiki_page_claims(claim_id);
             CREATE INDEX IF NOT EXISTS idx_project_documents_artifact
             ON project_documents(artifact_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS project_imports (
+                id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL UNIQUE REFERENCES artifacts(id) ON DELETE CASCADE,
+                filename TEXT NOT NULL DEFAULT '',
+                archive_path TEXT NOT NULL,
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'awaiting_review',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS wiki_imports (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL DEFAULT '',
+                archive_path TEXT NOT NULL,
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'awaiting_review',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         evidence_columns = {
@@ -867,6 +888,10 @@ def _artifact_row(row: sqlite3.Row) -> dict[str, Any]:
         "purpose": row["purpose"],
         "status": row["status"],
         "source_count": row["source_count"],
+        "evidence_count": row["evidence_count"],
+        "claim_count": row["claim_count"],
+        "document_count": row["document_count"],
+        "import_state": row["import_state"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -876,11 +901,25 @@ def list_artifacts(path: Path | None = None) -> list[dict[str, Any]]:
     with _connect(path or KNOWLEDGE_DB_PATH) as connection:
         rows = connection.execute(
             """
-            SELECT artifacts.*, COUNT(artifact_sources.source_id) AS source_count
+            SELECT artifacts.*,
+                   (SELECT COUNT(DISTINCT evidence.source_id)
+                    FROM artifact_claims
+                    JOIN evidence_claim_links AS links
+                      ON links.claim_id = artifact_claims.claim_id
+                    JOIN evidence ON evidence.id = links.evidence_id
+                    WHERE artifact_claims.artifact_id = artifacts.id) AS source_count,
+                   (SELECT COUNT(DISTINCT links.evidence_id)
+                    FROM artifact_claims
+                    JOIN evidence_claim_links AS links
+                      ON links.claim_id = artifact_claims.claim_id
+                    WHERE artifact_claims.artifact_id = artifacts.id) AS evidence_count,
+                   (SELECT COUNT(*) FROM artifact_claims
+                    WHERE artifact_id = artifacts.id) AS claim_count,
+                   (SELECT COUNT(*) FROM project_documents
+                    WHERE artifact_id = artifacts.id) AS document_count,
+                   COALESCE((SELECT status FROM project_imports
+                    WHERE artifact_id = artifacts.id), '') AS import_state
             FROM artifacts
-            LEFT JOIN artifact_sources
-              ON artifact_sources.artifact_id = artifacts.id
-            GROUP BY artifacts.id
             ORDER BY artifacts.updated_at DESC
             """
         ).fetchall()
@@ -921,9 +960,247 @@ def create_artifact(
         "purpose": purpose,
         "status": status,
         "source_count": 0,
+        "evidence_count": 0,
+        "claim_count": 0,
+        "document_count": 0,
+        "import_state": "",
         "created_at": now,
         "updated_at": now,
     }
+
+
+def get_project(project_id: str, path: Path | None = None) -> dict[str, Any]:
+    """Return explicit Claims plus their derived Evidence and Source provenance."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    projects = {item["id"]: item for item in list_artifacts(database_path)}
+    project = projects.get(str(project_id or "").strip())
+    if project is None:
+        raise ValueError("Project not found")
+    with _connect(database_path) as connection:
+        claim_ids = [row["claim_id"] for row in connection.execute(
+            "SELECT claim_id FROM artifact_claims WHERE artifact_id = ? ORDER BY added_at",
+            (project["id"],),
+        ).fetchall()]
+        evidence_ids = [row["evidence_id"] for row in connection.execute(
+            """SELECT DISTINCT links.evidence_id
+               FROM artifact_claims JOIN evidence_claim_links AS links
+                 ON links.claim_id = artifact_claims.claim_id
+               WHERE artifact_claims.artifact_id = ? ORDER BY links.evidence_id""",
+            (project["id"],),
+        ).fetchall()]
+        source_ids = [row["source_id"] for row in connection.execute(
+            """SELECT DISTINCT evidence.source_id
+               FROM artifact_claims JOIN evidence_claim_links AS links
+                 ON links.claim_id = artifact_claims.claim_id
+               JOIN evidence ON evidence.id = links.evidence_id
+               WHERE artifact_claims.artifact_id = ? ORDER BY evidence.source_id""",
+            (project["id"],),
+        ).fetchall()]
+    sources_by_id = {item["id"]: item for item in list_sources(database_path)}
+    evidence_by_id = {item["id"]: item for item in list_evidence(database_path)}
+    claims_by_id = {item["id"]: item for item in list_claims(database_path)}
+    project_wiki = next((
+        item for item in list_views(database_path)
+        if item.get("artifact_id") == project["id"] and item.get("view_type") == "wiki"
+    ), None)
+    return {
+        **project,
+        "sources": [sources_by_id[item] for item in source_ids if item in sources_by_id],
+        "evidence": [evidence_by_id[item] for item in evidence_ids if item in evidence_by_id],
+        "claims": [claims_by_id[item] for item in claim_ids if item in claims_by_id],
+        "wiki": project_wiki,
+        "wiki_proposals": list_project_wiki_proposals(project["id"], database_path),
+        "documents": list_project_documents(project["id"], database_path),
+        "import": get_project_import(project["id"], database_path),
+    }
+
+
+def stage_project_import(
+    project_id: str, filename: str, archive_path: Path,
+    summary: dict[str, Any], path: Path | None = None,
+) -> dict[str, Any]:
+    now, import_id = _now(), uuid4().hex
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        connection.execute(
+            "INSERT INTO project_imports "
+            "(id, artifact_id, filename, archive_path, summary_json, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'awaiting_review', ?, ?)",
+            (
+                import_id, project_id, _clean_text(filename, 300), str(archive_path),
+                json.dumps(summary, ensure_ascii=False), now, now,
+            ),
+        )
+    return {
+        "id": import_id, "project_id": project_id, "filename": filename,
+        "summary": summary, "status": "awaiting_review",
+        "created_at": now, "updated_at": now,
+    }
+
+
+def get_project_import(
+    project_id: str, path: Path | None = None,
+) -> dict[str, Any] | None:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        row = connection.execute(
+            "SELECT * FROM project_imports WHERE artifact_id = ?", (project_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    try:
+        item["summary"] = json.loads(item.pop("summary_json") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        item["summary"] = {}
+    item["project_id"] = item.pop("artifact_id")
+    return item
+
+
+def finish_project_import(
+    project_id: str, status: str, path: Path | None = None,
+) -> None:
+    if status not in {"imported", "discarded"}:
+        raise ValueError("unsupported Project import state")
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        cursor = connection.execute(
+            "UPDATE project_imports SET status = ?, updated_at = ? WHERE artifact_id = ?",
+            (status, _now(), project_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError("Project import was not found")
+        connection.execute(
+            "UPDATE artifacts SET status = ?, updated_at = ? WHERE id = ?",
+            ("researching" if status == "imported" else "archived", _now(), project_id),
+        )
+
+
+def stage_wiki_import(
+    filename: str, archive_path: Path, summary: dict[str, Any],
+    path: Path | None = None,
+) -> dict[str, Any]:
+    now, import_id = _now(), uuid4().hex
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        connection.execute(
+            "INSERT INTO wiki_imports "
+            "(id, filename, archive_path, summary_json, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'awaiting_review', ?, ?)",
+            (import_id, _clean_text(filename, 300), str(archive_path),
+             json.dumps(summary, ensure_ascii=False), now, now),
+        )
+    return {
+        "id": import_id, "filename": filename, "summary": summary,
+        "status": "awaiting_review", "created_at": now, "updated_at": now,
+    }
+
+
+def list_wiki_imports(path: Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            "SELECT * FROM wiki_imports WHERE status = 'awaiting_review' "
+            "ORDER BY updated_at DESC"
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["summary"] = json.loads(item.pop("summary_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            item["summary"] = {}
+        item.pop("archive_path", None)
+        items.append(item)
+    return items
+
+
+def get_wiki_import(import_id: str, path: Path | None = None) -> dict[str, Any] | None:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        row = connection.execute(
+            "SELECT * FROM wiki_imports WHERE id = ?", (import_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    try:
+        item["summary"] = json.loads(item.pop("summary_json") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        item["summary"] = {}
+    return item
+
+
+def finish_wiki_import(
+    import_id: str, status: str, path: Path | None = None,
+) -> None:
+    if status not in {"imported", "discarded"}:
+        raise ValueError("unsupported Wiki import state")
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        cursor = connection.execute(
+            "UPDATE wiki_imports SET status = ?, updated_at = ? WHERE id = ?",
+            (status, _now(), import_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError("Wiki import was not found")
+
+
+def merge_imported_wiki(
+    title: str, wiki: dict[str, Any], claim_map: dict[str, str],
+    path: Path | None = None,
+) -> int:
+    """Merge a reviewed portable Wiki beneath one root without replacing local pages."""
+    raw_pages = [item for item in (wiki.get("pages") or []) if isinstance(item, dict)]
+    if not raw_pages:
+        return 0
+    database_path = path or KNOWLEDGE_DB_PATH
+    now, root_id = _now(), uuid4().hex
+    page_ids = {str(page.get("id") or ""): uuid4().hex for page in raw_pages}
+    with _connect(database_path) as connection:
+        root_ordinal = connection.execute(
+            "SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM wiki_pages WHERE parent_id IS NULL"
+        ).fetchone()["value"]
+        connection.execute(
+            "INSERT INTO wiki_pages (id, title, parent_id, summary, ordinal, created_at, updated_at) "
+            "VALUES (?, ?, NULL, '', ?, ?, ?)",
+            (root_id, _clean_text(title, 200) or "Imported Wiki", root_ordinal, now, now),
+        )
+        for ordinal, page in enumerate(raw_pages):
+            old_id = str(page.get("id") or "")
+            parent_id = page_ids.get(str(page.get("parent_id") or ""), root_id)
+            connection.execute(
+                "INSERT INTO wiki_pages (id, title, parent_id, summary, ordinal, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (page_ids[old_id], _clean_text(page.get("title"), 200) or "Untitled",
+                 parent_id, _clean_text(page.get("summary"), 12000), ordinal, now, now),
+            )
+            mapped_claims = [
+                claim_map[item] for item in page.get("claim_ids") or [] if item in claim_map
+            ]
+            connection.executemany(
+                "INSERT OR IGNORE INTO wiki_page_claims "
+                "(page_id, claim_id, ordinal, added_at) VALUES (?, ?, ?, ?)",
+                [(page_ids[old_id], claim_id, index, now)
+                 for index, claim_id in enumerate(mapped_claims)],
+            )
+    return len(raw_pages) + 1
+
+
+def link_project_knowledge(
+    project_id: str, entity_type: str, entity_id: str,
+    path: Path | None = None,
+) -> None:
+    table_and_column = {
+        "source": ("artifact_sources", "source_id"),
+        "evidence": ("artifact_evidence", "evidence_id"),
+        "claim": ("artifact_claims", "claim_id"),
+    }.get(str(entity_type or "").strip().lower())
+    if table_and_column is None:
+        raise ValueError("unsupported Project knowledge type")
+    table, column = table_and_column
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        if connection.execute(
+            "SELECT id FROM artifacts WHERE id = ?", (project_id,),
+        ).fetchone() is None:
+            raise ValueError("Project not found")
+        connection.execute(
+            f"INSERT OR IGNORE INTO {table} (artifact_id, {column}, added_at) VALUES (?, ?, ?)",
+            (project_id, entity_id, _now()),
+        )
 
 
 def _source_row(
@@ -1447,6 +1724,73 @@ def create_evidence(
         "quote": quote,
         "locator": locator or segment["locator"],
     }
+
+
+def import_evidence(
+    source_id: str, payload: dict[str, Any], artifact_id: str = "",
+    image_data: str = "", path: Path | None = None,
+) -> dict[str, Any]:
+    """Create grounded Evidence from a reviewed portable package without replacing captures."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    quote = str(payload.get("quote") or "")
+    evidence_type = str(payload.get("evidence_type") or "text").strip().lower()
+    locator = _clean_text(payload.get("locator"), 300) or "Imported Evidence"
+    if evidence_type == "text" and not quote.strip():
+        raise ValueError("Imported text Evidence has no quote")
+    segment_text = quote if quote else f"Snapshot: {locator}"
+    now, capture_id, segment_id = _now(), uuid4().hex, uuid4().hex
+    with _connect(database_path) as connection:
+        if connection.execute(
+            "SELECT id FROM sources WHERE id = ?", (source_id,)
+        ).fetchone() is None:
+            raise ValueError("Imported Evidence Source was not found")
+        connection.execute(
+            "INSERT INTO source_captures "
+            "(id, source_id, url, media_type, sha256, raw_path, extraction_version, captured_at) "
+            "VALUES (?, ?, '', ?, ?, '', 1, ?)",
+            (
+                capture_id, source_id,
+                "image/png" if evidence_type == "snapshot" else "text/plain",
+                hashlib.sha256(segment_text.encode("utf-8")).hexdigest(), now,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO capture_segments "
+            "(id, capture_id, ordinal, locator, text, text_hash, block_type, metadata_json) "
+            "VALUES (?, ?, 1, ?, ?, ?, 'paragraph', '{}')",
+            (
+                segment_id, capture_id, locator, segment_text,
+                hashlib.sha256(segment_text.encode("utf-8")).hexdigest(),
+            ),
+        )
+    evidence_payload = {
+        "segment_id": segment_id,
+        "quote": quote,
+        "start_offset": 0,
+        "end_offset": len(quote),
+        "evidence_type": evidence_type,
+        "locator": locator,
+        "anchor": payload.get("anchor") if isinstance(payload.get("anchor"), dict) else {},
+    }
+    if artifact_id:
+        evidence_payload["artifact_id"] = artifact_id
+    if evidence_type == "snapshot":
+        evidence_payload["image_data"] = image_data
+    evidence = create_evidence(evidence_payload, database_path)
+    tags = payload.get("tags") or []
+    if isinstance(tags, list) and tags:
+        set_entity_tags(
+            "evidence", evidence["id"],
+            [item.get("name") if isinstance(item, dict) else item for item in tags],
+            database_path,
+        )
+    for annotation in payload.get("annotations") or []:
+        if isinstance(annotation, dict) and str(annotation.get("body") or "").strip():
+            create_annotation({
+                "target_type": "evidence", "target_id": evidence["id"],
+                "body": annotation["body"], "origin": "import",
+            }, database_path)
+    return evidence
 
 
 def get_capture_file(
@@ -2318,6 +2662,109 @@ def create_evidence_proposal(
             "created_at": now, "updated_at": now}
 
 
+def create_project_claim_recommendations(
+    project_id: str, recommendations: list[dict[str, Any]], capability_version: str,
+    model: str = "", scope: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> list[dict[str, Any]]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        if connection.execute(
+            "SELECT 1 FROM artifacts WHERE id = ?", (project_id,)
+        ).fetchone() is None:
+            raise ValueError("Project not found")
+        valid_claim_ids = {
+            row["id"] for row in connection.execute(
+                "SELECT id FROM claims WHERE lifecycle = 'active'"
+            ).fetchall()
+        }
+        linked_claim_ids = {
+            row["claim_id"] for row in connection.execute(
+                "SELECT claim_id FROM artifact_claims WHERE artifact_id = ?",
+                (project_id,),
+            ).fetchall()
+        }
+        now = _now()
+        created = []
+        for item in recommendations[:30]:
+            if not isinstance(item, dict):
+                continue
+            claim_id = _clean_text(item.get("claim_id"), 80)
+            if claim_id not in valid_claim_ids or claim_id in linked_claim_ids:
+                continue
+            payload = {
+                "project_id": project_id,
+                "claim_id": claim_id,
+                "rationale": _clean_text(item.get("rationale"), 2000),
+            }
+            proposal_id = uuid4().hex
+            connection.execute(
+                """INSERT INTO review_proposals
+                   (id, proposal_type, capability_version, model, scope_json,
+                    payload_json, created_at, updated_at)
+                   VALUES (?, 'project_claim', ?, ?, ?, ?, ?, ?)""",
+                (proposal_id, capability_version, _clean_text(model, 200),
+                 json.dumps(scope or {}, ensure_ascii=False),
+                 json.dumps(payload, ensure_ascii=False), now, now),
+            )
+            created.append({
+                "id": proposal_id, "proposal_type": "project_claim",
+                "status": "awaiting_review", "capability_version": capability_version,
+                "model": model, "scope": scope or {}, "payload": payload,
+                "created_at": now, "updated_at": now,
+            })
+    return created
+
+
+def list_project_claim_recommendations(
+    project_id: str, path: Path | None = None,
+) -> list[dict[str, Any]]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    claims_by_id = {item["id"]: item for item in list_claims(database_path)}
+    with _connect(database_path) as connection:
+        rows = connection.execute(
+            """SELECT * FROM review_proposals
+               WHERE proposal_type = 'project_claim' AND status = 'awaiting_review'
+               ORDER BY updated_at DESC"""
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["scope"] = json.loads(item.pop("scope_json") or "{}")
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if item["payload"].get("project_id") != project_id:
+            continue
+        claim = claims_by_id.get(item["payload"].get("claim_id"))
+        if claim:
+            item["claim"] = claim
+            result.append(item)
+    return result
+
+
+def accept_project_claim_recommendation(
+    proposal_id: str, path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            """SELECT payload_json FROM review_proposals WHERE id = ?
+               AND proposal_type = 'project_claim' AND status = 'awaiting_review'""",
+            (proposal_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError("Project Claim recommendation not found")
+    payload = json.loads(row["payload_json"])
+    link_project_knowledge(
+        str(payload.get("project_id") or ""), "claim",
+        str(payload.get("claim_id") or ""), database_path,
+    )
+    discard_claim_proposal(proposal_id, database_path)
+    return {"project_id": payload["project_id"], "claim_id": payload["claim_id"]}
+
+
 def list_evidence_proposals(path: Path | None = None) -> list[dict[str, Any]]:
     with _connect(path or KNOWLEDGE_DB_PATH) as connection:
         rows = connection.execute(
@@ -2928,22 +3375,17 @@ def get_wiki(path: Path | None = None) -> dict[str, Any]:
     }
 
 
-def create_wiki_proposal(
-    payload: dict[str, Any], capability_version: str, model: str = "",
-    scope: dict[str, Any] | None = None, path: Path | None = None,
+def _normalize_wiki_proposal_payload(
+    payload: dict[str, Any], valid_claim_ids: set[str],
 ) -> dict[str, Any]:
     raw_pages = payload.get("pages")
     if not isinstance(raw_pages, list) or not raw_pages:
         raise ValueError("Wiki proposal requires at least one Page")
     if len(raw_pages) > 200:
         raise ValueError("Wiki proposal has too many Pages")
-    database_path = path or KNOWLEDGE_DB_PATH
-    with _connect(database_path) as connection:
-        valid_claim_ids = {
-            row["id"] for row in connection.execute("SELECT id FROM claims").fetchall()
-        }
     pages = []
     keys: set[str] = set()
+    assigned_claim_ids: set[str] = set()
     for index, raw in enumerate(raw_pages):
         if not isinstance(raw, dict):
             raise ValueError("Each Wiki Page proposal must be an object")
@@ -2957,6 +3399,9 @@ def create_wiki_proposal(
         ))
         if any(claim_id not in valid_claim_ids for claim_id in claim_ids):
             raise ValueError("Wiki proposal references an unknown Claim")
+        if assigned_claim_ids.intersection(claim_ids):
+            raise ValueError("Each Claim can belong to only one Wiki Page")
+        assigned_claim_ids.update(claim_ids)
         pages.append({
             "key": key,
             "title": title,
@@ -2978,7 +3423,7 @@ def create_wiki_proposal(
                 raise ValueError("Wiki Page hierarchy contains a cycle")
             visited.add(cursor)
             cursor = parent_by_key.get(cursor, "")
-    proposal_payload = {
+    return {
         "summary": _clean_text(payload.get("summary"), 3000),
         "pages": pages,
         "gaps": [
@@ -2986,22 +3431,160 @@ def create_wiki_proposal(
             if _clean_text(item, 1000)
         ],
     }
+
+
+def create_wiki_proposal(
+    payload: dict[str, Any], capability_version: str, model: str = "",
+    scope: dict[str, Any] | None = None, path: Path | None = None,
+    proposal_type: str = "wiki_patch",
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        valid_claim_ids = {
+            row["id"] for row in connection.execute("SELECT id FROM claims").fetchall()
+        }
+    proposal_payload = _normalize_wiki_proposal_payload(payload, valid_claim_ids)
     now, proposal_id = _now(), uuid4().hex
     with _connect(database_path) as connection:
         connection.execute(
             "INSERT INTO review_proposals "
             "(id, proposal_type, capability_version, model, scope_json, payload_json, "
-            "created_at, updated_at) VALUES (?, 'wiki_patch', ?, ?, ?, ?, ?, ?)",
-            (proposal_id, capability_version, _clean_text(model, 200),
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (proposal_id, proposal_type, capability_version, _clean_text(model, 200),
              json.dumps(scope or {}, ensure_ascii=False),
              json.dumps(proposal_payload, ensure_ascii=False), now, now),
         )
     return {
-        "id": proposal_id, "proposal_type": "wiki_patch",
+        "id": proposal_id, "proposal_type": proposal_type,
         "status": "awaiting_review", "capability_version": capability_version,
         "model": model, "scope": scope or {}, "payload": proposal_payload,
         "created_at": now, "updated_at": now,
     }
+
+
+def create_manual_wiki_proposal(path: Path | None = None) -> dict[str, Any]:
+    """Copy the accepted Wiki into an editable, reviewable Patch."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    wiki = get_wiki(database_path)
+    active_claim_ids = {
+        claim["id"] for claim in wiki["claims"]
+        if claim.get("lifecycle") == "active"
+    }
+    if not wiki["pages"]:
+        raise ValueError("Organize the Wiki before editing its structure")
+    pages = []
+    assigned_claim_ids: set[str] = set()
+    for page in wiki["pages"]:
+        claim_ids = [
+            claim_id for claim_id in page.get("claim_ids", [])
+            if claim_id in active_claim_ids and claim_id not in assigned_claim_ids
+        ]
+        assigned_claim_ids.update(claim_ids)
+        pages.append({
+            "key": page["id"],
+            "title": page["title"],
+            "parent_key": page.get("parent_id") or "",
+            "summary": page.get("summary") or "",
+            "claim_ids": claim_ids,
+        })
+    return create_wiki_proposal(
+        {"summary": "Manual Wiki structure adjustment.", "pages": pages},
+        "manual-wiki-editor-v1", "",
+        {"origin": "manual", "claim_ids": sorted(active_claim_ids)}, database_path,
+    )
+
+
+def update_wiki_proposal(
+    proposal_id: str, payload: dict[str, Any], path: Path | None = None,
+) -> dict[str, Any]:
+    """Persist edits to an awaiting global Wiki Patch."""
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM review_proposals WHERE id = ? "
+            "AND proposal_type = 'wiki_patch' AND status = 'awaiting_review'",
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Wiki proposal not found")
+        valid_claim_ids = {
+            item["id"] for item in connection.execute("SELECT id FROM claims").fetchall()
+        }
+        normalized = _normalize_wiki_proposal_payload(payload, valid_claim_ids)
+        now = _now()
+        connection.execute(
+            "UPDATE review_proposals SET payload_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(normalized, ensure_ascii=False), now, proposal_id),
+        )
+        updated = connection.execute(
+            "SELECT * FROM review_proposals WHERE id = ?", (proposal_id,)
+        ).fetchone()
+    return _decode_review_proposal(updated)
+
+
+def list_project_wiki_proposals(
+    project_id: str, path: Path | None = None,
+) -> list[dict[str, Any]]:
+    with _connect(path or KNOWLEDGE_DB_PATH) as connection:
+        rows = connection.execute(
+            """SELECT * FROM review_proposals
+               WHERE proposal_type = 'project_wiki_patch'
+               AND status = 'awaiting_review' ORDER BY updated_at DESC"""
+        ).fetchall()
+    return [
+        item for item in (_decode_review_proposal(row) for row in rows)
+        if item.get("scope", {}).get("project_id") == project_id
+    ]
+
+
+def accept_project_wiki_proposal(
+    proposal_id: str, path: Path | None = None,
+) -> dict[str, Any]:
+    database_path = path or KNOWLEDGE_DB_PATH
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            """SELECT * FROM review_proposals WHERE id = ?
+               AND proposal_type = 'project_wiki_patch'
+               AND status = 'awaiting_review'""", (proposal_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError("Project Wiki proposal not found")
+    proposal = _decode_review_proposal(row)
+    project_id = str(proposal.get("scope", {}).get("project_id") or "")
+    project = get_project(project_id, database_path)
+    project_claim_ids = {claim["id"] for claim in project.get("claims", [])}
+    pages = proposal.get("payload", {}).get("pages", [])
+    claim_ids = list(dict.fromkeys(
+        claim_id for page in pages for claim_id in page.get("claim_ids", [])
+        if claim_id in project_claim_ids
+    ))
+    if not claim_ids:
+        raise ValueError("Project Wiki proposal contains no Project Claims")
+    blocks = []
+    for page in pages:
+        blocks.append({"block_type": "heading", "content": page["title"]})
+        if page.get("summary"):
+            blocks.append({"block_type": "paragraph", "content": page["summary"]})
+        blocks.extend(
+            {"block_type": "claim", "claim_id": claim_id}
+            for claim_id in page.get("claim_ids", []) if claim_id in project_claim_ids
+        )
+    existing = next((
+        item for item in list_views(database_path)
+        if item.get("artifact_id") == project_id and item.get("view_type") == "wiki"
+    ), None)
+    payload = {
+        "title": f"{project['title']} Wiki", "view_type": "wiki",
+        "purpose": project["purpose"], "artifact_id": project_id,
+        "claim_ids": claim_ids, "blocks": blocks,
+        "graph_state": {"pages": pages},
+    }
+    wiki = (
+        update_view(existing["id"], payload, database_path)
+        if existing else create_view(payload, database_path)
+    )
+    discard_claim_proposal(proposal_id, database_path)
+    return wiki
 
 
 def list_wiki_proposals(path: Path | None = None) -> list[dict[str, Any]]:
