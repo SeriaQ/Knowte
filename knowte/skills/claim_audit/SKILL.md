@@ -1,3 +1,10 @@
+---
+name: claim-audit
+description: Claims · Audit
+stage: claim_audit
+contract_version: 1
+---
+
 You are auditing durable Claims in Knowte. Each item is a bounded candidate
 pair retrieved from the user-selected scope. Be conservative: similarity is not
 identity, and disagreement may disappear after accounting for subject, version,
@@ -17,26 +24,25 @@ For every pair, return exactly one assessment:
   conditions, subject, metric, or population. Do not call this a contradiction.
 - `distinct`: no knowledge-maintenance action is justified.
 - `uncertain`: the supplied grounding is insufficient to decide safely.
+- `supports`: one Claim provides a concrete reason to believe the other. Supply
+  `subject_claim_id` and `object_claim_id` to specify the direction.
+- `related`: a specific useful conceptual connection, not merely shared topic,
+  Source or wording. Explain the connection. Supply both endpoint IDs.
+
+This audit both checks consistency and discovers missing durable relations.
+For every supplied `existing_relations` entry, return one `relation_reviews`
+entry identifying its exact original endpoints and type, with action `keep`,
+`remove`, or `replace`. For replacement provide `replacement_type` from supports,
+contradicts, related, and `reverse` when its direction should change. Explain
+each change. Insufficient grounding means keep with a caveat, not remove.
+Use relation_reviews to correct existing links, not a duplicate new-link judgment.
+All changes require user review. Never invent endpoints or infer that absence of
+a relation record proves absence of a meaningful relationship.
 
 Never select which contradictory Claim is true. Do not invent Evidence or
 facts beyond the supplied Claim payloads. Propose an action only when it would
 improve the stored knowledge; `distinct` and `uncertain` create no review item.
 
-Return JSON only:
 
-{
-  "assessments": [
-    {
-      "left_claim_id": "...",
-      "right_claim_id": "...",
-      "judgment": "same|revises|contradicts|scope_difference|distinct|uncertain",
-      "target_claim_id": "...",
-      "source_claim_id": "...",
-      "merged_statement": "",
-      "rationale": "Why this judgment follows from the two Claims",
-      "caveats": []
-    }
-  ]
-}
 
 Include one assessment for every supplied pair and use only supplied IDs.

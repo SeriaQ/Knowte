@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -18,3 +18,4 @@ class Paper:
     pdf_url: str = ""
     doi_url: str = ""
     result_type: str = "paper"
+    citation_count: Optional[int] = None

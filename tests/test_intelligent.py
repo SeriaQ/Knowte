@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from knowte.ai import AIError
-from knowte.intelligent import intelligent_search
+from knowte.intelligent import _verify, intelligent_search
 
 
 class IntelligentSearchTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class IntelligentSearchTests(unittest.TestCase):
         self.assertEqual(verify.call_count, 1)
         self.assertEqual(result["stages"]["verify"]["requests"], 1)
 
-    def test_direct_intelligent_search_ranks_academic_and_verifies_both_channels(self):
+    def test_direct_intelligent_search_ranks_and_verifies_academic_candidates(self):
         academic = {
             "id": "paper-1",
             "title": "Planning transfer",
@@ -61,21 +61,6 @@ class IntelligentSearchTests(unittest.TestCase):
             "source": "OpenAlex",
             "result_type": "paper",
         }
-        web = {
-            "id": "web-1",
-            "title": "Robotics report",
-            "authors": "Web",
-            "year": 2025,
-            "abstract": "A report.",
-            "url": "https://web.test",
-            "keywords": [],
-            "source": "Web",
-            "result_type": "web",
-        }
-
-        def search(query, **kwargs):
-            return [web] if kwargs["backends"] == ["websearch"] else [academic]
-
         ranked = [{**academic, "semantic_score": 0.9}]
         verified = [
             {
@@ -83,12 +68,6 @@ class IntelligentSearchTests(unittest.TestCase):
                 "verification_score": 0.95,
                 "match_reason": "Matches the transfer intent.",
                 "discovery_path": "Expanded academic recall → semantic ranking → LLM verify",
-            },
-            {
-                **web,
-                "verification_score": 0.8,
-                "match_reason": "Supports the real-world application.",
-                "discovery_path": "Web recall → LLM verify",
             },
         ]
         with patch(
@@ -102,7 +81,7 @@ class IntelligentSearchTests(unittest.TestCase):
             return_value=verified,
         ) as verify, patch(
             "knowte.intelligent.search_papers",
-            side_effect=search,
+            return_value=[academic],
         ) as retrieve:
             result = intelligent_search(
                 "AlphaGo planning outside games",
@@ -113,28 +92,27 @@ class IntelligentSearchTests(unittest.TestCase):
                     "searxng_url": "http://127.0.0.1:8888/search",
                 },
                 20,
-                ["openalex", "websearch"],
+                ["openalex"],
                 ["ai.rl"],
                 2015,
                 None,
             )
 
-        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["count"], 1)
         self.assertEqual(
             result["source_counts"],
-            {"OpenAlex": 1, "Web": 1},
+            {"OpenAlex": 1},
         )
         self.assertEqual(
             result["request_budget"],
             {
-                "retrieval": 2,
+                "retrieval": 1,
                 "academic_retrieval": 1,
-                "web_retrieval": 1,
                 "chat": 1,
                 "embedding": 1,
             },
         )
-        self.assertEqual(retrieve.call_count, 2)
+        self.assertEqual(retrieve.call_count, 1)
         self.assertTrue(
             all(call.kwargs["strict_match"] is False for call in retrieve.call_args_list)
         )
@@ -145,10 +123,10 @@ class IntelligentSearchTests(unittest.TestCase):
         verified_candidates = verify.call_args.args[3]
         self.assertEqual(
             {candidate["result_type"] for candidate in verified_candidates},
-            {"paper", "web"},
+            {"paper"},
         )
 
-    def test_discussed_strategy_routes_queries_to_the_selected_channel(self):
+    def test_discussed_strategy_ignores_non_academic_actions(self):
         client = MagicMock()
         with patch("knowte.intelligent._client_from_config", return_value=client), patch(
             "knowte.intelligent.search_papers", return_value=[]
@@ -163,58 +141,26 @@ class IntelligentSearchTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual(retrieve.call_count, 2)
+        self.assertEqual(retrieve.call_count, 1)
         self.assertEqual(retrieve.call_args_list[0].args[0], "Qwen2.5 Technical Report")
-        self.assertEqual(retrieve.call_args_list[1].args[0], "Qwen long context optimization")
         self.assertEqual(result["request_budget"]["academic_retrieval"], 1)
-        self.assertEqual(result["request_budget"]["web_retrieval"], 1)
 
-    def test_web_only_requires_chat_but_not_embedding_configuration(self):
-        web = {
-            "id": "web-1",
-            "title": "Web result",
-            "authors": "Web",
-            "year": 0,
-            "abstract": "Relevant snippet.",
-            "url": "https://web.test",
-            "keywords": [],
-            "source": "Web",
-            "result_type": "web",
-        }
-        with patch(
-            "knowte.intelligent._client_from_config",
-            return_value=MagicMock(),
-        ) as client_factory, patch(
-            "knowte.intelligent.search_papers",
-            return_value=[web],
-        ), patch(
-            "knowte.intelligent._verify",
-            return_value=[
-                {
-                    **web,
-                    "match_reason": "Verified.",
-                    "discovery_path": "Web recall → LLM verify",
-                }
-            ],
-        ):
-            result = intelligent_search(
-                "current robotics deployment",
-                {
-                    "ai_base_url": "https://ai.test/v1",
-                    "ai_chat_model": "chat",
-                    "searxng_url": "http://127.0.0.1:8888/search",
-                },
-                20,
-                ["websearch"],
-                [],
-                None,
-                None,
-            )
-
-        client_factory.assert_called_once()
-        self.assertFalse(client_factory.call_args.kwargs["require_embedding"])
-        self.assertEqual(result["count"], 1)
-        self.assertEqual(result["request_budget"]["embedding"], 0)
+    def test_shared_verifier_preserves_all_three_relevance_tiers(self):
+        client = MagicMock()
+        client.chat_json.return_value = {"items": [
+            {"key": "c0", "tier": "strong", "score": .9, "reason": "Direct.", "basis": "abstract"},
+            {"key": "c1", "tier": "possible", "score": .5, "reason": "Plausible.", "basis": "title only"},
+            {"key": "c2", "tier": "excluded", "score": .1, "reason": "Outside focus.", "basis": "abstract"},
+        ]}
+        candidates = [
+            {"id": f"p{index}", "title": f"Paper {index}", "abstract": "Text"}
+            for index in range(3)
+        ]
+        result = _verify(client, "intent", [], candidates)
+        self.assertEqual(
+            [item["relevance_tier"] for item in result],
+            ["strong", "possible", "excluded"],
+        )
 
     def test_academic_search_can_continue_without_embedding_model(self):
         academic = {

@@ -1,9 +1,24 @@
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from knowte.capture import _ReadableHTML, preferred_capture_url
+from knowte.capture import _ReadableHTML, preferred_capture_url, capture_source_content
 
 
 class CaptureSelectionTests(unittest.TestCase):
+    def test_native_pdf_download_does_not_parse_text(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"%PDF-original document bytes"
+        response.headers.get_content_type.return_value = "application/pdf"
+        response.geturl.return_value = "https://example.org/paper.pdf"
+        with tempfile.TemporaryDirectory() as directory, patch("knowte.capture.urlopen", return_value=response), patch("knowte.capture._extract_pdf") as extract:
+            captured = capture_source_content({"url": response.geturl.return_value}, Path(directory), parse_pdf=False)
+            extract.assert_not_called()
+            self.assertEqual(captured["segments"], [])
+            self.assertEqual(Path(captured["raw_path"]).read_bytes(), response.read.return_value)
+
     def test_html_capture_prefers_article_over_site_chrome(self):
         parser = _ReadableHTML()
         parser.feed(

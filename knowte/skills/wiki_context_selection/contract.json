@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "page_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 5, "uniqueItems": true}
+  },
+  "required": ["page_ids"],
+  "additionalProperties": false
+}

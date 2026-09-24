@@ -113,9 +113,12 @@ def _merge_academic_links(
     pools: Dict[str, List[Paper]], academic_sources: List[str]
 ) -> Dict[str, List[Paper]]:
     links: Dict[str, Dict[str, str]] = {}
+    citations: Dict[str, int] = {}
     for source in academic_sources:
         for paper in pools.get(source, []):
             key = _paper_key(paper)
+            if paper.citation_count is not None:
+                citations[key] = max(citations.get(key, 0), paper.citation_count)
             merged = links.setdefault(
                 key, {"paper_url": "", "pdf_url": "", "doi_url": ""}
             )
@@ -135,6 +138,7 @@ def _merge_academic_links(
                     paper_url=paper_url,
                     pdf_url=merged["pdf_url"] or paper.pdf_url,
                     doi_url=merged["doi_url"] or paper.doi_url,
+                    citation_count=citations.get(_paper_key(paper)),
                 )
             )
     return merged_pools
@@ -456,6 +460,7 @@ def search_papers(
             "result_type": paper.result_type,
             "keywords": paper.keywords,
             "source": paper.source,
+            "citation_count": paper.citation_count,
         }
         for paper in selected
     ]

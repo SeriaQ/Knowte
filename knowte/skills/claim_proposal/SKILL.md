@@ -1,6 +1,13 @@
+---
+name: claim-proposal
+description: Evidence · Propose Claims
+stage: claim_proposal
+contract_version: 1
+---
+
 # Claim Change Proposal Capability
 
-Capability ID: `claim-proposal-v3`
+Capability ID: `claim-proposal-v4`
 
 Turn the user's selected Evidence into the smallest useful set of reviewable
 changes to durable Claims. This is knowledge distillation, not passage
@@ -58,9 +65,16 @@ Existing Claims:
   scope, strength, conditions, or time range.
 - Source count is context, not a relation. Several excerpts from one Source can
   compose a conclusion but are not independent corroboration.
-- Propose a Claim–Claim relation only between exact supplied existing Claim
-  identifiers and only when that durable relation is materially useful.
-  `related` is not a fallback for mere topical similarity.
+- Give each new Claim a unique `temp_id` such as `new:1`. Relation endpoints
+  may use these temporary IDs or exact supplied existing Claim IDs. Consider
+  new–new and new–existing pairs; consider existing–existing pairs only when
+  this run's Evidence adds a materially new judgment. Do not scan old knowledge
+  incidentally. Relations are independent review drafts, not automatically accepted.
+- `supports` is directional: the subject provides a reason to believe the object;
+  `contradicts` requires matching truth conditions; `related` requires a specific
+  useful conceptual connection. Explain that connection in the rationale.
+  Shared topic, Source, or wording alone does not justify a relation. Do not fill
+  a quota. Never use an unknown or discarded candidate ID.
 
 Quality and safety:
 
@@ -76,51 +90,3 @@ Quality and safety:
 - `skipped` is a transient explanation, not a knowledge object. Use it when
   material is irrelevant to the Focus, duplicative within the run, too weak,
   or better suited to a View.
-
-Return JSON only with this shape:
-
-```json
-{
-  "summary": "What this proposal set changes and why",
-  "claims": [
-    {
-      "statement": "An atomic proposition",
-      "basis": "reported",
-      "evidence": [{
-        "evidence_id": "exact-selected-id",
-        "stance": "supports",
-        "rationale": "This passage directly states the proposition."
-      }],
-      "tags": ["optional", "free-form"],
-      "rationale": "Why this is durable knowledge rather than a summary line",
-      "caveats": []
-    }
-  ],
-  "existing_claim_updates": [
-    {
-      "claim_id": "exact-existing-claim-id",
-      "evidence": [{
-        "evidence_id": "exact-selected-id",
-        "stance": "supports",
-        "rationale": "How this Evidence affects the existing Claim."
-      }],
-      "rationale": "Why updating the existing Claim avoids a duplicate",
-      "caveats": []
-    }
-  ],
-  "claim_relations": [
-    {
-      "subject_claim_id": "exact-existing-claim-id",
-      "object_claim_id": "another-exact-existing-claim-id",
-      "relation_type": "supports",
-      "rationale": "Why the directed relationship is useful"
-    }
-  ],
-  "skipped": [
-    {
-      "evidence_ids": ["exact-selected-id"],
-      "reason": "Why no durable change is proposed for this material"
-    }
-  ]
-}
-```

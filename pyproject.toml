@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.6.0"
-description = "Local-first knowledge workspace for discovering sources, grounding claims in evidence, and organizing reusable knowledge with AI."
+version = "0.6.1"
+description = "Local-first, AI-assisted knowledge workspace for turning sources into reviewed evidence, connected claims, and reusable wikis."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
   "pypdf>=6.0,<7",
+  "Pillow>=10,<12",
 ]
 license = "MIT"
 license-files = ["LICENSE"]
@@ -40,12 +41,18 @@ exclude = ["tests", "tests.*", "browser-extension", "browser-extension.*"]
 [tool.setuptools.package-data]
 knowte = [
   "prompts/*.md",
+  "skills/*.md",
+  "skills/*/SKILL.md",
+  "skills/*/contract.json",
+  "skills/*/examples/*.md",
   "web/*.html",
   "web/*.css",
   "web/*.js",
   "web/*.png",
   "web/vendor/pdfjs/*.mjs",
   "web/vendor/pdfjs/LICENSE",
+  "web/vendor/katex/*.js",
+  "web/vendor/katex/LICENSE",
   "web/vendor/pdfjs/cmaps/*",
   "web/vendor/pdfjs/standard_fonts/*",
 ]

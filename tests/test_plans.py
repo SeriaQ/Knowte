@@ -7,6 +7,16 @@ from knowte.plans import create_plan, delete_plan, list_plans, update_plan
 
 
 class PlanStorageTests(unittest.TestCase):
+    def test_both_legacy_modes_keep_discussed_queries_and_review_behavior(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "plans.json"
+            for mode in ("keyword", "intelligent"):
+                plan = create_plan({"query": "Learn LLMs", "mode": mode,
+                    "search_actions": [{"query": "attention is all you need", "target": "academic"}]}, path)
+                updated = update_plan(plan["id"], {"name": "Renamed"}, path)
+                self.assertEqual(updated["mode"], mode)
+                self.assertEqual(updated["search_actions"][0]["query"], "attention is all you need")
+
     def test_plan_round_trip_keeps_behavior_but_not_secrets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "plans.json"

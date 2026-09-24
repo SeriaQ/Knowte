@@ -21,7 +21,7 @@ def _fetch_semanticscholar(
     params = {
         "query": query,
         "limit": min(max(limit, 1), 100),
-        "fields": "title,authors,year,abstract,externalIds,url,fieldsOfStudy,openAccessPdf",
+        "fields": "title,authors,year,abstract,externalIds,url,fieldsOfStudy,openAccessPdf,citationCount",
     }
     if fields:
         params["fieldsOfStudy"] = ",".join(fields)
@@ -118,6 +118,7 @@ def search_semanticscholar(
                 url=url,
                 keywords=fields_list,
                 source="Semantic Scholar",
+                citation_count=item.get("citationCount"),
                 paper_url=url,
                 pdf_url=pdf_url,
                 doi_url=doi_url,

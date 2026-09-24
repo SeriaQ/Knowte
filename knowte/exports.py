@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from io import BytesIO
 import json
+import re
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -11,6 +12,7 @@ from .knowledge import (
     get_project,
     get_snapshot_file,
     get_source,
+    get_capture_file,
     get_wiki,
     list_claims,
     list_evidence,
@@ -97,11 +99,14 @@ def _wiki_markdown(
     for page in pages:
         lines.extend([f"{'#' * (depth(page) + 2)} {page.get('title') or 'Untitled'}", ""])
         if page.get("summary"):
-            lines.extend([str(page["summary"]), ""])
+            summary = re.sub(r"\[\[claim:([^|\]\s]+)\|([^\]\n]+)\]\]",
+                             lambda match: f"[{match[2]}](#claim-{match[1]})", str(page["summary"]))
+            lines.extend([summary, ""])
         for claim_id in page.get("claim_ids", []):
             claim = claims.get(claim_id)
             if not claim:
                 continue
+            lines.append(f'<a id="claim-{claim_id}"></a>')
             lines.append(f"- {claim.get('statement', '')}")
             for link in claim.get("evidence", []):
                 item = evidence.get(link.get("evidence_id", ""), {})
@@ -165,6 +170,8 @@ def build_knowledge_export(
             raise ValueError("Choose one Project to export")
         project = get_project(requested[0], database_path)
         claim_ids = [claim["id"] for claim in project.get("claims", [])]
+    if any(all_claims.get(claim_id, {}).get("needs_review") for claim_id in claim_ids):
+        raise ValueError("Review Evidence-changed Claims before exporting this knowledge as reviewed")
     evidence_ids = list(dict.fromkeys(
         link.get("evidence_id", "")
         for claim_id in claim_ids for link in all_claims.get(claim_id, {}).get("evidence", [])
@@ -217,6 +224,7 @@ def build_knowledge_export(
         project_payload["evidence_ids"] = evidence_ids
         project_payload["source_ids"] = list(sources)
         project_payload["documents"] = project.get("documents", [])
+        project_payload["wiki"] = project.get("wiki")
     exported_at = _now()
     manifest = {
         "application": "Knowte",
@@ -251,6 +259,11 @@ def build_knowledge_export(
         archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
         archive.writestr("data.json", json.dumps(data, ensure_ascii=False, indent=2) + "\n")
         archive.writestr("content.md", markdown)
+        for source in sources.values():
+            if source.get("document_hash"):
+                original, _, _ = get_capture_file(source["id"], content_dir, database_path)
+                suffix = Path(source["document_filename"]).suffix.lower()
+                archive.write(original, f"assets/source-{source['id']}{suffix}")
         for item in evidence:
             if not item.get("has_snapshot"):
                 continue

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260827o" />
+    <link rel="stylesheet" href="styles.css?v=20260924relationgraph" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -24,6 +24,7 @@
             <img src="knowte_icon.png" alt="" aria-hidden="true" />
           </div>
           <div class="side-title">Knowte</div>
+          <small id="library-badge" hidden></small>
         </div>
         <nav class="side-nav">
           <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
@@ -46,19 +47,16 @@
             <div class="search-mode-bar">
               <div class="search-mode-switch" role="group" aria-label="Search mode">
                 <div class="search-mode-choice">
-                  <button type="button" class="search-mode-option is-active" data-search-mode="keyword" aria-pressed="true">Keyword</button>
-                  <button type="button" class="search-mode-default" data-default-search-mode="keyword" aria-label="Set Keyword as the default search mode" aria-pressed="true" title="Default search mode">★</button>
-                </div>
-                <div class="search-mode-choice">
-                  <button type="button" class="search-mode-option" data-search-mode="smart" aria-pressed="false">Intelligent</button>
-                  <button type="button" class="search-mode-default" data-default-search-mode="intelligent" aria-label="Set Intelligent as the default search mode" aria-pressed="false" title="Set as default">☆</button>
+                  <button type="button" class="search-mode-option is-active" data-search-mode="search" aria-pressed="true">Search</button>
+                  <button type="button" class="search-mode-default" data-default-search-mode="search" aria-label="Set Search as the default search mode" aria-pressed="true" title="Default search mode">★</button>
                 </div>
                 <div class="search-mode-choice">
                   <button type="button" class="search-mode-option" data-search-mode="import" aria-pressed="false">Import</button>
                   <button type="button" class="search-mode-default" data-default-search-mode="import" aria-label="Set Import as the default search mode" aria-pressed="false" title="Set as default">☆</button>
                 </div>
               </div>
-              <small id="search-mode-hint">Search providers directly with your keywords.</small>
+              <label id="search-ai-review-control"><input type="checkbox" id="search-ai-review" /> AI Review <small>Semantic ranking and LLM review · uses model API</small></label>
+              <small id="search-mode-hint">Search academic sources directly, or discuss queries first.</small>
             </div>
             <form id="search-form">
               <input
@@ -73,12 +71,12 @@
                   <button type="button" class="save-plan-btn" id="discuss-search" hidden>Discuss</button>
                   <button type="button" class="save-plan-btn" id="save-plan">Save Plan</button>
                 </div>
-                <label class="ai-action-model" id="search-model-control" hidden><span>Model</span><select id="search-model-select" aria-label="Model for Intelligent Search and discussion"></select></label>
+                <label class="ai-action-model" id="search-model-control"><span>Model</span><select id="search-model-select" aria-label="Model for AI Review and Discuss"></select></label>
               </div>
             </form>
             <section class="search-strategy" id="search-strategy" hidden aria-label="Search strategy">
               <div class="search-strategy-head">
-                <div><strong>Search strategy</strong><small>Rank editable candidates; only the Top 5 run. Filters apply to every action.</small></div>
+                <div><strong>Search strategy</strong><small>Edit and rank academic queries; only the Top 5 run. Filters apply to every query.</small></div>
                 <button type="button" id="search-strategy-add">+ Add a new query</button>
               </div>
               <div id="search-strategy-list"></div>
@@ -98,17 +96,27 @@
             <section class="search-import" id="search-import" hidden aria-label="Import third-party results">
               <div class="search-import-head">
                 <div><strong>Import third-party results</strong><small>Paste links for a quick import, or structured output from an external LLM.</small></div>
-                <button type="button" id="copy-import-prompt">Copy import prompt</button>
+                <button type="button" id="copy-import-prompt">Copy suggested prompt</button>
               </div>
               <details class="import-prompt-preview"><summary>Preview prompt</summary><pre id="import-prompt-preview"></pre></details>
               <label for="import-content">URLs, DOI/arXiv IDs, or structured JSON</label>
               <textarea id="import-content" rows="9" placeholder="One URL, DOI, or arXiv ID per line — or paste the JSON returned by an external LLM."></textarea>
               <div class="search-import-actions"><small id="import-status" role="status"></small><button type="button" id="parse-import">Parse results</button></div>
+              <section class="document-import" aria-label="Upload documents">
+                <strong>Upload documents</strong>
+                <small>PDF, Markdown, TXT, DOCX · up to 20 MB each. Files stay in this library; model requests send content only when you ask.</small>
+                <label id="document-drop-zone" for="document-files">Drop documents here or choose files
+                  <input id="document-files" type="file" multiple accept=".pdf,.md,.markdown,.txt,.docx" />
+                </label>
+                <small>PDF keeps its layout; scanned pages support region capture. DOCX uses extracted text, not Word layout. Text files must use UTF-8 or UTF-16.</small>
+                <div id="document-upload-list"></div>
+                <div class="search-import-actions"><small id="document-upload-status" role="status"></small><button id="document-upload" type="button" disabled>Import documents</button></div>
+              </section>
             </section>
             <div class="intelligent-progress" id="intelligent-progress" hidden>
               <div class="intelligent-progress-head">
                 <div>Intelligent discovery</div>
-                <small>Uses the OpenAI-compatible connection configured in Config.</small>
+                <small>Uses the selected model profile configured in Config.</small>
               </div>
               <div class="intelligent-channels">
                 <div class="intelligent-channel">
@@ -119,7 +127,7 @@
                     <span data-stage="verify">LLM verify</span>
                   </div>
                 </div>
-                <div class="intelligent-channel">
+                <div class="intelligent-channel" hidden>
                   <strong>Web</strong>
                   <div class="intelligent-stages" id="web-stages">
                     <span data-stage="recall">Recall</span>
@@ -182,7 +190,7 @@
                   <strong><span id="usage-day">0</span><small>/ 5000</small></strong>
                 </div>
               </div>
-              <div class="usage-group usage-group-web">
+              <div class="usage-group usage-group-web" hidden>
                 <div class="usage-head">
                   <span class="usage-signal" aria-hidden="true"></span>
                   <div>
@@ -234,6 +242,13 @@
                 <button class="stop-btn" id="stop-search" type="button" aria-label="Stop searching" disabled>Stop</button>
               </div>
               <label class="master-select"><input type="checkbox" id="results-select-all" /> Select all</label>
+              <label class="results-sort">Sort
+                <select id="results-sort" aria-label="Sort search results" title="Sort all loaded results. Missing dates or citation counts appear last; relevance uses model scores when available, otherwise retrieval order.">
+                  <option value="relevance">Relevance</option>
+                  <option value="recent">Recent</option>
+                  <option value="citations">Citations</option>
+                </select>
+              </label>
               <div class="pager" id="results-pager" hidden>
                 <button type="button" id="page-prev-top">Prev</button>
                 <select id="page-select-top" aria-label="Top page selector"></select>
@@ -256,7 +271,16 @@
             <div class="library-toolbar">
               <div class="library-toolbar-actions">
                 <button type="button" id="library-abstract-toggle" aria-pressed="false">Hide abstracts</button>
+                <button type="button" class="semantic-action" id="library-batch-tag" disabled>+ Tag</button>
+                <button type="button" class="semantic-action is-destructive" id="library-batch-delete" disabled>Delete</button>
                 <label class="master-select library-master-select"><input type="checkbox" id="library-select-all" /> Select all</label>
+              </div>
+            </div>
+            <div class="entity-filter-row" id="library-tag-filters">
+              <span class="entity-filter-title">Tag Filter</span>
+              <div class="entity-filter-fields">
+              <div class="tag-filter-control tag-multiselect" id="library-tag-filter"><span>Any of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
+              <div class="tag-filter-control tag-multiselect" id="library-tag-all-filter"><span>All of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
               </div>
             </div>
             <div class="source-evidence-proposer">
@@ -265,9 +289,37 @@
                 <button type="button" class="primary-action" id="propose-evidence" disabled>Propose Evidence via LLM</button>
                 <label class="ai-action-model"><span>Model</span><select id="evidence-model-select" aria-label="Model for Evidence proposals"></select></label>
               </div>
+              <div class="evidence-read-options">
+                <label>Read scope <select id="evidence-read-scope"><option value="selected">Selected pages</option><option value="related">Related pages</option></select></label>
+                <label id="evidence-related-limit-label" hidden>Max total pages <select id="evidence-related-limit"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label>
+                <p id="evidence-related-cost" role="note" hidden></p>
+                <div id="evidence-related-report" role="status" hidden></div>
+              </div>
             </div>
+            <section class="source-discovery-launcher">
+              <div class="source-discovery-copy">
+                <strong>Explore related papers</strong>
+                <small>Follow references, citations, and graph recommendations from one to three selected Seed Sources, then verify relevance with AI.</small>
+              </div>
+              <input id="source-discovery-focus" type="text" maxlength="2000" placeholder="Optional focus, e.g. Qwen long-context architecture" />
+              <div class="ai-run-control">
+                <button type="button" class="primary-action" id="source-discovery-run" disabled>Explore related</button>
+                <label class="ai-action-model"><span>Model</span><select id="source-discovery-model-select" aria-label="Model for related Source discovery"></select></label>
+              </div>
+            </section>
             <div class="knowledge-status" id="library-status" role="status"></div>
             <div class="library-list" id="library-list"></div>
+            <section class="source-discovery-results" id="source-discovery-results" hidden>
+              <div class="source-discovery-head">
+                <div><strong>Related Sources</strong><small id="source-discovery-summary"></small></div>
+                <button type="button" class="reader-toolbar-btn" id="source-discovery-close">× <span>Close</span></button>
+              </div>
+              <small id="source-discovery-status" role="status"></small>
+              <div id="source-discovery-list"></div>
+              <div class="source-discovery-footer">
+                <button type="button" class="primary-action" id="source-discovery-add" disabled>Add selected Sources</button>
+              </div>
+            </section>
             <section class="source-reader" id="source-reader" hidden>
               <div class="source-reader-head">
                 <div><small id="source-reader-meta"></small><h2 id="source-reader-title"></h2></div>
@@ -319,9 +371,11 @@
                 <div class="stage-toolbar-tools">
                   <button class="review-queue-action" type="button" id="evidence-proposals-toggle" aria-controls="evidence-proposal-board" aria-expanded="false">Awaiting review · 0</button>
                   <button type="button" class="semantic-action" id="evidence-batch-tag" disabled>+ Tag</button>
+                  <button type="button" class="semantic-action is-destructive" id="evidence-batch-delete" disabled>Delete</button>
                   <label class="master-select" title="Select all visible Evidence"><input type="checkbox" id="evidence-library-select-all" /> Select all</label>
                 </div>
               </div>
+              <label class="claim-proposal-focus"><span>Focus <small>optional</small></span><input id="claim-proposal-focus" type="text" maxlength="2000" placeholder="What should become durable knowledge from the selected Evidence?" /></label>
               <div class="entity-filter-row">
                 <span class="entity-filter-title">Tag Filter</span>
                 <div class="entity-filter-fields">
@@ -329,7 +383,6 @@
                   <div class="tag-filter-control tag-multiselect" id="evidence-tag-all-filter"><span>All of</span><details><summary><span>0 selected</span></summary><div class="tag-multiselect-menu"></div></details></div>
                 </div>
               </div>
-              <label class="claim-proposal-focus"><span>Focus <small>optional</small></span><input id="claim-proposal-focus" type="text" maxlength="2000" placeholder="What should become durable knowledge from the selected Evidence?" /></label>
               <div class="knowledge-status" id="evidence-status" role="status"></div>
             </div>
             <div class="evidence-library-list" id="evidence-library-list"></div>
@@ -361,6 +414,10 @@
               <div class="claims-toolbar-end">
                 <button class="semantic-action is-audit" type="button" id="claims-audit-toggle">Audit Claims</button>
                 <button class="review-queue-action" type="button" id="claims-proposals-toggle" aria-controls="claim-proposal-board" aria-expanded="false">Awaiting review · 0</button>
+                <div class="claims-list-controls" id="claims-list-controls">
+                  <button type="button" class="semantic-action" id="claims-batch-tag" disabled>+ Tag</button>
+                  <label class="master-select" title="Select all visible Claims"><input type="checkbox" id="claims-select-all" /> Select all</label>
+                </div>
               </div>
             </div>
             <div class="entity-filter-row">
@@ -399,14 +456,10 @@
               </div>
               <small id="claim-create-status" role="status"></small>
             </div>
-            <div class="claims-list-controls" id="claims-list-controls">
-              <button type="button" class="semantic-action" id="claims-batch-tag" disabled>+ Tag</button>
-              <label class="master-select" title="Select all visible Claims"><input type="checkbox" id="claims-select-all" /> Select all</label>
-            </div>
             <details class="claim-proposal-report" id="claim-proposal-report" hidden><summary id="claim-proposal-report-summary">Latest proposal run</summary><div id="claim-proposal-report-body"></div></details>
             <section class="claim-audit-board" id="claim-audit-board" hidden>
               <div class="claim-audit-head">
-                <div><strong>Audit Claims</strong><small>Scan every Claim in the selected scope; only likely pairs are sent to the model.</small></div>
+                <div><strong>Audit Claims</strong><small>Check consistency, discover missing relations, and review existing links within this scope. Changes require review.</small></div>
                 <button type="button" class="reader-toolbar-btn" id="claim-audit-close">× <span>Close</span></button>
               </div>
               <div class="claim-audit-config" id="claim-audit-config">
@@ -430,6 +483,10 @@
             </section>
             <section class="claim-proposal-board" id="claim-proposal-board" hidden>
               <div class="claim-section-head"><strong>Awaiting review</strong><small>Kept until you Accept, Keep disputed, or Discard.</small></div>
+              <div class="claim-review-tabs" role="group" aria-label="Claim review category">
+                <button type="button" id="claim-review-new" aria-pressed="true">Proposals</button>
+                <button type="button" id="claim-review-changed" aria-pressed="false">Evidence changed</button>
+              </div>
               <div id="claim-proposal-list"></div>
             </section>
             <div class="claims-list" id="claims-list"></div>
@@ -455,10 +512,13 @@
                 <div class="stage-toolbar-tools">
                   <label class="ai-action-model"><span>Model</span><select id="wiki-model-select" aria-label="Model for Wiki organization"></select></label>
                   <button type="button" class="primary-action" id="wiki-organize">Organize with AI</button>
-                  <button type="button" class="semantic-action is-edit" id="wiki-edit-structure">Edit structure</button>
-                  <button type="button" class="review-queue-action" id="wiki-proposals-toggle" aria-expanded="false">Awaiting review · 0</button>
+                  <button type="button" class="semantic-action is-edit" id="wiki-edit-structure">Edit</button>
+                  <button type="button" class="semantic-action is-destructive" id="wiki-reset-structure" disabled>Reset</button>
+                  <button type="button" class="review-queue-action" id="wiki-proposals-toggle" aria-expanded="false" disabled>Awaiting review · 0</button>
                 </div>
               </div>
+              <small class="knowledge-status" id="wiki-call-estimate"></small>
+              <small class="wiki-call-detail" id="wiki-call-detail"></small>
               <small class="knowledge-status wiki-action-status" id="wiki-status" role="status"></small>
               <div class="wiki-health-row">
                 <div class="wiki-health" id="wiki-health"></div>
@@ -594,17 +654,16 @@
                   <label><input type="checkbox" value="arxiv" checked /> arXiv</label>
                   <label><input type="checkbox" value="openalex" checked /> OpenAlex</label>
                   <label><input type="checkbox" value="semanticscholar" checked /> Semantic Scholar</label>
-                  <label><input type="checkbox" value="websearch" /> Web Search</label>
                 </div>
                 </div>
                 <div class="ai-limits-grid search-result-limits">
                 <div class="config-row">
-                  <label for="max-papers">Keyword results</label>
+                  <label for="max-papers">Search results (AI Review off)</label>
                   <input type="number" id="max-papers" name="max-papers" min="20" max="1000" step="10" value="100" />
-                  <small>Initial academic result target. Find More adds this many; Web-only searches use actual SearXNG pages.</small>
+                  <small>Initial academic result target. Find More adds this many.</small>
                 </div>
                 <div class="config-row">
-                  <label for="intelligent-max-results">Intelligent results</label>
+                  <label for="intelligent-max-results">AI-reviewed results</label>
                   <input type="number" id="intelligent-max-results" min="1" max="100" step="1" value="20" />
                   <small>Target number of results that pass LLM verification. Verification stops when this target or the candidate pool is exhausted.</small>
                 </div>
@@ -622,7 +681,7 @@
                   <div class="ai-role-grid" id="ai-role-grid"></div>
                 </section>
                 <div class="config-subsection ai-search-settings">
-                  <h3>Intelligent Search</h3>
+                  <h3>Search · AI Review</h3>
                   <div class="ai-limits-grid">
                     <div class="config-row">
                       <label for="ai-verify-batch-size">Verification batch size</label>
@@ -641,6 +700,34 @@
                 <div class="config-subsection ai-stage-settings">
                   <h3>Knowledge stages</h3>
                   <div class="ai-stage-settings-grid">
+                    <div class="config-row">
+                      <label for="ai-wiki-claim-limit">Claims per Wiki organization</label>
+                      <input type="number" id="ai-wiki-claim-limit" min="1" max="1000" value="100" />
+                      <small>Stale → unorganized → others. Remaining knowledge is preserved. Larger batches need more model context.</small>
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-evidence-source-limit">Sources per Evidence run</label>
+                      <input type="number" id="ai-evidence-source-limit" min="1" max="100" value="6" />
+                      <small>1–100 items. Larger selections use more context and may exceed your model’s capacity.</small>
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-claim-evidence-limit">Evidence per Claims run</label>
+                      <input type="number" id="ai-claim-evidence-limit" min="1" max="100" value="30" />
+                      <small>1–100 items. Larger selections use more context and may exceed your model’s capacity.</small>
+                    </div>
+                    <div class="config-row">
+                      <label for="ai-claim-comparison-limit">Existing Claims to compare</label>
+                      <input type="number" id="ai-claim-comparison-limit" min="1" max="1000" value="100" />
+                      <small>Up to 100 by default, retrieved separately for each Evidence and deduplicated. Uses the same model call; larger limits use more input tokens. Not an exhaustive library audit.</small>
+                    </div>
+                    <div class="config-row">
+                      <label for="evidence-request-mode">Evidence requests</label>
+                      <select id="evidence-request-mode">
+                        <option value="combined">Combined · one request</option>
+                        <option value="individual">One by one · one request per Source</option>
+                      </select>
+                      <small>Combined shares context (up to 12 proposals total). One by one processes Sources sequentially (up to 12 each), using more model requests. Failures are reported without automatic retries.</small>
+                    </div>
                     <div class="config-row">
                       <label for="ai-stage-timeout">Stage request timeout (seconds)</label>
                       <input type="number" id="ai-stage-timeout" min="5" max="600" value="45" />
@@ -672,6 +759,11 @@
                       <input type="number" id="ai-copilot-temperature" min="0" max="2" step="0.1" value="0.2" />
                     </div>
                     <div class="config-row">
+                      <label for="ai-copilot-context-limit">Context items</label>
+                      <input type="number" id="ai-copilot-context-limit" min="1" max="100" value="12" />
+                      <small>Total Sources, Evidence, and Claims attached to a conversation (1–100).</small>
+                    </div>
+                    <div class="config-row">
                       <label for="ai-copilot-max-tokens">Max output tokens</label>
                       <input type="number" id="ai-copilot-max-tokens" min="1" max="32768" step="1" value="1200" />
                     </div>
@@ -682,13 +774,16 @@
                     <button type="button" class="copilot-add-parameter" id="ai-copilot-add-parameter">+ Add parameter</button>
                     <small>Values use JSON syntax: numbers and booleans need no quotes; strings do. Reserved request fields cannot be overridden.</small>
                   </details>
+                </section>
+              </fieldset>
+              <fieldset class="ai-config stage-skills-config">
+                <legend>Stage Skills</legend>
                   <details class="ai-embedding-details copilot-prompt-preview">
-                    <summary>View stage system prompts</summary>
-                    <div class="copilot-prompt-block" id="ai-copilot-prompt-shared-block">
-                      <span class="copilot-prompt-label">Shared Review Copilot prompt</span>
+                    <summary>Stage skills</summary>
+                    <details class="copilot-prompt-block" id="ai-copilot-prompt-shared-block">
+                      <summary>Product rules · Read-only</summary>
                       <pre id="ai-copilot-prompt-shared"></pre>
-                      <small>Used by Search discussion, Sources, Evidence, Claims, Views, and Projects. Your Custom instructions are appended after the selected stage addition.</small>
-                    </div>
+                    </details>
                     <label class="copilot-prompt-stage">Stage
                       <select id="ai-copilot-prompt-stage">
                         <option value="search_strategy">Search · Initial strategy</option>
@@ -706,11 +801,26 @@
                         <option value="artifact">Projects</option>
                       </select>
                     </label>
+                    <div class="skill-actions">
+                      <button type="button" id="skill-customize" data-skill-action="customize">Create custom copy</button>
+                      <button type="button" id="skill-reveal" data-skill-action="reveal">Open folder</button>
+                      <button type="button" id="skill-reload" data-skill-action="reload">Reload</button>
+                      <button type="button" id="skill-builtin" data-skill-action="builtin">Use built-in</button>
+                    </div>
+                    <small id="skill-path"></small>
                     <span class="copilot-prompt-label" id="ai-copilot-prompt-stage-label">Dedicated capability prompt</span>
                     <pre id="ai-copilot-prompt-preview"></pre>
                     <small id="ai-copilot-prompt-note">Initial Search strategy and proposal generation use dedicated prompts rather than the shared Review Copilot prompt.</small>
+                    <details class="skill-contract-block">
+                      <summary>Output contract · Read-only</summary>
+                      <pre id="skill-contract"></pre>
+                    </details>
+                    <details class="skill-contract-block">
+                      <summary>Request preview</summary>
+                      <small>The system message contains fixed product rules and the output contract. The user message contains stage guidance, applicable preferences, and task data. Search examples depend on Area filters; this preview shows the general example. Task data is added at runtime. Preferences reflect the Config form and require Save.</small>
+                      <pre id="skill-assembled"></pre>
+                    </details>
                   </details>
-                </section>
               </fieldset>
               <fieldset class="config-section source-config-section">
                 <legend>Source Connections</legend>
@@ -743,7 +853,7 @@
                   </div>
                   </div>
                 </div>
-                <div class="config-subsection web-source-config">
+                <div class="config-subsection web-source-config" hidden>
                   <h3>Web Search · SearXNG</h3>
                   <div class="config-row">
                 <label for="searxng-url">SearXNG URL</label>
@@ -932,6 +1042,7 @@
         <div id="evidence-detail-annotation-list"></div>
       </section>
       <div class="evidence-detail-actions">
+        <button type="button" id="evidence-detail-edit">Edit Evidence</button>
         <button type="button" id="evidence-detail-edit-tags">Edit Tags</button>
         <button class="danger-action" type="button" id="evidence-detail-delete">Delete Evidence</button>
       </div>
@@ -963,6 +1074,8 @@
       <div class="evidence-quick-actions"><button type="button" id="evidence-quick-discard">Discard</button><button type="button" id="evidence-quick-save">Save</button></div>
       <small id="evidence-quick-status" role="status"></small>
     </section>
-    <script src="app.js?v=20260827o"></script>
+    <script src="vendor/katex/katex.min.js"></script>
+    <script src="evidence-math.js?v=20260922star"></script>
+    <script src="app.js?v=20260924graphgestures"></script>
   </body>
 </html>

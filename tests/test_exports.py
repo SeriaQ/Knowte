@@ -17,6 +17,7 @@ from knowte.imports import (
 )
 from knowte.knowledge import (
     accept_wiki_proposal,
+    accept_project_wiki_proposal,
     create_artifact,
     create_claim,
     create_evidence,
@@ -28,6 +29,7 @@ from knowte.knowledge import (
     list_claims,
     save_source,
     store_capture,
+    save_project_document,
 )
 from knowte.server import create_server
 
@@ -108,11 +110,46 @@ class KnowledgeExportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Wiki or Project"):
                 build_knowledge_export(kind, [], self.database, self.content)
 
+    def test_project_roundtrip_preserves_wiki_and_remaps_article_citations(self):
+        project = create_artifact({"title": "Learning", "purpose": "Learn Qwen"}, self.database)
+        claim_id = self.claim["id"]
+        link_project_knowledge(project["id"], "claim", claim_id, self.database)
+        proposal = create_wiki_proposal({
+            "pages": [{"key": "design", "title": "Design", "parent_key": "",
+                       "summary": f"See [[claim:{claim_id}|Architecture]]", "claim_ids": [claim_id]}],
+            "gaps": ["Training is not covered"],
+        }, "test", scope={"project_id": project["id"]}, path=self.database,
+            proposal_type="project_wiki_patch")
+        accept_project_wiki_proposal(proposal["id"], self.database)
+        save_project_document({
+            "artifact_id": project["id"], "title": "Reading", "goal": "Understand",
+            "content": {"title": "Reading", "selected_claim_ids": [claim_id],
+                        "sections": [{"heading": "Architecture", "paragraphs": [
+                            {"text": self.claim["statement"], "claim_ids": [claim_id]},
+                        ]}]},
+        }, self.database)
+        filename, body = build_knowledge_export("project", [project["id"]], self.database, self.content)
+        target = self.root / "roundtrip.db"
+        content = self.root / "roundtrip-content"
+        staged = stage_project_package_import(base64.b64encode(body).decode("ascii"), filename, target, content)
+        self.assertEqual(list_claims(target), [])
+        project_id = staged["project"]["id"]
+        accept_project_import(project_id, target, content)
+        restored = get_project(project_id, target)
+        new_id = restored["claims"][0]["id"]
+        self.assertNotEqual(new_id, claim_id)
+        self.assertEqual(restored["wiki"]["graph_state"]["pages"][0]["claim_ids"], [new_id])
+        self.assertEqual(restored["wiki"]["graph_state"]["pages"][0]["summary"], f"See [[claim:{new_id}|Architecture]]")
+        self.assertEqual(restored["wiki"]["graph_state"]["gaps"], ["Training is not covered"])
+        article = restored["documents"][0]["content"]
+        self.assertEqual(article["selected_claim_ids"], [new_id])
+        self.assertEqual(article["sections"][0]["paragraphs"][0]["claim_ids"], [new_id])
+
     def test_wiki_import_is_reviewed_once_then_merged_with_its_items(self):
         proposal = create_wiki_proposal({
             "summary": "Organize imported knowledge.",
             "pages": [{"key": "qwen", "title": "Qwen", "parent_key": "",
-                       "claim_ids": [self.claim["id"]]}],
+                       "summary": f"See [[claim:{self.claim['id']}|Qwen]]", "claim_ids": [self.claim["id"]]}],
         }, "wiki-maintainer-v1", path=self.database)
         accept_wiki_proposal(proposal["id"], self.database)
         _, body = build_knowledge_export("wiki", [], self.database, self.content)
@@ -130,6 +167,9 @@ class KnowledgeExportTests(unittest.TestCase):
         self.assertEqual(result["created"]["claims"], 1)
         self.assertEqual(len(list_claims(target_database)), 1)
         self.assertGreaterEqual(len(get_wiki(target_database)["pages"]), 1)
+        new_id = list_claims(target_database)[0]["id"]
+        page = next(page for page in get_wiki(target_database)["pages"] if page["claim_ids"])
+        self.assertEqual(page["summary"], f"See [[claim:{new_id}|Qwen]]")
 
     def test_wiki_and_project_packages_cannot_cross_import_boundaries(self):
         project = create_artifact({"title": "P", "purpose": "Test"}, self.database)

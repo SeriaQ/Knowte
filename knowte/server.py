@@ -6,10 +6,10 @@ from collections import Counter
 import functools
 import hashlib
 from importlib.metadata import PackageNotFoundError, version as package_version
-from importlib.resources import files as resource_files
 import json
 import os
 import re
+import shutil
 import socketserver
 import sys
 import sysconfig
@@ -24,6 +24,9 @@ from .config import (
     CONFIG_PATH,
     export_config,
     load_config,
+    save_config,
+    obsolete_config_items,
+    remove_obsolete_config_items,
     set_default_search_mode,
     set_email,
     set_enabled_backends,
@@ -40,8 +43,12 @@ from .config import (
     set_searxng_proxy,
     set_web_ignore_year_filter,
 )
+from .stage_skills import skill_prompt, skill_catalog, manage_skill
 from .ai import AIError
-from .capture import CaptureError, capture_source_content
+from .capture import CaptureError, capture_source_content, capture_evidence_image, discover_source_images
+from .documents import import_document, parse_document
+from .related_pages import discover_pages, select_pages, page_url, in_scope, MAX_PAGES
+from .knowledge import preview_knowledge_deletion, delete_knowledge_items, prepare_wiki_batch, merge_wiki_batch
 from .companion import CompanionStore
 from .exports import build_knowledge_export
 from .imports import (
@@ -51,7 +58,13 @@ from .imports import (
     stage_project_package_import,
     stage_wiki_package_import,
 )
-from .intelligent import _client_from_config, _model_name_from_config, intelligent_search
+from .intelligent import (
+    _client_from_config,
+    _model_name_from_config,
+    _verify_batched,
+    intelligent_search,
+)
+from .source_discovery import discover_related_papers
 from .knowledge import (
     KNOWLEDGE_DB_PATH,
     create_annotation,
@@ -71,6 +84,7 @@ from .knowledge import (
     create_evidence_proposal,
     create_project_claim_recommendations,
     create_evidence,
+    update_evidence,
     delete_annotation,
     discard_claim_proposal,
     delete_evidence,
@@ -82,7 +96,7 @@ from .knowledge import (
     get_source_workspace,
     get_view,
     get_wiki,
-    find_related_claims,
+    find_claim_comparison_context,
     list_claim_proposals,
     list_evidence_proposals,
     list_project_claim_recommendations,
@@ -110,6 +124,7 @@ from .knowledge import (
     create_manual_wiki_proposal,
     update_wiki_proposal,
     accept_wiki_proposal,
+    reset_wiki_structure,
     accept_project_wiki_proposal,
     list_project_wiki_proposals,
     save_project_document,
@@ -179,59 +194,43 @@ def _map_document_quote(workspace: dict, quote: str) -> tuple[str, str] | None:
             return str(segment.get("id") or ""), original
     return None
 
-_CLAIM_PROPOSAL_CAPABILITY = "claim-proposal-v3"
+_CLAIM_PROPOSAL_CAPABILITY = "claim-proposal-v4"
 _EVIDENCE_PROPOSAL_CAPABILITY = "evidence-proposal-v2"
 _WIKI_PROPOSAL_CAPABILITY = "wiki-maintainer-v1"
 _WIKI_ARTICLE_CAPABILITY = "wiki-article-v1"
 _PROJECT_CLAIM_RECOMMENDATION_CAPABILITY = "project-claim-recommendation-v1"
 
 
-def _claim_proposal_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath("claim_proposal.md").read_text(
-        encoding="utf-8"
-    )
+def _claim_proposal_prompt(directory=None) -> str:
+    return skill_prompt("claim_proposal", directory)
 
 
-def _claim_audit_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath("claim_audit.md").read_text(
-        encoding="utf-8"
-    )
+def _claim_audit_prompt(directory=None) -> str:
+    return skill_prompt("claim_audit", directory)
 
 
-def _evidence_proposal_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath("evidence_proposal.md").read_text(
-        encoding="utf-8"
-    )
+def _evidence_proposal_prompt(directory=None) -> str:
+    return skill_prompt("evidence_proposal", directory)
 
 
-def _evidence_document_proposal_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath(
-        "evidence_document_proposal.md"
-    ).read_text(encoding="utf-8")
+def _evidence_document_proposal_prompt(directory=None) -> str:
+    return skill_prompt("evidence_document_proposal", directory)
 
 
-def _wiki_maintainer_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath("wiki_maintainer.md").read_text(
-        encoding="utf-8"
-    )
+def _wiki_maintainer_prompt(directory=None) -> str:
+    return skill_prompt("wiki_maintainer", directory)
 
 
-def _wiki_article_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath("wiki_article.md").read_text(
-        encoding="utf-8"
-    )
+def _wiki_article_prompt(directory=None) -> str:
+    return skill_prompt("wiki_article", directory)
 
 
-def _wiki_article_selection_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath(
-        "wiki_article_selection.md"
-    ).read_text(encoding="utf-8")
+def _wiki_article_selection_prompt(directory=None) -> str:
+    return skill_prompt("wiki_article_selection", directory)
 
 
-def _project_claim_recommendation_prompt() -> str:
-    return resource_files("knowte.prompts").joinpath(
-        "project_claim_recommendation.md"
-    ).read_text(encoding="utf-8")
+def _project_claim_recommendation_prompt(directory=None) -> str:
+    return skill_prompt("project_claim_recommendation", directory)
 
 
 def _wiki_claim_context(claim: dict, include_evidence: bool = False) -> dict:
@@ -375,13 +374,20 @@ def _import_candidates(raw: str) -> list[dict]:
         if arxiv_id and not url:
             url = f"https://arxiv.org/abs/{arxiv_id}"
         parsed = urlparse(url)
+        if (parsed.hostname or "").lower() in {"arxiv.org", "www.arxiv.org"}:
+            match = re.fullmatch(r"/(?:abs|pdf|html)/(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?/?", parsed.path, re.I)
+            if match:
+                arxiv_id = match.group(1)
+                url = f"https://arxiv.org/abs/{arxiv_id}"
+        if not doi and (parsed.hostname or "").lower() in {"doi.org", "dx.doi.org"}:
+            doi = parsed.path.lstrip("/")
         valid_url = parsed.scheme in {"http", "https"} and bool(parsed.netloc)
         locator = (doi or arxiv_id or url).casefold()
         if not locator or locator in seen:
             continue
         seen.add(locator)
         title = str(item.get("title") or "").strip()[:500]
-        source_type = str(item.get("source_type") or "web").strip().lower()
+        source_type = str(item.get("source_type") or ("paper" if arxiv_id or doi else "web")).strip().lower()
         why = str(item.get("why_relevant") or "").strip()[:1800]
         authors = item.get("authors") or []
         if isinstance(authors, list):
@@ -398,7 +404,7 @@ def _import_candidates(raw: str) -> list[dict]:
             "abstract": "Imported candidate; inspect the original Source before creating Evidence.",
             "url": url,
             "paper_url": url,
-            "pdf_url": "",
+            "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else "",
             "doi_url": f"https://doi.org/{doi}" if doi else "",
             "keywords": [],
             "source": "Third-party import",
@@ -558,6 +564,9 @@ def _set_intelligent_progress(
 class KnowteTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
+    # Page startup opens several API/static connections at once. The default
+    # backlog of five drops bursts before a request handler can even run.
+    request_queue_size = 128
 
     def handle_error(self, request, client_address):
         error = sys.exc_info()[1]
@@ -569,11 +578,12 @@ class KnowteTCPServer(socketserver.ThreadingTCPServer):
 
 
 class KnowteHandler(SimpleHTTPRequestHandler):
+    library_name = "default"
     config_path = CONFIG_PATH
     plans_path = PLANS_PATH
     knowledge_db_path = KNOWLEDGE_DB_PATH
     content_dir = KNOWLEDGE_DB_PATH.parent / "content"
-    allowed_backends = ["arxiv", "openalex", "semanticscholar", "websearch"]
+    allowed_backends = ["arxiv", "openalex", "semanticscholar"]
     default_backends = ["arxiv", "openalex", "semanticscholar"]
     debug_replay_query = ""
     debug_replay_artifact = ""
@@ -770,6 +780,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if parsed.path.rstrip("/") == "/api/skills":
+            self._send_json({"skills": skill_catalog(self.config_path.parent / "skills"), "platform": sys.platform})
+            return
         if parsed.path.rstrip("/") == "/api/config":
             config = load_config(self.config_path)
             copilot_prompt, copilot_temperature, copilot_max_tokens, copilot_advanced = _copilot_settings(config)
@@ -779,6 +792,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             chat_profile = profile_by_id.get(profile_roles.get("intelligent_search", ""), {})
             embedding_profile = profile_by_id.get(profile_roles.get("embedding", ""), {})
             payload = {
+                "library_name": self.library_name,
                 "email": config.get("email", ""),
                 "semanticscholar_api_key": "",
                 "semanticscholar_api_key_configured": bool(
@@ -797,6 +811,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     in {"keyword", "intelligent", "import"}
                     else "keyword"
                 ),
+                "search_ai_review": self._parse_bool(config.get("search_ai_review", "true" if config.get("default_search_mode") == "intelligent" else "false")),
                 "web_ignore_year_filter": self._parse_bool(
                     config.get("web_ignore_year_filter", "true")
                 ),
@@ -835,6 +850,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     config.get("ai_search_timeout_seconds")
                     or config.get("ai_timeout_seconds"), 45, 5, 600
                 ),
+                "ai_evidence_source_limit": self._parse_bounded_int(config.get("ai_evidence_source_limit"), 6, 1, 100),
+                "ai_claim_evidence_limit": self._parse_bounded_int(config.get("ai_claim_evidence_limit"), 30, 1, 100),
+                "ai_claim_comparison_limit": self._parse_bounded_int(config.get("ai_claim_comparison_limit"), 100, 1, 1000),
+                "ai_wiki_claim_limit": self._parse_bounded_int(config.get("ai_wiki_claim_limit"), 100, 1, 1000),
+                "ai_copilot_context_limit": self._parse_bounded_int(config.get("ai_copilot_context_limit"), 12, 1, 100),
+                "ai_evidence_request_mode": config.get("ai_evidence_request_mode", "combined"),
                 "ai_stage_timeout_seconds": self._parse_bounded_int(
                     config.get("ai_stage_timeout_seconds")
                     or config.get("ai_timeout_seconds"), 45, 5, 600
@@ -963,6 +984,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     ),
                     search_actions=search_actions,
                     profile_id=params.get("model_profile_id", [""])[0][:80],
+                    skills_dir=self.config_path.parent / "skills",
                 )
                 payload["warnings"] = [*warnings, *payload.get("warnings", [])]
                 payload["enabled_backends"] = backends
@@ -1464,6 +1486,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             r"/api/claim-audits/([0-9a-f]+)/(run|pause|resume|cancel)", route
         )
         if route not in {
+            "/api/skills",
             "/api/config",
             "/api/config/default-search-mode",
             "/api/searxng",
@@ -1474,6 +1497,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/review/chat",
             "/api/search/strategy",
             "/api/search/import",
+            "/api/source-discovery",
             "/api/evidence",
             "/api/claims",
             "/api/claim-relations",
@@ -1481,8 +1505,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/claim-audits",
             "/api/claim-audits/preview",
             "/api/evidence-proposals/generate",
+            "/api/evidence-pages/select",
+            "/api/library/documents",
             "/api/wiki/proposals/generate",
             "/api/wiki/proposals/edit",
+            "/api/wiki/reset",
             "/api/wiki/articles/generate",
             "/api/project-articles/generate",
             "/api/project-documents",
@@ -1492,6 +1519,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/wiki/imports",
             "/api/tags/entity",
             "/api/tags/batch",
+            "/api/knowledge/delete-preview",
+            "/api/knowledge/delete",
             "/api/annotations",
             "/api/companion/pairing",
             "/api/companion/pair",
@@ -1504,11 +1533,26 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         length = int(self.headers.get("Content-Length", "0"))
+        if route == "/api/library/documents" and length > 28 * 1024 * 1024:
+            self.close_connection = True
+            self._send_json({"message": "Document exceeds the 20 MB limit"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
         body = self.rfile.read(length) if length > 0 else b""
         try:
             payload = json.loads(body.decode("utf-8")) if body else {}
         except json.JSONDecodeError:
             payload = {}
+        if route == "/api/library/documents":
+            try:
+                result = import_document(
+                    base64.b64decode(str(payload.get("data") or ""), validate=True),
+                    str(payload.get("filename") or ""), str(payload.get("title") or ""),
+                    self.knowledge_db_path, self.content_dir,
+                )
+                self._send_json(result, HTTPStatus.CREATED)
+            except (ValueError, OSError) as error:
+                self._send_json({"message": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         if route == "/api/exports":
             try:
                 filename, export_body = build_knowledge_export(
@@ -1626,6 +1670,23 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
             return
+        if route == "/api/skills":
+            # Local file operations are restricted to this browser's local origin.
+            origin = self.headers.get("Origin")
+            if self.client_address[0] not in {"127.0.0.1", "::1"} or (
+                origin and urlparse(origin).netloc != self.headers.get("Host")
+            ):
+                self._send_json({"message": "Skill file actions require local access."}, HTTPStatus.FORBIDDEN)
+                return
+            try:
+                entry = manage_skill(
+                    payload.get("stage"), payload.get("action"),
+                    self.config_path.parent / "skills",
+                )
+                self._send_json({"skill": entry})
+            except (AIError, OSError) as error:
+                self._send_json({"error": "invalid_skill", "message": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         if route == "/api/project-wiki-proposals/generate":
             project_id = str(payload.get("project_id") or "").strip()
             try:
@@ -1639,12 +1700,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 config = load_config(self.config_path)
                 profile_id = str(payload.get("model_profile_id") or "")[:80]
                 client = _client_from_config(
-                    config, require_embedding=False, role="wiki", profile_id=profile_id,
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="wiki", profile_id=profile_id,
                 )
                 _, temperature, max_tokens, advanced = _copilot_settings(config, "artifact")
                 current_pages = (project.get("wiki") or {}).get("graph_state", {}).get("pages", [])
                 result = client.chat_json(
-                    _wiki_maintainer_prompt(),
+                    skill_prompt("project_wiki", self.config_path.parent / "skills"),
                     json.dumps({
                         "instruction": "Organize only this Project's Claims into a compact Project Wiki.",
                         "project": {"title": project["title"], "purpose": project["purpose"]},
@@ -1703,11 +1764,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 config = load_config(self.config_path)
                 profile_id = str(payload.get("model_profile_id") or "")[:80]
                 client = _client_from_config(
-                    config, require_embedding=False, role="article", profile_id=profile_id,
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="article", profile_id=profile_id,
                 )
                 _, temperature, max_tokens, advanced = _copilot_settings(config, "artifact")
                 result = client.chat_json(
-                    _project_claim_recommendation_prompt(),
+                    _project_claim_recommendation_prompt(self.config_path.parent / "skills"),
                     json.dumps({
                         "project": {"title": project["title"], "purpose": project["purpose"]},
                         "candidate_claims": candidates,
@@ -1775,7 +1836,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 config = load_config(self.config_path)
                 profile_id = audit.get("model_profile_id", "")
                 client = _client_from_config(
-                    config, require_embedding=False, role="claims",
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="claims",
                     profile_id=profile_id,
                 )
                 pairs_payload = []
@@ -1786,6 +1847,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         "left_claim_id": left["id"], "right_claim_id": right["id"],
                     })
                     pairs_payload.append({
+                        "existing_relations": [relation for relation in left.get("relations", [])
+                                               if {relation["subject_claim_id"], relation["object_claim_id"]} == {left["id"], right["id"]}],
                         "left": {
                             "claim_id": left["id"], "statement": left["statement"],
                             "basis": left["basis"], "review_state": left["review_state"],
@@ -1810,7 +1873,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         },
                     })
                 result = client.chat_json(
-                    _claim_audit_prompt(),
+                    _claim_audit_prompt(self.config_path.parent / "skills"),
                     json.dumps({"pairs": pairs_payload}, ensure_ascii=False),
                     temperature=0.05, max_tokens=3200,
                     allow_text_fallback=True,
@@ -1865,17 +1928,58 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                                 "audit_judgment": judgment,
                                 "rationale": rationale, "caveats": caveats,
                             }
-                    elif judgment in {"contradicts", "scope_difference"}:
+                    elif judgment in {"supports", "related", "contradicts", "scope_difference"}:
+                        if judgment == "supports" and not (assessment.get("subject_claim_id") and assessment.get("object_claim_id")):
+                            raise AIError("invalid_claim_audit", "Support relations require an explicit direction.")
+                        subject_id = str(assessment.get("subject_claim_id") or left_id)
+                        object_id = str(assessment.get("object_claim_id") or right_id)
+                        if {subject_id, object_id} != {left_id, right_id}:
+                            raise AIError("invalid_claim_audit", "Invalid relation endpoints. Nothing from this batch was saved.")
                         proposal_payload = {
                             "operation": "create_relation",
-                            "subject_claim_id": left_id,
-                            "subject_statement": claims_by_id[left_id]["statement"],
-                            "object_claim_id": right_id,
-                            "object_statement": claims_by_id[right_id]["statement"],
-                            "relation_type": "contradicts" if judgment == "contradicts" else "related",
+                            "subject_claim_id": subject_id,
+                            "subject_statement": claims_by_id[subject_id]["statement"],
+                            "object_claim_id": object_id,
+                            "object_statement": claims_by_id[object_id]["statement"],
+                            "relation_type": "related" if judgment == "scope_difference" else judgment,
                             "audit_judgment": judgment,
                             "rationale": rationale, "caveats": caveats,
                         }
+                    existing_relations = [relation for relation in claims_by_id[left_id].get("relations", [])
+                                          if {relation["subject_claim_id"], relation["object_claim_id"]} == {left_id, right_id}]
+                    relation_keys = ("subject_claim_id", "object_claim_id", "relation_type")
+                    reviewed_keys = [tuple(review.get(key) for key in relation_keys) for review in assessment.get("relation_reviews") or []]
+                    if len(reviewed_keys) != len(set(reviewed_keys)) or set(reviewed_keys) != {tuple(relation[key] for key in relation_keys) for relation in existing_relations}:
+                        raise AIError("incomplete_claim_audit", "The model omitted or duplicated an existing relation review. Nothing from this batch was saved.")
+                    if proposal_payload and proposal_payload["operation"] == "create_relation" and any(
+                        all(relation[key] == proposal_payload[key] for key in ("subject_claim_id", "object_claim_id", "relation_type"))
+                        for relation in existing_relations
+                    ):
+                        proposal_payload = None
+                    for review in assessment.get("relation_reviews") or []:
+                        old = next((relation for relation in existing_relations if all(
+                            relation[key] == review.get(key) for key in ("subject_claim_id", "object_claim_id", "relation_type")
+                        )), None)
+                        if old is None:
+                            raise AIError("invalid_claim_audit", "Unknown relation in audit review. Nothing from this batch was saved.")
+                        action = review.get("action")
+                        if action == "keep":
+                            continue
+                        replacement = review.get("replacement_type") if action == "replace" else "remove"
+                        if action not in {"remove", "replace"} or replacement not in {"supports", "contradicts", "related", "remove"}:
+                            raise AIError("invalid_claim_audit", "Invalid relation review action.")
+                        subject_id, object_id = old["subject_claim_id"], old["object_claim_id"]
+                        if review.get("reverse") and action == "replace":
+                            subject_id, object_id = object_id, subject_id
+                        proposal_payloads.append({
+                            "operation": "revise_relation", "existing_relation": old,
+                            "subject_claim_id": subject_id, "object_claim_id": object_id,
+                            "subject_statement": claims_by_id[subject_id]["statement"],
+                            "object_statement": claims_by_id[object_id]["statement"],
+                            "relation_type": replacement, "rationale": str(review.get("rationale") or "")[:2000],
+                        })
+                        if proposal_payload and proposal_payload["operation"] == "create_relation" and replacement != "remove":
+                            proposal_payload = None
                     if proposal_payload:
                         proposal_payloads.append(proposal_payload)
                 if assessed_pairs != allowed_pairs:
@@ -1884,7 +1988,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         "The model omitted one or more Claim pairs. Nothing from this batch was saved.",
                     )
                 proposals = [create_claim_proposal(
-                    proposal_payload, "claim-audit-v1",
+                    proposal_payload, "claim-audit-v2",
                     _model_name_from_config(config, "claims", profile_id),
                     {"audit_id": audit_id, "scope": audit.get("scope", {})},
                     self.knowledge_db_path,
@@ -2055,7 +2159,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             source_id = capture_match.group(1)
             try:
                 source = get_source(source_id, self.knowledge_db_path)
-                captured = capture_source_content(source, self.content_dir)
+                if source.get("document_hash"):
+                    original, _, _ = get_capture_file(source_id, self.content_dir, self.knowledge_db_path)
+                    captured = parse_document(original.read_bytes(), source["document_filename"])
+                    captured["raw_path"] = str(original)
+                else:
+                    captured = capture_source_content(source, self.content_dir)
                 self._send_json(
                     store_capture(source_id, captured, self.knowledge_db_path),
                     HTTPStatus.CREATED,
@@ -2104,6 +2213,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     {"error": "invalid_tags", "message": str(error)},
                     HTTPStatus.BAD_REQUEST,
                 )
+            return
+        if route in {"/api/knowledge/delete-preview", "/api/knowledge/delete"}:
+            try:
+                if route.endswith("delete-preview"):
+                    result = preview_knowledge_deletion(payload.get("entity_type"), payload.get("entity_ids"), self.knowledge_db_path)
+                else:
+                    result = delete_knowledge_items(payload.get("entity_type"), payload.get("entity_ids"), payload.get("token"), self.knowledge_db_path)
+                self._send_json(result)
+            except ValueError as error:
+                self._send_json({"message": str(error)}, HTTPStatus.BAD_REQUEST)
             return
         if route == "/api/tags/batch":
             names = payload.get("tags")
@@ -2168,44 +2287,66 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         if route == "/api/wiki/proposals/generate":
             try:
                 wiki = get_wiki(self.knowledge_db_path)
-                active_claims = [
-                    claim for claim in wiki["claims"]
-                    if claim.get("lifecycle") == "active"
-                ]
-                if not active_claims:
-                    raise ValueError("The Wiki needs at least one active Claim to organize")
-                if len(active_claims) > 200:
-                    raise ValueError(
-                        "Global Wiki organization currently supports up to 200 active Claims"
-                    )
                 config = load_config(self.config_path)
+                batch_limit = self._parse_bounded_int(config.get("ai_wiki_claim_limit"), 100, 1, 1000)
+                active_claims, batch_scope = prepare_wiki_batch(wiki, batch_limit)
+                if not active_claims:
+                    raise ValueError("The Wiki needs at least one reviewed active Claim to organize")
                 client = _client_from_config(
-                    config, require_embedding=False, role="wiki",
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="wiki",
                     profile_id=str(payload.get("model_profile_id") or "")[:80],
                 )
                 _, temperature, max_tokens, advanced = _copilot_settings(config, "views")
+                directory = [{"title": page["title"], "summary": page["summary"],
+                              "parent_id": page["parent_id"], "page_id": page["id"],
+                              "claim_count": len(page["claim_ids"])} for page in wiki["pages"]]
+                reference_pages = []
+                if batch_scope["partial"] and directory:
+                    selection = client.chat_json(
+                        skill_prompt("wiki_context_selection", self.config_path.parent / "skills"),
+                        json.dumps({"directory": directory,
+                                    "claims": [_wiki_claim_context(claim) for claim in active_claims]}, ensure_ascii=False),
+                        temperature=min(temperature, 0.3), max_tokens=1000, extra_parameters=advanced,
+                    )
+                    page_ids = selection.get("page_ids")
+                    pages_by_id = {page["id"]: page for page in wiki["pages"]}
+                    if (not isinstance(page_ids, list) or len(page_ids) > 5
+                            or any(not isinstance(pid, str) or pid not in pages_by_id for pid in page_ids)
+                            or len(set(page_ids)) != len(page_ids)):
+                        raise ValueError("Wiki reference selection returned invalid Page ids")
+                    selected_ids = set(batch_scope["claim_ids"])
+                    references = {claim["id"]: claim for claim in wiki["claims"]
+                                  if claim["id"] not in selected_ids and claim["lifecycle"] == "active"
+                                  and not claim.get("needs_review")}
+                    # Up to ten Claims per page: a large page cannot consume all context.
+                    for pid in page_ids:
+                        ids = [cid for cid in pages_by_id[pid]["claim_ids"] if cid in references]
+                        reference_pages.append({"page_id": pid, "available_claim_count": len(ids),
+                                                "truncated": len(ids) > 10,
+                                                "claims": [_wiki_claim_context(references[cid]) for cid in ids[:10]]})
                 request_payload = json.dumps({
+                    "batch_mode": batch_scope["partial"],
+                    "batch_instruction": "In batch mode return only selected Claims. Reuse an existing page_id as key to place Claims there; its title and parent remain unchanged. Existing Pages and unselected Claims are preserved by the application. New Pages may use existing page_ids as parent_key.",
                     "instruction": str(payload.get("instruction") or "")[:2000],
-                    "current_wiki": [
-                        {
-                            "title": page["title"],
-                            "summary": page["summary"],
-                            "parent_id": page["parent_id"],
-                            "page_id": page["id"],
-                            "claim_ids": page["claim_ids"],
-                        }
-                        for page in wiki["pages"]
-                    ],
+                    "current_wiki": directory,
+                    "reference_pages": reference_pages,
+                    "reference_instruction": "Reference Claims are read-only context, not assignment targets. Samples marked truncated are incomplete; preserve existing summaries where the sample cannot justify changing them.",
                     "claims": [
                         _wiki_claim_context(claim) for claim in active_claims
                     ],
                 }, ensure_ascii=False)
                 result = client.chat_json(
-                    _wiki_maintainer_prompt(), request_payload,
+                    _wiki_maintainer_prompt(self.config_path.parent / "skills"), request_payload,
                     temperature=min(temperature, 0.3),
                     max_tokens=max(3000, max_tokens),
                     extra_parameters=advanced,
                 )
+                if batch_scope["partial"]:
+                    result = merge_wiki_batch(result, wiki, batch_scope["claim_ids"])
+                else:
+                    assigned = [cid for page in result.get("pages", []) for cid in page.get("claim_ids", [])]
+                    if len(assigned) != len(active_claims) or set(assigned) != set(batch_scope["claim_ids"]):
+                        raise ValueError("Wiki organization must assign every selected Claim exactly once")
                 proposal = create_wiki_proposal(
                     result,
                     _WIKI_PROPOSAL_CAPABILITY,
@@ -2213,7 +2354,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         config, "wiki",
                         str(payload.get("model_profile_id") or "")[:80],
                     ),
-                    {"claim_ids": [claim["id"] for claim in active_claims]},
+                    batch_scope,
                     self.knowledge_db_path,
                 )
                 snapshot = client.usage_snapshot()
@@ -2237,6 +2378,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     if error.code in {"ai_unconfigured", "chat_model_missing"}
                     else HTTPStatus.SERVICE_UNAVAILABLE,
                 )
+            return
+        if route == "/api/wiki/reset":
+            if payload.get("confirmed") is not True:
+                self._send_json({"message": "Confirm the Wiki structure reset first."}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(reset_wiki_structure(self.knowledge_db_path))
             return
         if route == "/api/wiki/proposals/edit":
             try:
@@ -2270,16 +2417,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 ]
                 if not selected_claims:
                     raise ValueError("This Project has no active Claims for an Article")
-                if len(selected_claims) > 200:
-                    raise ValueError("Article generation currently supports up to 200 Project Claims")
+                if len(selected_claims) > 100:
+                    raise ValueError("Article generation currently supports up to 100 Project Claims")
                 config = load_config(self.config_path)
                 client = _client_from_config(
-                    config, require_embedding=False, role="article",
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="article",
                     profile_id=str(payload.get("model_profile_id") or "")[:80],
                 )
                 _, temperature, max_tokens, advanced = _copilot_settings(config, "views")
                 selection = client.chat_json(
-                    _wiki_article_selection_prompt(),
+                    _wiki_article_selection_prompt(self.config_path.parent / "skills"),
                     json.dumps({
                         "goal": goal,
                         "project": {
@@ -2301,7 +2448,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         if isinstance(selection, dict) else []
                     )
                     if str(item) in valid_ids
-                ))[:40]
+                ))[:100]
                 if not chosen_ids:
                     raise AIError(
                         "no_article_material",
@@ -2313,7 +2460,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     key=lambda claim: chosen_ids.index(claim["id"]),
                 )
                 result = client.chat_json(
-                    _wiki_article_prompt(),
+                    _wiki_article_prompt(self.config_path.parent / "skills"),
                     json.dumps({
                         "goal": goal,
                         "selection_rationale": str(
@@ -2389,11 +2536,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             academic_enabled = any(
                 item in {"arxiv", "openalex", "semanticscholar"} for item in enabled
             )
-            web_enabled = "websearch" in enabled
             try:
                 config = load_config(self.config_path)
                 client = _client_from_config(
-                    config, require_embedding=False, role="intelligent_search",
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="intelligent_search",
                     profile_id=str(payload.get("model_profile_id") or "")[:80],
                 )
                 custom_instructions = str(
@@ -2405,7 +2551,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     else []
                 )
                 strategy_prompt = build_search_strategy_prompt(
-                    selected_areas, custom_instructions
+                    selected_areas, custom_instructions, self.config_path.parent / "skills"
                 )
                 _, copilot_temperature, copilot_max_tokens, copilot_advanced = (
                     _copilot_settings(config)
@@ -2416,14 +2562,13 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         "intent": intent,
                         "available_channels": {
                             "academic": academic_enabled,
-                            "web": web_enabled,
                         },
                         "areas": selected_areas,
                         "year_from": payload.get("year_from") or None,
                         "year_to": payload.get("year_to") or None,
                         "output": {"actions": [{
                             "query": "concise retrieval query",
-                            "target": "academic|web|both",
+                            "target": "academic",
                             "purpose": "why this retrieval action exists",
                         }]},
                     }, ensure_ascii=False),
@@ -2436,21 +2581,17 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     if not isinstance(item, dict):
                         continue
                     action_query = str(item.get("query") or "").strip()[:500]
-                    target = str(item.get("target") or "both").lower()
+                    target = str(item.get("target") or "academic").lower()
                     if target == "academic" and not academic_enabled:
                         continue
-                    if target == "web" and not web_enabled:
-                        continue
-                    if target == "both" and not (academic_enabled and web_enabled):
-                        target = "academic" if academic_enabled else "web"
-                    if action_query and target in {"academic", "web", "both"}:
+                    if action_query and target == "academic":
                         actions.append({
                             "query": action_query,
                             "target": target,
                             "purpose": str(item.get("purpose") or "").strip()[:500],
                         })
                 if not actions:
-                    actions = [{"query": intent, "target": "both" if academic_enabled and web_enabled else ("academic" if academic_enabled else "web"), "purpose": "Search the original intent directly."}]
+                    actions = [{"query": intent, "target": "academic", "purpose": "Search the original intent directly."}]
                 snapshot = client.usage_snapshot()
                 usage = record_ai_usage(
                     chat_requests=snapshot.get("chat_requests", 0),
@@ -2463,11 +2604,195 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST if error.code == "ai_unconfigured" else HTTPStatus.SERVICE_UNAVAILABLE,
                 )
             return
+        if route == "/api/source-discovery":
+            source_ids = payload.get("source_ids")
+            if not isinstance(source_ids, list):
+                source_ids = []
+            source_ids = list(dict.fromkeys(
+                str(item) for item in source_ids[:3] if item
+            ))
+            focus = str(payload.get("focus") or "").strip()[:2000]
+            if not source_ids:
+                self._send_json(
+                    {"error": "source_required", "message": "Select one to three Seed Sources."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            if not can_request(backends=["semanticscholar"]).get("allowed_paper", True):
+                self._send_json(
+                    {"error": "paper_rate_limited", "message": "The academic request limit has been reached."},
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                )
+                return
+            try:
+                library = list_sources(self.knowledge_db_path)
+                by_id = {str(item.get("id") or ""): item for item in library}
+                seeds = [by_id[item] for item in source_ids if item in by_id]
+                if len(seeds) != len(source_ids):
+                    raise ValueError("One or more selected Seed Sources no longer exist")
+                config = load_config(self.config_path)
+                discovered = discover_related_papers(
+                    seeds,
+                    str(config.get("semanticscholar_api_key") or ""),
+                )
+                latest_usage = get_usage()
+                for _ in range(discovered.get("requests", 0)):
+                    latest_usage = record_request(backends=["semanticscholar"])
+                if not discovered.get("successful_requests"):
+                    failures = discovered.get("retrieval_failures", [])
+                    reasons = ", ".join(sorted({
+                        f"{item['code']}" + (f" (HTTP {item['status']})" if item.get("status") else "")
+                        for item in failures
+                    }))
+                    retry_after = max((item.get("retry_after", 0) for item in failures), default=0)
+                    self._send_json({
+                        "error": "discovery_retrieval_failed",
+                        "message": "Semantic Scholar retrieval failed on all paths: "
+                            + (reasons or "no successful response")
+                            + (f". Retry in {retry_after} seconds" if retry_after else "")
+                            + ". No relevance assessment was run. This does not mean no related papers exist.",
+                        "retrieval_failures": failures, "usage": latest_usage,
+                    }, HTTPStatus.BAD_GATEWAY)
+                    return
+                existing_urls = {
+                    str(value).rstrip("/").casefold()
+                    for source in library
+                    for value in (
+                        source.get("url"), source.get("paper_url"),
+                        source.get("pdf_url"), source.get("doi_url"),
+                    )
+                    if value
+                }
+                existing_titles = {
+                    str(source.get("title") or "").strip().casefold()
+                    for source in library if source.get("title")
+                }
+                candidates = [
+                    item for item in discovered["candidates"]
+                    if str(item.get("title") or "").strip().casefold() not in existing_titles
+                    and not any(
+                        str(item.get(field) or "").rstrip("/").casefold() in existing_urls
+                        for field in ("url", "paper_url", "pdf_url", "doi_url")
+                        if item.get(field)
+                    )
+                ]
+                if not candidates:
+                    self._send_json({
+                        **discovered, "results": [], "excluded_results": [],
+                        "empty_reason": "already_saved" if discovered["candidates"] else "no_candidates",
+                        "already_saved_count": len(discovered["candidates"]),
+                        "retrieved_count": len(discovered["candidates"]),
+                        "assessed_count": 0, "unassessed_count": 0,
+                        "candidate_count": 0, "usage": latest_usage,
+                    })
+                    return
+                client = _client_from_config(
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="source_discovery",
+                    profile_id=str(payload.get("model_profile_id") or "")[:80],
+                )
+                seed_context = json.dumps({
+                    "seeds": [{
+                        "title": seed.get("title"),
+                        "year": seed.get("year"),
+                        "abstract": str(seed.get("abstract") or "")[:5000],
+                    } for seed in seeds],
+                }, ensure_ascii=False)
+                intent = focus or "Find Sources with a material intellectual or technical relationship to the Seed Sources."
+                assessed, errors, chat_requests = _verify_batched(
+                    client, intent, [], candidates,
+                    self._parse_bounded_int(config.get("ai_verify_batch_size"), 5, 1, 20),
+                    self._parse_bounded_int(config.get("ai_verify_concurrency"), 1, 1, 8),
+                    20,
+                    verification_context=seed_context,
+                )
+                results = [
+                    item for item in assessed
+                    if item.get("relevance_tier") != "excluded"
+                ][:20]
+                excluded = [
+                    item for item in assessed
+                    if item.get("relevance_tier") == "excluded"
+                ]
+                snapshot = client.usage_snapshot()
+                latest_usage = record_ai_usage(
+                    chat_requests=snapshot.get("chat_requests", chat_requests),
+                    chat_tokens=snapshot.get("chat_tokens", 0),
+                )
+                self._send_json({
+                    "seeds": [{"id": item["id"], "title": item["title"]} for item in seeds],
+                    "focus": focus,
+                    "results": results,
+                    "excluded_results": excluded,
+                    "candidate_count": len(candidates),
+                    "retrieved_count": len(discovered["candidates"]),
+                    "already_saved_count": len(discovered["candidates"]) - len(candidates),
+                    "assessed_count": len(assessed),
+                    "unassessed_count": max(0, len(candidates) - len(assessed)),
+                    "undisplayed_count": max(0, len(assessed) - len(excluded) - len(results)),
+                    "truncated_paths": discovered.get("truncated_paths", []),
+                    "cache_hits": discovered.get("cache_hits", 0),
+                    "path_count": discovered.get("path_count", 0),
+                    "requests": discovered.get("requests", 0),
+                    "successful_requests": discovered.get("successful_requests", 0),
+                    "retrieval_failures": discovered.get("retrieval_failures", []),
+                    "resolved_seed_count": discovered.get("resolved_seed_count", 0),
+                    "unresolved_seed_count": discovered.get("unresolved_seed_count", 0),
+                    "warnings": [f"verification_failed:{error.code}" for error in errors],
+                    "usage": latest_usage,
+                })
+            except ValueError as error:
+                self._send_json(
+                    {"error": "invalid_source_discovery", "message": str(error)},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            except AIError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error), "usage": get_usage()},
+                    HTTPStatus.BAD_REQUEST
+                    if error.code in {"ai_unconfigured", "chat_model_missing"}
+                    else HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return
+        if route == "/api/evidence-pages/select":
+            client = None
+            try:
+                ids = payload.get("source_ids")
+                focus = str(payload.get("focus") or "").strip()[:2000]
+                limit = int(payload.get("max_pages", 4))
+                config = load_config(self.config_path)
+                source_limit = self._parse_bounded_int(config.get("ai_evidence_source_limit"), 6, 1, 100)
+                if not isinstance(ids, list) or not 1 <= len(ids) <= source_limit or not focus or not 1 <= limit <= MAX_PAGES:
+                    raise ValueError(f"Choose 1–{source_limit} webpage Sources, a Focus, and a total page limit of 1–{MAX_PAGES}")
+                sources = [get_source(str(sid), self.knowledge_db_path) for sid in dict.fromkeys(ids)]
+                if any(s.get("document_hash") or s.get("source_type") == "paper" for s in sources):
+                    raise ValueError("Related pages is for webpages. Use Selected pages for papers and uploaded documents.")
+                pages, warnings = discover_pages(sources)
+                if not pages:
+                    raise ValueError("No accessible page directory was found; no model request was made")
+                config = load_config(self.config_path)
+                client = _client_from_config(config, skills_dir=self.config_path.parent / "skills", require_embedding=False,
+                                             role="evidence", profile_id=str(payload.get("model_profile_id") or "")[:80])
+                selected, summary = select_pages(client, pages, focus, limit, self.config_path.parent / "skills")
+                response = {"pages": selected, "summary": summary, "warnings": warnings,
+                            "candidate_count": len(pages), "request_mode": config.get("ai_evidence_request_mode", "combined")}
+                status = HTTPStatus.OK
+            except (AIError, ValueError, OSError, TypeError) as error:
+                response = {"message": str(error)}
+                status = HTTPStatus.BAD_GATEWAY if isinstance(error, AIError) else HTTPStatus.BAD_REQUEST
+            if client is not None:
+                snapshot = client.usage_snapshot()
+                response["usage"] = record_ai_usage(chat_requests=snapshot.get("chat_requests", 0), chat_tokens=snapshot.get("chat_tokens", 0))
+            self._send_json(response, status)
+            return
         if route == "/api/evidence-proposals/generate":
             source_ids = payload.get("source_ids")
             if not isinstance(source_ids, list):
                 source_ids = []
-            source_ids = list(dict.fromkeys(str(item) for item in source_ids[:6] if item))
+            selection_limit = self._parse_bounded_int(load_config(self.config_path).get("ai_evidence_source_limit"), 6, 1, 100)
+            if len(source_ids) > selection_limit:
+                self._send_json({"message": f"Select at most {selection_limit} items for this run."}, HTTPStatus.BAD_REQUEST)
+                return
+            source_ids = list(dict.fromkeys(str(item) for item in source_ids if item))
             focus = str(payload.get("focus") or "").strip()[:2000]
             if not source_ids or not focus:
                 self._send_json(
@@ -2477,186 +2802,171 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 )
                 return
             try:
-                workspaces = []
-                for source_id in source_ids:
-                    workspace = get_source_workspace(source_id, self.knowledge_db_path)
-                    if not workspace.get("capture"):
-                        captured = capture_source_content(workspace["source"], self.content_dir)
-                        workspace = store_capture(
-                            source_id, captured, self.knowledge_db_path
-                        )
-                    workspaces.append(workspace)
                 config = load_config(self.config_path)
-                client = _client_from_config(
-                    config, require_embedding=False, role="evidence",
-                    profile_id=str(payload.get("model_profile_id") or "")[:80],
-                )
-                requested_profile_id = str(payload.get("model_profile_id") or "")[:80]
-                evidence_profile = next((
-                    item for item in ai_model_profiles(config)
-                    if str(item.get("id") or "") == requested_profile_id
-                ), None) or ai_profile_for_role(config, "evidence")
-                capabilities = set(evidence_profile.get("capabilities", []))
-                native_documents = []
-                browsable_urls = []
-                source_context = []
-                for workspace in workspaces:
-                    source = workspace["source"]
-                    source_url = source.get("url") or source.get("paper_url")
-                    input_kind = "capture"
-                    if capabilities & {"native_documents", "file_extraction"}:
-                        try:
-                            raw_path, media_type, _ = get_capture_file(
-                                source["id"], self.content_dir, self.knowledge_db_path
-                            )
-                            if media_type == "application/pdf":
-                                native_documents.append({
-                                    "data": raw_path.read_bytes(),
-                                    "mime_type": media_type,
-                                    "filename": f"{source['id']}.pdf",
-                                })
-                                input_kind = "native_document"
-                        except (ValueError, OSError):
-                            pass
-                    if (
-                        input_kind == "capture"
-                        and "url_fetch" in capabilities
-                        and source_url
-                    ):
-                        browsable_urls.append(str(source_url))
-                        input_kind = "url"
-                    segments = []
-                    budget = 0
-                    if input_kind == "capture":
-                        for segment in workspace.get("segments", []):
-                            text = str(segment.get("text") or "")
-                            if budget + len(text) > 45000:
-                                break
-                            segments.append({
-                                "segment_id": segment["id"],
-                                "locator": segment.get("locator", ""),
-                                "text": text,
-                            })
-                            budget += len(text)
-                    source_context.append({
-                        "source_id": source["id"],
-                        "title": source["title"],
-                        "url": source_url,
-                        "input_kind": input_kind,
-                        "segments": segments,
-                    })
-                request_text = json.dumps(
-                    {"focus": focus, "sources": source_context}, ensure_ascii=False
-                )
-                result = None
-                grounded_input_used = bool(native_documents or browsable_urls)
-                if grounded_input_used:
+                profile_id = str(payload.get("model_profile_id") or "")[:80]
+                client = _client_from_config(config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="evidence", profile_id=profile_id)
+                profile = next((item for item in ai_model_profiles(config) if item["id"] == profile_id), None) or ai_profile_for_role(config, "evidence")
+                capabilities = set(profile.get("capabilities", []))
+                related_workspaces = {}
+                related_pages = payload.get("related_pages")
+                request_mode = config.get("ai_evidence_request_mode", "combined")
+                seed_ids = list(source_ids)
+                if related_pages is not None:
+                    if not isinstance(related_pages, list) or not 1 <= len(related_pages) <= MAX_PAGES:
+                        raise ValueError(f"Related page count must be between 1 and {MAX_PAGES}; requests are never silently split")
+                    request_mode = payload.get("related_request_mode", request_mode)
+                    if request_mode not in {"combined", "individual"}:
+                        raise ValueError("Invalid related-page request mode")
+                    seeds = {sid: get_source(sid, self.knowledge_db_path) for sid in seed_ids}
+                    saved = {page_url(s["url"]): s for s in list_sources(self.knowledge_db_path) if str(s.get("url") or "").startswith(("http://", "https://"))}
+                    source_ids = []
+                    for page in related_pages:
+                        if not isinstance(page, dict):
+                            raise ValueError("Invalid related page")
+                        parent = seeds.get(str(page.get("parent_source_id") or ""))
+                        url = page_url(page.get("url"))
+                        if parent is None or not in_scope(url, parent.get("url") or parent.get("paper_url")):
+                            raise ValueError("Selected related page is outside the seed website/version")
+                        source = saved.get(url)
+                        if source:
+                            workspace = get_source_workspace(source["id"], self.knowledge_db_path)
+                        else:
+                            source = {"id": hashlib.sha256(url.encode()).hexdigest()[:32], "url": url,
+                                      "title": str(page.get("title") or url)[:1000], "source_type": "web",
+                                      "parent_source_id": parent["id"]}
+                            workspace = {"source": source, "segments": [], "capture": None, "pending_source": True}
+                        if source["id"] not in related_workspaces:
+                            related_workspaces[source["id"]] = workspace
+                            source_ids.append(source["id"])
+                groups = [[sid] for sid in source_ids] if request_mode == "individual" else [source_ids]
+                proposals, warnings, summaries = [], [], []
+                for group in groups:
                     try:
-                        result = client.grounded_json(
-                            _evidence_document_proposal_prompt(), request_text,
-                            documents=native_documents, urls=browsable_urls,
-                            max_tokens=3500,
-                        )
-                    except AIError as error:
-                        # Malformed output is still a completed model response. Return it
-                        # to the user instead of silently spending a second request.
-                        if error.code == "invalid_model_json":
-                            raise
-                        result = None
-                    except (ValueError, OSError):
-                        result = None
-                if result is None:
-                    # A failed grounded request falls back to locally captured text without
-                    # resending native files or assuming the provider visited a URL.
-                    fallback_context = []
-                    for workspace in workspaces:
-                        segments = []
-                        budget = 0
-                        for segment in workspace.get("segments", []):
-                            text = str(segment.get("text") or "")
-                            if budget + len(text) > 45000:
-                                break
-                            segments.append({
-                                "segment_id": segment["id"],
-                                "locator": segment.get("locator", ""),
-                                "text": text,
-                            })
-                            budget += len(text)
-                        fallback_context.append({
-                            "source_id": workspace["source"]["id"],
-                            "title": workspace["source"]["title"],
-                            "url": workspace["source"].get("url")
-                            or workspace["source"].get("paper_url"),
-                            "segments": segments,
-                        })
-                    result = client.chat_json(
-                        _evidence_proposal_prompt(), json.dumps(
-                            {"focus": focus, "sources": fallback_context},
-                            ensure_ascii=False,
-                        ),
-                        temperature=0.1, max_tokens=3500,
-                    )
-                candidates = result.get("evidence") if isinstance(result, dict) else []
-                if not isinstance(candidates, list):
-                    candidates = []
-                allowed_sources = set(source_ids)
-                segment_source = {
-                    segment["id"]: workspace["source"]["id"]
-                    for workspace in workspaces
-                    for segment in workspace.get("segments", [])
-                }
-                scope = {"kind": "selected_sources", "source_ids": source_ids,
-                         "focus": focus}
-                proposals = []
-                for candidate in candidates[:12]:
-                    if not isinstance(candidate, dict):
-                        continue
-                    segment_id = str(candidate.get("segment_id") or "")
-                    source_id = str(candidate.get("source_id") or segment_source.get(segment_id) or "")
-                    if source_id in allowed_sources and (
-                        not segment_id or segment_source.get(segment_id) != source_id
-                    ):
-                        workspace = next(
-                            item for item in workspaces
-                            if item["source"]["id"] == source_id
-                        )
-                        mapped = _map_document_quote(workspace, candidate.get("quote", ""))
-                        if mapped:
-                            segment_id, verified_quote = mapped
-                            candidate = {
-                                **candidate,
-                                "segment_id": segment_id,
-                                "quote": verified_quote,
-                            }
-                    if source_id not in allowed_sources or segment_source.get(segment_id) != source_id:
-                        continue
-                    try:
-                        proposals.append(create_evidence_proposal(
-                            {**candidate, "source_id": source_id},
-                            _EVIDENCE_PROPOSAL_CAPABILITY,
-                            _model_name_from_config(
-                                config, "evidence",
-                                str(payload.get("model_profile_id") or "")[:80],
-                            ), scope,
-                            self.knowledge_db_path,
-                        ))
-                    except ValueError:
-                        continue
-                if not proposals:
-                    raise AIError(
-                        "no_evidence_proposals",
-                        "The model returned no exact quotations that Knowte could verify.",
-                    )
+                        workspaces, documents, urls, manifest = [], [], [], []
+                        for source_id in group:
+                            workspace = related_workspaces.get(source_id) or get_source_workspace(source_id, self.knowledge_db_path)
+                            source = workspace["source"]
+                            url = source.get("url") or source.get("paper_url")
+                            kind = "capture"
+                            local_document = bool(source.get("document_hash"))
+                            local_pdf = local_document and workspace.get("capture", {}).get("media_type") == "application/pdf"
+                            is_pdf = local_pdf or bool(source.get("pdf_url")) or source.get("source_type") == "paper" or str(url).split("?")[0].endswith(".pdf")
+                            if is_pdf and capabilities & {"native_documents", "file_extraction"}:
+                                if local_pdf:
+                                    original, _, _ = get_capture_file(source_id, self.content_dir, self.knowledge_db_path)
+                                    captured = {"media_type": "application/pdf", "raw_path": str(original)}
+                                elif workspace.get("pending_source"):
+                                    import tempfile
+                                    with tempfile.TemporaryDirectory(prefix="knowte-related-") as temporary:
+                                        captured = capture_source_content(source, Path(temporary), parse_pdf=False)
+                                        document_bytes = Path(captured["raw_path"]).read_bytes()
+                                else:
+                                    captured = capture_source_content(source, self.content_dir, parse_pdf=False)
+                                if captured["media_type"] != "application/pdf":
+                                    raise CaptureError("Source did not return a PDF. Choose URL Fetch or text explicitly.")
+                                documents.append({"data": document_bytes if workspace.get("pending_source") else Path(captured["raw_path"]).read_bytes(), "mime_type": "application/pdf", "filename": f"{source_id}.pdf"})
+                                kind = "native_document"
+                            elif "url_fetch" in capabilities and url:
+                                urls.append(str(url))
+                                kind = "url"
+                            elif not workspace.get("segments"):
+                                if workspace.get("pending_source"):
+                                    import tempfile
+                                    with tempfile.TemporaryDirectory(prefix="knowte-related-") as temporary:
+                                        captured = capture_source_content(source, Path(temporary))
+                                    workspace["segments"] = [{"id": f"{source_id}-{i}", "text": text,
+                                        "locator": captured["locators"][i]} for i, text in enumerate(captured["segments"])]
+                                else:
+                                    captured = capture_source_content(source, self.content_dir)
+                                    workspace = store_capture(source_id, captured, self.knowledge_db_path)
+                            segments, budget = [], 0
+                            if kind == "capture":
+                                if not any(str(s.get("text") or "").strip() for s in workspace.get("segments", [])):
+                                    raise ValueError("No extractable text. Use a native PDF model, or capture Evidence manually in Inspect.")
+                                for segment in workspace.get("segments", []):
+                                    text = str(segment.get("text") or "")[:max(0, 45000 - budget)]
+                                    if not text:
+                                        continue
+                                    segments.append({"segment_id": segment["id"], "locator": segment.get("locator", ""), "text": text})
+                                    budget += len(text)
+                                if sum(len(item.get("text", "")) for item in workspace.get("segments", [])) > budget:
+                                    warnings.append(f"{source['title']}: text truncated to 45,000 characters.")
+                            workspaces.append(workspace)
+                            images = []
+                            if url and not is_pdf and not local_document:
+                                try:
+                                    images = discover_source_images(str(url))
+                                except (CaptureError, OSError, ValueError) as error:
+                                    warnings.append(f"{source['title']}: image discovery unavailable: {error}")
+                            manifest.append({"source_id": source_id, "title": source["title"], "url": url, "input_kind": kind, "segments": segments, "images": images})
+                        request_text = json.dumps({"focus": focus, "sources": manifest}, ensure_ascii=False)
+                        if documents or urls:
+                            result = client.grounded_json(_evidence_document_proposal_prompt(self.config_path.parent / "skills"), request_text, documents=documents, urls=urls, max_tokens=3500)
+                        else:
+                            prompt = _evidence_document_proposal_prompt if any(item["images"] for item in manifest) else _evidence_proposal_prompt
+                            result = client.chat_json(prompt(self.config_path.parent / "skills"), request_text, temperature=0.1, max_tokens=3500)
+                        candidates = result.get("evidence", [])
+                        if result.get("summary"):
+                            summaries.append(str(result["summary"])[:1000])
+                        created = 0
+                        for candidate in candidates[:12] if isinstance(candidates, list) else []:
+                            if not isinstance(candidate, dict):
+                                continue
+                            sid = str(candidate.get("source_id") or "")
+                            if not sid:
+                                sid = next((w["source"]["id"] for w in workspaces if any(s["id"] == candidate.get("segment_id") for s in w.get("segments", []))), "")
+                            workspace = next((w for w in workspaces if w["source"]["id"] == sid), None)
+                            if workspace is None:
+                                continue
+                            entry = next(item for item in manifest if item["source_id"] == sid)
+                            if candidate.get("evidence_type") == "snapshot":
+                                asset = next((item for item in entry["images"] if item["image_url"] == candidate.get("image_url")), None)
+                                if asset is None:
+                                    warnings.append(f"{entry['title']}: proposed image was not in this page's original image directory.")
+                                    continue
+                                try:
+                                    candidate = {**candidate, "image_data": capture_evidence_image(asset["image_url"]),
+                                                 "quote": asset["caption"], "image_alt": asset["alt"],
+                                                 "segment_id": "", "verification": "external_unverified"}
+                                except (CaptureError, OSError, ValueError) as error:
+                                    warnings.append(f"{entry['title']}: {error}")
+                                    continue
+                            mapped = _map_document_quote(workspace, candidate.get("quote", ""))
+                            if candidate.get("evidence_type") == "snapshot":
+                                pass
+                            elif mapped:
+                                segment_id, quote = mapped
+                                candidate = {**candidate, "quote": quote, "segment_id": segment_id, "verification": "local_match"}
+                            elif entry["input_kind"] != "capture":
+                                candidate = {**candidate, "segment_id": "", "verification": "external_unverified"}
+                            else:
+                                warnings.append(f"{entry['title']}: an excerpt did not match captured text.")
+                                continue
+                            try:
+                                related_source = None
+                                if workspace.get("pending_source"):
+                                    related_source = {"title": workspace["source"]["title"], "url": entry["url"],
+                                                      "parent_source_id": workspace["source"]["parent_source_id"]}
+                                    candidate = {**candidate, "segment_id": "", "verification": "external_unverified"}
+                                proposals.append(create_evidence_proposal(
+                                    {**candidate, "source_id": sid, "source_url": entry["url"], "related_source": related_source},
+                                    _EVIDENCE_PROPOSAL_CAPABILITY, _model_name_from_config(config, "evidence", profile_id),
+                                    {"kind": "related_pages" if related_pages is not None else "selected_sources", "source_ids": group, "seed_source_ids": seed_ids, "focus": focus,
+                                     "summary": str(result.get("summary") or "")[:2000],
+                                     "inputs": [{"source_id": item["source_id"], "title": item["title"], "url": item["url"], "input_kind": item["input_kind"],
+                                                 "text_characters": sum(len(s["text"]) for s in item["segments"])} for item in manifest]},
+                                    self.knowledge_db_path,
+                                ))
+                                created += 1
+                            except ValueError as error:
+                                warnings.append(f"{entry['title']}: {error}")
+                        if not created:
+                            warnings.append("No usable Evidence returned for: " + ", ".join(item["title"] for item in manifest))
+                    except (AIError, CaptureError, ValueError, OSError) as error:
+                        warnings.append(f"Sources {', '.join(group)}: {error}")
                 snapshot = client.usage_snapshot()
-                latest_usage = record_ai_usage(
-                    chat_requests=snapshot.get("chat_requests", 0),
-                    chat_tokens=snapshot.get("chat_tokens", 0),
-                )
-                self._send_json(
-                    {"proposals": proposals,
-                     "summary": str(result.get("summary") or "")[:1000],
-                     "usage": latest_usage}, HTTPStatus.CREATED,
-                )
+                latest_usage = record_ai_usage(chat_requests=snapshot.get("chat_requests", 0), chat_tokens=snapshot.get("chat_tokens", 0))
+                self._send_json({"proposals": proposals, "warnings": warnings, "summary": "\n".join(summaries), "usage": latest_usage}, HTTPStatus.CREATED)
             except (AIError, CaptureError) as error:
                 self._send_json(
                     {"error": getattr(error, "code", "evidence_proposal_failed"),
@@ -2672,8 +2982,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             evidence_ids = payload.get("evidence_ids")
             if not isinstance(evidence_ids, list):
                 evidence_ids = []
+            selection_limit = self._parse_bounded_int(load_config(self.config_path).get("ai_claim_evidence_limit"), 30, 1, 100)
+            if len(evidence_ids) > selection_limit:
+                self._send_json({"message": f"Select at most {selection_limit} items for this run."}, HTTPStatus.BAD_REQUEST)
+                return
             evidence_ids = list(dict.fromkeys(
-                str(item) for item in evidence_ids[:30] if item
+                str(item) for item in evidence_ids if item
             ))
             evidence_items = [
                 item for item in list_evidence(self.knowledge_db_path)
@@ -2691,7 +3005,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             try:
                 config = load_config(self.config_path)
                 client = _client_from_config(
-                    config, require_embedding=False, role="claims",
+                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="claims",
                     profile_id=str(payload.get("model_profile_id") or "")[:80],
                 )
                 artifact = payload.get("artifact")
@@ -2723,13 +3037,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     for tag in item.get("tags", [])
                     if tag
                 ))
-                related_claims = find_related_claims(
-                    " ".join([
-                        focus,
-                        *(item["quote"] for item in evidence_context),
-                    ]),
-                    context_tags, 20, self.knowledge_db_path,
-                    list(dict.fromkeys(item["source_id"] for item in evidence_context)),
+                related_claims, comparison_scope = find_claim_comparison_context(
+                    evidence_context, focus,
+                    self._parse_bounded_int(config.get("ai_claim_comparison_limit"), 100, 1, 1000),
+                    self.knowledge_db_path,
                 )
                 scope["comparison_claim_ids"] = [
                     item["claim_id"] for item in related_claims
@@ -2749,7 +3060,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     ensure_ascii=False,
                 )
                 result = client.chat_json(
-                    _claim_proposal_prompt(), request_payload,
+                    _claim_proposal_prompt(self.config_path.parent / "skills"), request_payload,
                     temperature=0.1, max_tokens=3000,
                 )
                 candidates = result.get("claims") if isinstance(result, dict) else []
@@ -2760,6 +3071,14 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     item["claim_id"]: item for item in related_claims
                 }
                 proposals = []
+                new_claim_refs = {}
+                duplicate_refs = set()
+                for candidate in candidates[:20]:
+                    if isinstance(candidate, dict) and candidate.get("temp_id"):
+                        reference = str(candidate["temp_id"])
+                        if reference in new_claim_refs:
+                            duplicate_refs.add(reference)
+                        new_claim_refs[reference] = None
                 for candidate in candidates[:20]:
                     if not isinstance(candidate, dict):
                         continue
@@ -2792,6 +3111,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                             scope,
                             self.knowledge_db_path,
                         ))
+                        reference = str(candidate.get("temp_id") or "")
+                        if reference and reference not in duplicate_refs and reference not in allowed_claims:
+                            new_claim_refs[reference] = {
+                                "claim_id": "proposal:" + proposals[-1]["id"],
+                                "statement": candidate.get("statement", ""),
+                            }
                     except ValueError:
                         continue
                 updates = result.get("existing_claim_updates") if isinstance(result, dict) else []
@@ -2829,15 +3154,16 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     except ValueError:
                         continue
                 relations = result.get("claim_relations") if isinstance(result, dict) else []
-                for candidate in (relations if isinstance(relations, list) else [])[:12]:
+                relation_targets = {**allowed_claims, **{key: value for key, value in new_claim_refs.items() if value and key not in duplicate_refs}}
+                for candidate in (relations if isinstance(relations, list) else [])[:20]:
                     if not isinstance(candidate, dict):
                         continue
                     subject_id = str(candidate.get("subject_claim_id") or "")
                     object_id = str(candidate.get("object_claim_id") or "")
                     relation_type = str(candidate.get("relation_type") or "").lower()
                     if (
-                        subject_id not in allowed_claims
-                        or object_id not in allowed_claims
+                        subject_id not in relation_targets
+                        or object_id not in relation_targets
                         or subject_id == object_id
                         or relation_type not in {"supports", "contradicts", "related"}
                     ):
@@ -2846,10 +3172,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         proposals.append(create_claim_proposal(
                             {
                                 "operation": "create_relation",
-                                "subject_claim_id": subject_id,
-                                "subject_statement": allowed_claims[subject_id]["statement"],
-                                "object_claim_id": object_id,
-                                "object_statement": allowed_claims[object_id]["statement"],
+                                "subject_claim_id": relation_targets[subject_id]["claim_id"],
+                                "subject_statement": relation_targets[subject_id]["statement"],
+                                "object_claim_id": relation_targets[object_id]["claim_id"],
+                                "object_statement": relation_targets[object_id]["statement"],
                                 "relation_type": relation_type,
                                 "rationale": str(candidate.get("rationale") or "")[:2000],
                                 "evidence": [],
@@ -2893,6 +3219,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                         "skipped": skipped_items,
                         "comparison_claim_count": len(related_claims),
                         "comparison_scope": {
+                            **comparison_scope,
                             "total_claim_count": len(list_claims(self.knowledge_db_path)),
                             "tag_count": len(context_tags),
                             "source_count": len({item["source_id"] for item in evidence_context}),
@@ -2912,9 +3239,11 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 config = set_default_search_mode(
                     str(payload.get("mode") or ""),
                     self.config_path,
+                    ai_review=payload.get("ai_review"),
                 )
                 self._send_json(
-                    {"default_search_mode": config["default_search_mode"]}
+                    {"default_search_mode": config["default_search_mode"],
+                     "search_ai_review": self._parse_bool(config.get("search_ai_review", "false"))}
                 )
             except ValueError as error:
                 self._send_json(
@@ -3034,7 +3363,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 return
             if not isinstance(selected, list):
                 selected = []
-            selected = [item for item in selected[:12] if isinstance(item, dict)]
+            context_limit = self._parse_bounded_int(load_config(self.config_path).get("ai_copilot_context_limit"), 12, 1, 100)
+            context_count = sum(len(payload.get(key) or []) for key in ("sources", "evidence", "claims") if isinstance(payload.get(key), list))
+            if context_count > context_limit:
+                self._send_json({"message": f"Context supports {context_limit} items."}, HTTPStatus.BAD_REQUEST)
+                return
+            selected = [item for item in selected if isinstance(item, dict)]
             workspace_cache = {}
             source_context = []
             for index, item in enumerate(selected):
@@ -3076,7 +3410,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 evidence = []
             evidence_context = []
             snapshot_images = []
-            for item in evidence[:max(0, 12 - len(selected))]:
+            for item in evidence:
                 if not isinstance(item, dict):
                     continue
                 evidence_id = str(item.get("id") or "")[:80]
@@ -3140,7 +3474,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             if not isinstance(selected_claims, list):
                 selected_claims = []
             claim_context = []
-            for item in selected_claims[:12]:
+            for item in selected_claims:
                 if not isinstance(item, dict):
                     continue
                 claim_context.append({
@@ -3186,7 +3520,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             try:
                 config = load_config(self.config_path)
                 client = _client_from_config(
-                    config,
+                    config, skills_dir=self.config_path.parent / "skills",
                     require_embedding=False,
                     role="copilot",
                     profile_id=str(payload.get("model_profile_id") or "")[:80],
@@ -3225,7 +3559,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     if snapshot_images else review_input
                 )
                 review = client.chat_json(
-                    copilot_prompt,
+                    review_copilot_prompt(review_context, config.get("ai_copilot_instructions", ""), self.config_path.parent / "skills"),
                     user_content,
                     temperature=copilot_temperature,
                     max_tokens=copilot_max_tokens,
@@ -3298,6 +3632,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self.wfile.write(response)
             return
         if route == "/api/searxng":
+            if self.library_name != "default":
+                self._send_json(
+                    {"message": "A separate library cannot manage the shared Docker search container."},
+                    HTTPStatus.CONFLICT,
+                )
+                return
             action = str(payload.get("action") or "").strip()
             try:
                 def save_managed_setup(response_payload):
@@ -3360,13 +3700,24 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             return
 
         email = (payload.get("email") or "").strip()
+        obsolete_items = obsolete_config_items(load_config(self.config_path))
+        if obsolete_items and not self._parse_bool(
+            payload.get("confirm_remove_obsolete_config")
+        ):
+            self._send_json(
+                {
+                    "error": "obsolete_config_confirmation_required",
+                    "message": (
+                        "Saving Config will remove settings from older "
+                        "Knowte versions."
+                    ),
+                    "obsolete_config_items": obsolete_items,
+                },
+                HTTPStatus.CONFLICT,
+            )
+            return
         api_key_supplied = "semanticscholar_api_key" in payload
         api_key = (payload.get("semanticscholar_api_key") or "").strip()
-        searxng_url = (payload.get("searxng_url") or "").strip()
-        searxng_proxy = (payload.get("searxng_proxy") or "").strip()
-        web_ignore_year_filter = self._parse_bool(
-            payload.get("web_ignore_year_filter", True)
-        )
         requested_backends = payload.get("enabled_backends", self.default_backends)
         if not isinstance(requested_backends, list):
             requested_backends = []
@@ -3391,21 +3742,30 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         config = set_email(email, self.config_path)
         if api_key_supplied:
             config = set_semanticscholar_key(api_key, self.config_path)
-        config = set_searxng_url(searxng_url, self.config_path)
-        try:
-            configure_searxng_proxy(searxng_proxy)
-        except SearxngManagerError as error:
-            self._send_json(
-                {"error": error.code, "message": str(error)}, HTTPStatus.BAD_REQUEST
+        if "searxng_url" in payload:
+            config = set_searxng_url(
+                str(payload.get("searxng_url") or "").strip(), self.config_path
             )
-            return
-        config = set_searxng_proxy(searxng_proxy, self.config_path)
+        if "searxng_proxy" in payload:
+            searxng_proxy = str(payload.get("searxng_proxy") or "").strip()
+            try:
+                if self.library_name == "default":
+                    configure_searxng_proxy(searxng_proxy)
+            except SearxngManagerError as error:
+                self._send_json(
+                    {"error": error.code, "message": str(error)}, HTTPStatus.BAD_REQUEST
+                )
+                return
+            config = set_searxng_proxy(searxng_proxy, self.config_path)
         config = set_enabled_backends(enabled_backends, self.config_path)
         config = set_max_papers(max_papers, self.config_path)
         config = set_intelligent_max_results(
             intelligent_max_results, self.config_path
         )
-        config = set_web_ignore_year_filter(web_ignore_year_filter, self.config_path)
+        if "web_ignore_year_filter" in payload:
+            config = set_web_ignore_year_filter(
+                self._parse_bool(payload.get("web_ignore_year_filter")), self.config_path
+            )
         ai_field_names = {
             "ai_model_profiles",
             "ai_role_assignments",
@@ -3424,6 +3784,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "ai_timeout_seconds",
             "ai_search_timeout_seconds",
             "ai_stage_timeout_seconds",
+            "ai_evidence_source_limit",
+            "ai_claim_evidence_limit",
+            "ai_claim_comparison_limit",
+            "ai_wiki_claim_limit",
+            "ai_copilot_context_limit",
+            "ai_evidence_request_mode",
             "ai_copilot_instructions",
             "ai_copilot_temperature",
             "ai_copilot_max_tokens",
@@ -3462,6 +3828,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "ai_timeout_seconds": payload.get("ai_timeout_seconds"),
                 "ai_search_timeout_seconds": payload.get("ai_search_timeout_seconds"),
                 "ai_stage_timeout_seconds": payload.get("ai_stage_timeout_seconds"),
+                "ai_evidence_source_limit": payload.get("ai_evidence_source_limit"),
+                "ai_claim_evidence_limit": payload.get("ai_claim_evidence_limit"),
+                "ai_claim_comparison_limit": payload.get("ai_claim_comparison_limit"),
+                "ai_wiki_claim_limit": payload.get("ai_wiki_claim_limit"),
+                "ai_copilot_context_limit": payload.get("ai_copilot_context_limit"),
+                "ai_evidence_request_mode": payload.get("ai_evidence_request_mode"),
                 "ai_copilot_instructions": payload.get("ai_copilot_instructions"),
                 "ai_copilot_temperature": payload.get("ai_copilot_temperature"),
                 "ai_copilot_max_tokens": payload.get("ai_copilot_max_tokens"),
@@ -3474,6 +3846,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     "ai_embedding_api_key"
                 )
             config = set_ai_settings(ai_settings, self.config_path)
+        config = remove_obsolete_config_items(self.config_path)
         public_profiles = _public_ai_profiles(config)
         profile_roles = ai_role_assignments(config)
         profile_by_id = {item["id"]: item for item in public_profiles}
@@ -3498,6 +3871,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 in {"keyword", "intelligent", "import"}
                 else "keyword"
             ),
+            "search_ai_review": self._parse_bool(config.get("search_ai_review", "true" if config.get("default_search_mode") == "intelligent" else "false")),
             "web_ignore_year_filter": self._parse_bool(
                 config.get("web_ignore_year_filter", "true")
             ),
@@ -3536,6 +3910,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 config.get("ai_search_timeout_seconds")
                 or config.get("ai_timeout_seconds"), 45, 5, 600
             ),
+            "ai_evidence_source_limit": self._parse_bounded_int(config.get("ai_evidence_source_limit"), 6, 1, 100),
+            "ai_claim_evidence_limit": self._parse_bounded_int(config.get("ai_claim_evidence_limit"), 30, 1, 100),
+            "ai_claim_comparison_limit": self._parse_bounded_int(config.get("ai_claim_comparison_limit"), 100, 1, 1000),
+            "ai_wiki_claim_limit": self._parse_bounded_int(config.get("ai_wiki_claim_limit"), 100, 1, 1000),
+            "ai_copilot_context_limit": self._parse_bounded_int(config.get("ai_copilot_context_limit"), 12, 1, 100),
+            "ai_evidence_request_mode": config.get("ai_evidence_request_mode", "combined"),
             "ai_stage_timeout_seconds": self._parse_bounded_int(
                 config.get("ai_stage_timeout_seconds")
                 or config.get("ai_timeout_seconds"), 45, 5, 600
@@ -3573,6 +3953,15 @@ class KnowteHandler(SimpleHTTPRequestHandler):
 
     def do_PUT(self):
         parsed = urlparse(self.path)
+        evidence_match = re.fullmatch(r"/api/evidence/([0-9a-f]+)", parsed.path.rstrip("/"))
+        if evidence_match:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                self._send_json(update_evidence(evidence_match.group(1), payload, self.knowledge_db_path))
+            except (ValueError, TypeError) as error:
+                self._send_json({"message": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         view_match = re.fullmatch(r"/api/views/([0-9a-f]+)", parsed.path.rstrip("/"))
         if view_match:
             length = int(self.headers.get("Content-Length", "0"))
@@ -3794,9 +4183,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(chunk)
 
 
-def create_server(host, port, config_path: Path | None = None):
+def create_server(host, port, config_path: Path | None = None, *, library_name="default"):
     web_root = Path(__file__).resolve().parent / "web"
     KnowteHandler.config_path = config_path or CONFIG_PATH
+    KnowteHandler.library_name = library_name
     KnowteHandler.plans_path = (
         KnowteHandler.config_path.with_name("plans.json")
         if config_path is not None
@@ -3828,15 +4218,65 @@ def create_server(host, port, config_path: Path | None = None):
     return server
 
 
+def prepare_library_config(source: Path, name: str, *, create=True) -> Path:
+    """Create a separate library or resolve an existing one without modifying it."""
+    if name.lower() == "default":
+        if create:
+            raise ValueError("The default library already exists; use --mount default or omit both options.")
+        return source
+    if not re.fullmatch(r"[\w-]{1,64}", name) or name.lower() in {
+        "content", "skills", "searxng", "con", "prn", "aux", "nul",
+        *{f"com{i}" for i in range(1, 10)}, *{f"lpt{i}" for i in range(1, 10)},
+    }:
+        raise ValueError("Library NAME must be 1–64 letters, digits, underscores or hyphens, and not a reserved folder/device name.")
+    directory = source.parent / name
+    if directory.is_symlink():
+        raise ValueError("Library directory must not be a symbolic link.")
+    target = directory / "config.yml"
+    if not create:
+        if not target.is_file() or target.is_symlink():
+            raise ValueError(f"Library '{name}' was not found or has no regular config.yml; create it with --new {name}.")
+        return target
+    try:
+        directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+    except FileExistsError:
+        raise ValueError(f"Library directory '{name}' already exists; use --mount {name}.") from None
+    skills = source.parent / "skills"
+    if skills.is_dir():
+        shutil.copytree(skills, directory / "skills")
+    if source.is_file():
+        shutil.copyfile(source, target)
+        target.chmod(0o600)
+    else:
+        save_config(load_config(source), target)
+    return target
+
+
 def main():
     parser = argparse.ArgumentParser(description="Knowte dev server")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "7880")))
-    parser.add_argument("--config", default=str(CONFIG_PATH))
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--config", default=str(CONFIG_PATH),
+                        help="Default library configuration; named libraries live beside it")
+    library = parser.add_mutually_exclusive_group()
+    library.add_argument("--new", metavar="NAME", help="Create and mount a new named library")
+    library.add_argument("--mount", metavar="NAME", help="Mount an existing library (default: default)")
     args = parser.parse_args()
-
-    with create_server(args.host, args.port, Path(args.config)) as httpd:
-        print(f"Knowte server running on http://{args.host}:{args.port}")
+    config_path = Path(args.config).expanduser().resolve()
+    name = args.new if args.new is not None else args.mount if args.mount is not None else "default"
+    if name.lower() == "default":
+        name = "default"
+    try:
+        config_path = prepare_library_config(config_path, name, create=args.new is not None)
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
+    from . import usage
+    usage.USAGE_DIR = config_path.parent
+    usage.USAGE_PATH = config_path.parent / "usage.json"
+    print(f"Library {name} — data: {config_path.parent}")
+    port = args.port if args.port is not None else int(os.getenv("PORT", "7880"))
+    with create_server(args.host, port, config_path, library_name=name) as httpd:
+        print(f"Knowte server running on http://{args.host}:{port}")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

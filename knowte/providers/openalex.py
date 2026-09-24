@@ -145,6 +145,7 @@ def search_openalex(
                 url=url,
                 keywords=keywords,
                 source="OpenAlex",
+                citation_count=item.get("cited_by_count"),
                 paper_url=paper_url,
                 pdf_url=pdf_url,
                 doi_url=doi_url,

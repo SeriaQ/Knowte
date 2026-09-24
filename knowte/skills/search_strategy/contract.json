@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "academic"
+            ]
+          },
+          "purpose": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "target",
+          "purpose"
+        ]
+      },
+      "maxItems": 5
+    }
+  },
+  "required": [
+    "actions"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "answer": {
+      "type": "string"
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_index": {
+            "type": "number"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "add",
+              "skip",
+              "inspect"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_index",
+          "decision",
+          "reason"
+        ]
+      },
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "answer"
+  ]
+}

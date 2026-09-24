@@ -1,18 +1,101 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import io
 import re
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin, urldefrag
 from urllib.request import Request, urlopen
 
 
 class CaptureError(RuntimeError):
     pass
+
+
+def capture_evidence_image(url: str) -> str:
+    """Fetch an original raster asset and normalize it to PNG, never generate it."""
+    if urlparse(url).scheme not in {"http", "https"}:
+        raise CaptureError("Evidence image must have an HTTP(S) URL")
+    with urlopen(Request(url, headers={"User-Agent": "Knowte"}), timeout=30) as response:
+        raw = response.read(10 * 1024 * 1024 + 1)
+    if len(raw) > 10 * 1024 * 1024:
+        raise CaptureError("Original image exceeds 10 MB")
+    from PIL import Image, UnidentifiedImageError
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format not in {"PNG", "JPEG", "WEBP", "GIF"} or image.width * image.height > 20_000_000:
+                raise CaptureError("Unsupported image format or image exceeds 20 megapixels")
+            if getattr(image, "n_frames", 1) > 1:
+                raise CaptureError("Animated images require manual capture")
+            output = io.BytesIO()
+            image.convert("RGBA").save(output, format="PNG")
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as error:
+        raise CaptureError("Could not decode original image") from error
+    if output.tell() > 10 * 1024 * 1024:
+        raise CaptureError("Converted image exceeds 10 MB")
+    return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+
+
+class _ImageDirectory(HTMLParser):
+    def __init__(self, url):
+        super().__init__(convert_charrefs=True)
+        self.url, self.images, self.figure, self.caption = url, [], None, False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "figure" or (tag == "div" and "figure" in attrs.get("class", "").split()):
+            self.figure = {"images": [], "text": [], "tag": tag, "depth": 0}
+        if self.figure and tag == self.figure["tag"]:
+            self.figure["depth"] += 1
+        if tag == "figcaption" or (tag == "p" and "caption" in attrs.get("class", "").split()):
+            self.caption = True
+        if tag != "img" or len(self.images) >= 40:
+            return
+        value = attrs.get("data-src") or attrs.get("src") or ""
+        if not value:
+            return
+        url = urldefrag(urljoin(self.url, value))[0]
+        if urlparse(url).scheme not in {"http", "https"}:
+            return
+        item = {"image_url": url, "alt": attrs.get("alt", "")[:1000], "caption": "", "title": attrs.get("title", "")[:500]}
+        self.images.append(item)
+        if self.figure:
+            self.figure["images"].append(item)
+
+    def handle_data(self, data):
+        if self.caption and self.figure:
+            self.figure["text"].append(data)
+
+    def handle_endtag(self, tag):
+        if tag in {"figcaption", "p"}:
+            self.caption = False
+        if self.figure and tag == self.figure["tag"]:
+            self.figure["depth"] -= 1
+            if not self.figure["depth"]:
+                caption = " ".join(" ".join(self.figure["text"]).split())[:2000]
+                for item in self.figure["images"]:
+                    item["caption"] = caption
+                self.figure = None
+
+
+def discover_source_images(url: str) -> list[dict[str, str]]:
+    """Read image metadata only; this is not a second copy of the page body."""
+    if urlparse(url).scheme not in {"http", "https"}:
+        return []
+    with urlopen(Request(url, headers={"User-Agent": "Knowte"}), timeout=15) as response:
+        if response.headers.get_content_type() not in {"text/html", "application/xhtml+xml"}:
+            return []
+        raw = response.read(2 * 1024 * 1024 + 1)
+        if len(raw) > 2 * 1024 * 1024:
+            raise CaptureError("Image directory exceeds 2 MB")
+        parser = _ImageDirectory(response.geturl())
+        parser.feed(raw.decode("utf-8", errors="replace"))
+        parser.close()
+    return list({item["image_url"]: item for item in parser.images}.values())
 
 
 class _ReadableHTML(HTMLParser):
@@ -166,6 +249,7 @@ def capture_source_content(
     *,
     timeout: float = 30,
     max_bytes: int = 20 * 1024 * 1024,
+    parse_pdf: bool = True,
 ) -> dict[str, Any]:
     url = preferred_capture_url(source)
     parsed = urlparse(url)
@@ -204,7 +288,7 @@ def capture_source_content(
     if len(raw) > max_bytes:
         raise CaptureError("Source content exceeds the 20 MB capture limit.")
     if media_type == "application/pdf" or raw.startswith(b"%PDF"):
-        extracted = _extract_pdf(raw)
+        extracted = _extract_pdf(raw) if parse_pdf else []
         segments = [item["text"] for item in extracted]
         locators = [item["locator"] for item in extracted]
         suffix = "pdf"
@@ -227,7 +311,7 @@ def capture_source_content(
         raise CaptureError(
             f"Unsupported capture format: {media_type}."
         )
-    if not segments:
+    if not segments and not (suffix == "pdf" and not parse_pdf):
         raise CaptureError("No readable content was found in this Source.")
 
     digest = hashlib.sha256(raw).hexdigest()

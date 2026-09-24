@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List
 from .ai import AIConnection, AIError, OpenAICompatibleClient, cosine_similarity
 from .config import ai_model_profiles, ai_role_assignments
 from .search import search_papers
+from .stage_skills import skill_prompt
 
 _ACADEMIC_SOURCES = {"arxiv", "openalex", "semanticscholar"}
 _EMBED_CACHE: Dict[tuple, tuple[float, List[float]]] = {}
@@ -25,6 +26,7 @@ def _client_from_config(
     role: str = "intelligent_search",
     profile_id: str = "",
     timeout_scope: str = "",
+    skills_dir=None,
 ) -> OpenAICompatibleClient:
     profiles = ai_model_profiles(config)
     profile_by_id = {str(item.get("id")): item for item in profiles}
@@ -51,7 +53,7 @@ def _client_from_config(
         if timeout_scope == "search" or (not timeout_scope and role == "intelligent_search")
         else "ai_stage_timeout_seconds"
     )
-    return OpenAICompatibleClient(
+    client = OpenAICompatibleClient(
         AIConnection(
             base_url,
             str(chat_profile.get("api_key") or ""),
@@ -77,6 +79,8 @@ def _client_from_config(
         provider=str(chat_profile.get("provider") or "openai_compatible"),
         custom_recipe=(chat_profile.get("custom_recipe") or {}),
     )
+    client.skills_dir = skills_dir
+    return client
 
 
 def _model_name_from_config(
@@ -183,6 +187,7 @@ def _verify(
     query: str,
     areas: List[str],
     candidates: List[dict],
+    verification_context: str = "",
 ) -> List[dict]:
     if not candidates:
         return []
@@ -198,6 +203,15 @@ def _verify(
                 "title": str(candidate.get("title") or "")[:500],
                 "summary": str(candidate.get("abstract") or "")[:2500],
                 "semantic_score": candidate.get("semantic_score"),
+                "discovery_path": str(candidate.get("discovery_path") or "")[:500],
+                "citation_contexts": [
+                    str(value)[:1000]
+                    for value in (candidate.get("citation_contexts") or [])[:3]
+                ],
+                "citation_intents": [
+                    str(value)[:100]
+                    for value in (candidate.get("citation_intents") or [])[:6]
+                ],
             }
         )
     area_rule = (
@@ -206,36 +220,51 @@ def _verify(
         else "No hard academic area boundary was selected."
     )
     payload = client.chat_json(
+        skill_prompt("relevance", getattr(client, "skills_dir", None)),
         (
-            "You verify research search results against the user's full intent. "
-            "Return JSON only and never invent facts absent from a candidate."
-        ),
-        (
-            f"Intent: {query}\n{area_rule}\nCandidates:\n"
+            f"Intent or Focus: {query}\n{area_rule}\n"
+            + (f"Seed context:\n{verification_context[:16000]}\n" if verification_context else "")
+            + "Candidates:\n"
             f"{json.dumps(compact, ensure_ascii=False)}\n"
-            "Return {\"items\":[{\"key\":\"c0\",\"relevant\":true,"
-            "\"score\":0.0,\"reason\":\"brief evidence-based reason\"}]}. "
-            "Include every candidate once. score must be 0..1. "
-            "A keyword match alone is insufficient."
+            "Return {\"items\":[{\"key\":\"c0\",\"tier\":\"strong|possible|excluded\","
+            "\"score\":0.0,\"reason\":\"brief evidence-based reason\","
+            "\"basis\":\"abstract + citation context|abstract|title only\"}]}. "
+            "Include every candidate exactly once. score must be 0..1. "
+            "A keyword match or citation edge alone is insufficient. When available "
+            "information cannot justify strong, use possible rather than guessing."
         ),
         max_tokens=max(512, min(4096, len(compact) * 160)),
     )
     items = payload.get("items", []) if isinstance(payload, dict) else []
     verified = []
+    decided_keys = set()
     for decision in items:
         if not isinstance(decision, dict):
             continue
         candidate = by_key.get(str(decision.get("key") or ""))
-        if candidate is None or decision.get("relevant") is not True:
+        if candidate is None:
             continue
+        decided_keys.add(str(decision.get("key") or ""))
+        tier = str(decision.get("tier") or "").strip().lower()
+        if not tier and "relevant" in decision:
+            tier = "strong" if decision.get("relevant") is True else "excluded"
+        if tier not in {"strong", "possible", "excluded"}:
+            tier = "possible"
         item = dict(candidate)
         try:
             score = float(decision.get("score", 0))
         except (TypeError, ValueError):
             score = 0.0
         item["verification_score"] = max(0.0, min(1.0, score))
+        item["relevance_tier"] = tier
         item["match_reason"] = str(decision.get("reason") or "Verified against the full intent.")[:600]
-        if item.get("result_type") == "web":
+        item["verification_basis"] = str(decision.get("basis") or "candidate metadata")[:200]
+        if item.get("discovery_links"):
+            item["discovery_path"] = (
+                str(item.get("discovery_path") or "Academic graph")
+                + " → LLM verify"
+            )
+        elif item.get("result_type") == "web":
             item["discovery_path"] = "Web recall → LLM verify"
         else:
             item["discovery_path"] = (
@@ -248,9 +277,21 @@ def _verify(
                 + " → LLM verify"
             )
         verified.append(item)
+    for key, candidate in by_key.items():
+        if key in decided_keys:
+            continue
+        item = dict(candidate)
+        item["relevance_tier"] = "possible"
+        item["verification_score"] = 0.0
+        item["match_reason"] = "The model did not return a usable assessment for this candidate."
+        item["verification_basis"] = "unassessed candidate metadata"
+        verified.append(item)
     return sorted(
         verified,
         key=lambda item: (
+            {"strong": 2, "possible": 1, "excluded": 0}.get(
+                item.get("relevance_tier"), 1
+            ),
             item.get("verification_score", 0),
             item.get("semantic_score", 0),
         ),
@@ -279,6 +320,8 @@ def _verification_fallback(candidates: List[dict], error: AIError) -> List[dict]
             f"LLM verification failed ({error.code}); this result is shown "
             f"from {source_description}."
         )
+        fallback["relevance_tier"] = "possible"
+        fallback["verification_basis"] = "LLM verification unavailable"
         fallback["discovery_path"] = (
             (
                 "Academic recall → semantic ranking"
@@ -300,7 +343,9 @@ def _verify_batched(
     batch_size: int,
     concurrency: int,
     target_count: int,
+    verification_context: str = "",
 ) -> tuple[List[dict], List[AIError], int]:
+    skill_prompt("relevance", getattr(client, "skills_dir", None))
     batches = [
         candidates[start : start + batch_size]
         for start in range(0, len(candidates), batch_size)
@@ -315,7 +360,11 @@ def _verify_batched(
         wave = batches[wave_start : wave_start + worker_count]
         with ThreadPoolExecutor(max_workers=len(wave)) as executor:
             pending = {
-                executor.submit(_verify, client, query, areas, batch): batch
+                executor.submit(
+                    _verify, client, query, areas, batch, verification_context
+                ) if verification_context else executor.submit(
+                    _verify, client, query, areas, batch
+                ): batch
                 for batch in wave
             }
             requests += len(pending)
@@ -326,12 +375,18 @@ def _verify_batched(
                 except AIError as error:
                     errors.append(error)
                     verified.extend(_verification_fallback(batch, error))
-        if len(verified) >= target_count:
+        accepted_count = sum(
+            item.get("relevance_tier") != "excluded" for item in verified
+        )
+        if accepted_count >= target_count:
             break
     return (
         sorted(
             verified,
             key=lambda item: (
+                {"strong": 2, "possible": 1, "excluded": 0}.get(
+                    item.get("relevance_tier"), 1
+                ),
                 item.get("verification_score", -1),
                 item.get("semantic_score", -1),
             ),
@@ -354,17 +409,18 @@ def intelligent_search(
     progress: Callable[[str, Dict[str, Any]], None] | None = None,
     search_actions: List[dict] | None = None,
     profile_id: str = "",
+    skills_dir=None,
 ) -> Dict[str, Any]:
     def report(stage: str, **details: Any) -> None:
         if progress is not None:
             progress(stage, details)
 
     academic_backends = [source for source in backends if source in _ACADEMIC_SOURCES]
-    include_web = "websearch" in backends and bool(config.get("searxng_url"))
     client = _client_from_config(
         config, require_embedding=bool(academic_backends), role="intelligent_search",
-        profile_id=profile_id,
+        profile_id=profile_id, skills_dir=skills_dir,
     )
+    skill_prompt("relevance", skills_dir)
     candidate_limit = max(
         20,
         min(int(config.get("max_papers") or "100"), 100),
@@ -390,17 +446,13 @@ def intelligent_search(
             continue
         action_query = str(item.get("query") or "").strip()[:500]
         target = str(item.get("target") or "both").strip().lower()
-        if action_query and target in {"academic", "web", "both"}:
-            actions.append({"query": action_query, "target": target})
+        if action_query and target in {"academic", "both"}:
+            actions.append({"query": action_query, "target": "academic"})
     if not actions:
-        actions = [{"query": query, "target": "both"}]
+        actions = [{"query": query, "target": "academic"}]
     academic_queries = list(dict.fromkeys(
         item["query"] for item in actions
         if item["target"] in {"academic", "both"}
-    ))
-    web_queries = list(dict.fromkeys(
-        item["query"] for item in actions
-        if item["target"] in {"web", "both"}
     ))
 
     academic_candidates: List[dict] = []
@@ -423,26 +475,6 @@ def intelligent_search(
             stages["recall"]["requests"] += 1
     academic_candidates = _dedupe(academic_candidates)
 
-    web_candidates: List[dict] = []
-    if include_web:
-        report("recall")
-        for retrieval_query in web_queries:
-            web_candidates.extend(search_papers(
-                retrieval_query,
-                limit=limit,
-                backends=["websearch"],
-                year_from=year_from,
-                year_to=year_to,
-                searxng_url=config.get("searxng_url"),
-                web_ignore_year_filter=str(
-                    config.get("web_ignore_year_filter") or ""
-                ).lower() in {"1", "true", "yes", "on"},
-                web_pages=web_pages,
-                strict_match=False,
-            ))
-            stages["recall"]["requests"] += 1
-        web_candidates = _dedupe(web_candidates)
-
     ranked_academic = academic_candidates
     if academic_candidates and client.embedding_model:
         report("embed")
@@ -462,26 +494,9 @@ def intelligent_search(
         warnings.append("embedding_unconfigured")
         stages["embed"] = {"status": "skipped", "requests": 0}
 
-    if ranked_academic and web_candidates:
-        academic_slots = max(1, round(limit * 0.7))
-        web_slots = max(1, limit - academic_slots)
-        verification_candidates = [
-            *ranked_academic[:academic_slots],
-            *web_candidates[:web_slots],
-        ]
-        used = {
-            item.get("id") or item.get("url") or item.get("title")
-            for item in verification_candidates
-        }
-        verification_candidates.extend(
-            item
-            for item in [*ranked_academic, *web_candidates]
-            if (item.get("id") or item.get("url") or item.get("title")) not in used
-        )
-    else:
-        verification_candidates = [*ranked_academic, *web_candidates]
+    verification_candidates = ranked_academic
     report("verify")
-    selected, verification_errors, verification_requests = _verify_batched(
+    assessed, verification_errors, verification_requests = _verify_batched(
         client,
         query,
         areas,
@@ -515,28 +530,32 @@ def intelligent_search(
             "failed_batches": 0,
         }
 
-    final_limit = limit if academic_backends else len(web_candidates)
-    final_results = selected[:final_limit]
+    selected = [
+        item for item in assessed if item.get("relevance_tier") != "excluded"
+    ]
+    excluded = [
+        item for item in assessed if item.get("relevance_tier") == "excluded"
+    ]
+    final_results = selected[:limit]
     source_counts = dict(
         Counter(result.get("source") or "Unknown" for result in final_results)
     )
     return {
         "query": query,
         "results": final_results,
+        "excluded_results": excluded,
         "count": len(final_results),
         "warnings": warnings,
         "stages": stages,
         "search_actions": actions,
         "candidate_counts": {
             "academic": len(academic_candidates),
-            "web": len(web_candidates),
-            "verified": len(selected),
+            "verified": len(assessed),
         },
         "source_counts": source_counts,
         "request_budget": {
             "retrieval": stages["recall"]["requests"],
             "academic_retrieval": len(academic_queries) if academic_backends else 0,
-            "web_retrieval": len(web_queries) if include_web else 0,
             "chat": stages["verify"]["requests"],
             "embedding": stages["embed"]["requests"],
         },

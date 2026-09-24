@@ -13,6 +13,16 @@ from knowte.search import _allocate_quotas, _source_weights, search_papers
 
 
 class ProviderYearFilterTests(unittest.TestCase):
+    def test_citation_counts_merge_without_treating_missing_as_zero(self):
+        base = Paper("a", "Same title", "Author", 2025, "", "", [], "arxiv")
+        from dataclasses import replace
+        pools = search_module._merge_academic_links({
+            "arxiv": [base],
+            "openalex": [replace(base, source="OpenAlex", citation_count=12)],
+        }, ["arxiv", "openalex"])
+        self.assertEqual(pools["arxiv"][0].citation_count, 12)
+        self.assertIsNone(base.citation_count)
+
     def setUp(self):
         websearch._PAGE_CACHE.clear()
         search_module._ACADEMIC_CACHE.clear()

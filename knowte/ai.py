@@ -347,6 +347,18 @@ class OpenAICompatibleClient:
             }
 
     def chat_json(
+        self, system, user, temperature=None, max_tokens=None,
+        extra_parameters=None, allow_text_fallback=False,
+    ):
+        from .stage_skills import prepare_skill_request, validate_skill_result
+        fixed_system, guided_user = prepare_skill_request(system, user)
+        result = self._chat_json(
+            fixed_system, guided_user, temperature, max_tokens,
+            extra_parameters, allow_text_fallback,
+        )
+        return validate_skill_result(system, result)
+
+    def _chat_json(
         self,
         system: str,
         user: str | List[Dict[str, Any]],
@@ -741,12 +753,16 @@ class OpenAICompatibleClient:
         self, system: str, user: str, document: bytes, mime_type: str,
         max_tokens: int = 3000,
     ) -> Any:
+        from .stage_skills import prepare_skill_request, validate_skill_result
+        prompt = system
+        system, user = prepare_skill_request(system, user)
         if self.provider == "openai_compatible":
             raise AIError("recipe_missing", "This provider has no native document recipe.")
-        return self._provider_json(
+        result = self._provider_json(
             system, user, 0.1, max_tokens, None,
             document=document, mime_type=mime_type,
         )
+        return validate_skill_result(prompt, result)
 
     def grounded_json(
         self, system: str, user: str,
@@ -764,10 +780,14 @@ class OpenAICompatibleClient:
                     "This provider has no native document or web browsing recipe.",
                 )
             return self.chat_json(system, user, temperature=0.1, max_tokens=max_tokens)
-        return self._provider_json(
+        from .stage_skills import prepare_skill_request, validate_skill_result
+        prompt = system
+        system, user = prepare_skill_request(system, user)
+        result = self._provider_json(
             system, user, 0.1, max_tokens, None,
             documents=native_documents, urls=source_urls,
         )
+        return validate_skill_result(prompt, result)
 
     def embeddings(self, texts: List[str]) -> List[List[float]]:
         if not self.embedding_model:

@@ -5,6 +5,85 @@ All notable changes to Knowte will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-09-24
+
+### Added
+
+- Related-paper discovery from saved academic Sources through references,
+  citations and recommendations, with an optional Focus, model selection,
+  retrieval caching and explicit coverage/rate-limit warnings.
+- Named libraries: `knowte --new NAME` creates an isolated knowledge library
+  with copied configuration and Skills; `--mount NAME` reopens it. The original
+  library remains `default`, without moving existing data.
+- Customizable stage Skills, with local files, folder reveal, reload and built-in
+  fallback controls. Product rules, output contracts and review permissions remain
+  application-owned.
+- Local PDF, Markdown, TXT and DOCX import, with validation, editable titles and
+  content deduplication. Wiki/Project exports include dependent original files.
+- Evidence extraction from provider-native PDFs or URL access without requiring
+  local text parsing. Config supports combined or per-Source requests; related-page
+  selection adds one model call and supports up to ten pages.
+- Web Evidence can preserve original embedded images and captions. Extraction
+  reports page provenance, coverage gaps, truncation, failures and estimated calls.
+- Versioned Evidence edits. Affected Claims enter a separate Evidence-changed
+  review queue with before/after context and explicit confirmation or withdrawal.
+- Tag/status filters, batch tagging and deletion for Sources and Evidence, with
+  impact previews and themed confirmation dialogs. Tagging has no total item cap
+  and is processed in internal batches.
+- Scoped selection and batch decisions in review queues, including Keep selected
+  disputed for eligible Claims. Failed items remain pending.
+- Configurable proposal, Copilot context, Claim comparison and Wiki batch limits.
+  Wiki organization prioritizes stale, unorganized, then other Claims; Wiki and
+  Article generation default to 100 Claims.
+- Claim proposals can suggest new–new and new–existing relations in the same model
+  call. Relations have independent review and persisted endpoint dependencies;
+  discarded endpoints explicitly block application.
+- Claim Audit discovers missing relations and proposes corrections or removals
+  of existing links. Candidate counts and estimated calls are shown before running;
+  findings require review.
+- Independent Claim Graph with compact stable clusters, Page/relation filters,
+  pan, pinch/modifier-wheel zoom, Fit, one-hop focus and selected-Claim details.
+  Unconnected Claims are separate; Page hierarchy does not determine placement.
+- Wiki Reset clears organization and pending structure drafts after confirmation,
+  preserving Claims, Evidence, Sources, Projects and Articles.
+- Lightweight Article editing, paragraph-citation editing and formatted preview.
+
+### Changed
+
+- Search and Import replace the Keyword/Intelligent/Import switch. AI Review is
+  independent of Discuss; existing Plans and defaults preserve their review behavior.
+- Search focuses on academic providers. Generic SearXNG Web Search is no longer
+  exposed; webpages remain supported through Import and Web Companion.
+- Search and related-paper discovery share Strong / Possible / Excluded review
+  levels. Results support relevance, year and citation-count sorting.
+- Discuss and Import guidance reflect academic retrieval and Source exploration;
+  Import no longer displays or copies irrelevant search filters.
+- Ordinary Config saves detect obsolete settings and ask before removing them.
+- Claim comparison retrieves candidates per Evidence with round-robin coverage,
+  reports truncation and stays within the same proposal call.
+- Wiki Claims have one home Page; other Pages link to them without duplicating
+  membership. Partial organization selects reference pages from summaries before
+  reading bounded Claim samples, with one/two-call estimates.
+
+### Fixed
+
+- Wiki Edit, Apply and Discard avoid redundant reloads and hidden Graph rendering.
+  Local requests have bounded timeouts, independent loading and visible retry/error
+  feedback; late responses do not overwrite newer decisions or unsaved drafts.
+- Empty Wiki patches explain Reset; empty review queues are disabled. Confirmed
+  batch decisions disappear immediately, with partial-failure progress.
+- Claim text no longer clips at rounded corners. Evidence, Claims and review
+  previews render formulas while preserving editable original text.
+- Model selections refresh after Config saves; dropdown arrows and theme styling
+  remain consistent. Proposal selection/progress and cross-tab counts stay in sync.
+- Project Wiki previews preserve knowledge gaps. Saved Articles retain citations,
+  render Markdown and survive Project export/import with remapped Claim IDs.
+- Imported arXiv/DOI links are recognized as papers. Exploration normalizes arXiv
+  identifiers, reports actual sampling/assessment counts and distinguishes failed
+  retrieval from genuinely empty results.
+- Normal scrolling passes over Graph without zooming; clicking a selected node
+  again clears selection and exits focused mode.
+
 ## [0.6.0] - 2026-08-27
 
 ### Added

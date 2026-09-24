@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "properties": {
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "segment_id": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "source_id",
+          "segment_id",
+          "quote"
+        ]
+      },
+      "maxItems": 12
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "evidence"
+  ]
+}

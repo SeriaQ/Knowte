@@ -108,7 +108,7 @@ def _clean(payload: dict[str, Any], existing: dict[str, Any] | None = None) -> d
         "year_from": _year(payload.get("year_from", existing.get("year_from") if existing else None)),
         "year_to": _year(payload.get("year_to", existing.get("year_to") if existing else None)),
         "sources": list(dict.fromkeys(sources)),
-        "search_actions": search_actions if mode == "intelligent" else [],
+        "search_actions": search_actions,
         "created_at": created_at,
         "updated_at": _now(),
         "last_run_at": payload.get(

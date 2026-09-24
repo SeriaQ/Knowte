@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "possible",
+              "excluded"
+            ]
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "tier",
+          "score",
+          "reason",
+          "basis"
+        ]
+      },
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "items"
+  ]
+}

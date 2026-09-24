@@ -21,13 +21,13 @@
 
 ## ✨ What Knowte does
 
-Knowte turns research into an inspectable knowledge chain:
+Knowte turns learning into an inspectable knowledge chain:
 
-> Search → Sources → Evidence → Claims → Wiki / Projects
+> Sources → Evidence → Claims → Wiki
 
-- **Find or import Sources.** Search arXiv, OpenAlex, Semantic Scholar, and an
-  optional SearXNG web source, or import links and structured results from
-  elsewhere.
+- **Find or import Sources.** Search arXiv, OpenAlex, and Semantic Scholar;
+  import links or structured results; then follow citations and academic-graph
+  recommendations from Sources you trust.
 - **Read and ground.** Inspect saved papers and webpages, then preserve exact
   text passages or visual regions as Evidence.
 - **Distill with review.** Write Claims manually or let a model propose them.
@@ -62,6 +62,26 @@ Specify them only when needed:
 knowte --host 127.0.0.1 --port 8080
 ```
 
+To try a clean, separate knowledge library:
+
+```bash
+knowte --new learning
+```
+
+Open [http://127.0.0.1:7880](http://127.0.0.1:7880). This library stores its data
+in `~/.knowte/learning/` and copies your configuration (including API keys) and custom
+skills on creation, but no existing knowledge or Plans. Open it again with
+`knowte --mount learning`. Run `knowte` (or `knowte --mount default`) to use
+the original `default` library, which stays in `~/.knowte/` without moving files.
+`--new` rejects existing directories; `--mount` rejects missing libraries, and the
+two options cannot be combined. Replace `learning` with your own
+name (letters, numbers, underscores or hyphens). Model calls are real and may
+incur costs. Companion needs separate pairing with this address.
+With `--config PATH`, the named folder is created alongside that configuration;
+`--port` (or `PORT`) overrides the default port of 7880 for every library.
+To run two libraries at once, assign different ports, e.g.
+`knowte --mount learning --port 7881`.
+
 From a source checkout, use:
 
 ```bash
@@ -76,13 +96,12 @@ no account or AI configuration.
 
 1. Enter a topic, title, author, or keywords in **Search**.
 2. Optionally choose research areas and a year range.
-3. Leave **Keyword** selected and click **Search**.
+3. Leave **AI Review** off and click **Search**.
 4. Select useful results in the list. The Review panel tracks the selection.
 5. Click **Add selected Sources** to save them to the global Source Library.
 
 Use **Find More** to continue the same retrieval. Knowte reuses cached academic
-candidates when possible and requests the next actual SearXNG page for Web
-Search.
+candidates when possible before making another provider request.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/SeriaQ/Knowte/main/docs/images/knowte-workflow-search.jpg" alt="Knowte Search workspace with Intelligent Search, filters, usage channels, and Review workspace" />
@@ -93,16 +112,26 @@ Search.
 
 1. Open **Sources**, select a saved Source, and use the magnifying-glass action
    to inspect it.
-2. Select text or capture a region to create precise Evidence. You can also
-   select one or more Sources, enter an optional focus, and choose
-   **Propose Evidence via LLM**.
-3. Open **Evidence** to review material across Sources. Select up to 30 items,
+2. To expand from trusted papers, select one to three Sources, optionally enter
+   a Focus under **Explore related papers**, and review the Strong, Possible,
+   and Excluded candidates found through references, citations, and graph
+   recommendations.
+3. Select text or capture a region to create precise Evidence. You can also
+   select one or more Sources, enter a focus, and choose
+   **Propose Evidence via LLM**. For documentation websites, **Related pages**
+   discovers navigation/sitemap links and uses one extra model call to select
+   relevant pages (up to ten total). Combined extraction uses two calls;
+   one-by-one uses N + 1, where N is the selected page count. This is not a
+   full-site crawl. Review shows each page's actual origin; new Sources are
+   saved only when you accept their Evidence.
+4. Open **Evidence** to review material across Sources. Select items within the
+   limit configured in **Config → Knowledge stages**,
    then write a Claim manually or choose **Propose Claims via LLM**.
-4. Open **Claims** to accept, keep disputed, revise, relate, tag, or withdraw
+5. Open **Claims** to accept, keep disputed, revise, relate, tag, or withdraw
    Claims. Reviewed active Claims enter the global Wiki automatically; select
    a subset when you want to add it to the active Project.
-5. Open **Wiki** and choose **Organize with AI** to structure all reviewed
-   Claims, or switch to **Graph** to inspect accepted Claim relations. Use
+6. Open **Wiki** and choose **Organize with AI** to structure reviewed Claims
+   in batches (100 by default), or switch to **Graph** to inspect accepted Claim relations. Use
    **Projects** to collect a topic-specific subset and generate an Article.
 
 Tab spinners show work still running. A notification beside a destination Tab
@@ -115,20 +144,30 @@ notification.
 
 ### Search
 
-Search has three modes:
+Search has two entry points:
 
-- **Keyword** sends the entered query directly to the enabled search backends.
-- **Intelligent** retrieves candidates and uses configured models for semantic
-  ranking and relevance verification. The original query is searched directly
-  unless you choose **Discuss**.
+- **Search** retrieves from the enabled academic backends. Optional **AI Review**
+  adds embedding ranking (when configured) and LLM relevance verification.
 - **Import** accepts URLs, DOI or arXiv identifiers, and Knowte's structured
-  JSON format. **Copy import prompt** provides instructions you can give to an
+  JSON format. **Copy suggested prompt** provides instructions you can give to an
   external LLM.
 
-In Intelligent mode, **Discuss** asks the Search Copilot to propose separate
-Academic and Web retrieval queries. You can continue the conversation, edit
-the proposals, and move candidates into or out of the Top 5 Search list. The
+  **Upload documents** accepts PDF, Markdown, TXT, and DOCX (up to 20 MB each).
+  Choose or drop files, edit their titles, then import them into Sources. Files
+  are parsed before saving; unsupported, unreadable, or empty documents are
+  rejected. PDFs retain their pages, including scanned pages for region capture;
+  Markdown/TXT and DOCX use a text reading view, not full original formatting.
+  Text files must use UTF-8 or UTF-16. Image-only DOCX should be exported to PDF.
+  Duplicate file contents reuse the existing Source. Uploaded originals travel
+  with Wiki/Project packages when their Sources are included.
+
+With AI Review either on or off, **Discuss** calls the Search Copilot to propose focused
+academic retrieval queries. You can continue the conversation, edit the
+proposals, and move candidates into or out of the Top 5 Search list. The
 confirmed Search list—not the unchanged text in the input—is then executed.
+With AI Review off, candidates are searched directly and results deduplicated,
+without embedding or LLM review. Discuss itself still uses the model API.
+Old Keyword Plans/defaults map to AI Review off; Intelligent ones map to on.
 
 Filters apply to every retrieval action. **Save Plan** preserves reusable
 search conditions; Plans currently run manually and use the credentials and
@@ -145,6 +184,13 @@ becomes or rewrites a Source.
   when native layout or interaction matters.
 - **Refresh** captures the latest accessible content again.
 - Tags and Annotations can be attached without changing the captured Source.
+- **Explore related papers** follows references, citations, and academic-graph
+  recommendations from one to three selected Seed Sources. An optional Focus
+  guides the shared Strong / Possible / Excluded relevance review.
+  Retrieval is sampled, not exhaustive; the result summary distinguishes retrieved
+  and assessed candidates and flags unavailable paths. Retrieval responses are
+  cached for 15 minutes while Knowte is running, and rate limits trigger a cooldown.
+  Running Explore again still performs a new model review of available candidates.
 
 Sources remain globally shared. Projects select reviewed Claims; their
 supporting Evidence and Sources follow automatically through provenance.
@@ -163,7 +209,8 @@ by an AI model.
 AI-proposed Evidence includes its quotation, location, rationale, and any
 material caveat. It stays in **Awaiting review** until accepted or discarded.
 Accepted Evidence can be opened back at its Source location, tagged in batches,
-annotated, and reused across Claims.
+annotated, edited with version history, and reused across Claims. Editing linked
+Evidence returns affected Claims to an **Evidence changed** review queue.
 
 ### Claims
 
@@ -180,6 +227,8 @@ relations are **supports**, **contradicts**, or **related**.
 
 Claim proposals consider the selected Evidence together and compare likely
 existing Claims before suggesting new Claims, links, revisions, or relations.
+Relations may connect new drafts to each other or to existing Claims. Accept their
+endpoint Claims first, then review the relations; batch acceptance handles this order.
 The proposal report shows what was considered and what was skipped. Proposed
 changes do not enter the knowledge base until reviewed.
 
@@ -187,7 +236,9 @@ Use **Audit Claims** when you want a broader consistency pass. An audit can
 cover the entire Library or an Any-of / All-of Tag scope. Knowte first builds a
 local set of likely pairs, shows the expected number of model batches, and then
 lets you start, pause, resume, or cancel the review. Its findings enter the
-same proposal queue rather than changing Claims automatically.
+same proposal queue rather than changing Claims automatically. It also discovers
+missing relations and reviews existing links for correction or removal. This is
+a candidate-based check, not an exhaustive comparison of every possible pair.
 
 ### Wiki and Projects
 
@@ -197,7 +248,10 @@ These are two projections over the same global knowledge objects:
   reviewed active Claim. New Claims appear under **Unorganized** until a
   reviewed structural patch assigns them to Pages.
 - **Graph** is rebuilt deterministically from accepted Claims and their
-  relations. It does not ask a model to invent edges.
+  relations, independently of Page hierarchy. Filter by Page or relation type,
+  select a node to inspect its connections, and use **Focus selected** or **Fit**.
+  Drag to pan; pinch or hold Ctrl (Windows/Linux) / Cmd (macOS) while scrolling
+  to zoom. Click the selected node again to deselect. No model calls are needed.
 - **Project** selects Claims for one topic and Purpose. Supporting Evidence and
   Sources follow through Claim provenance.
   Open a Project to filter the global Claim pool by text, Any-of Tags, and
@@ -228,7 +282,7 @@ copy of `~/.knowte/` remains the complete application backup.
 
 ## 🧠 Configure AI
 
-AI is optional. Keyword Search and manual knowledge work remain available
+AI is optional. Search with AI Review off and manual knowledge work remain available
 without it.
 
 Open **Config → AI Models**:
@@ -236,8 +290,8 @@ Open **Config → AI Models**:
 1. Add one **Model profile** for every model or endpoint you want to use.
 2. Choose its provider, Base URL, exact model ID, optional API key, proxy
    routing, and available capabilities.
-3. Under **AI roles**, assign an exact profile to Embeddings, Intelligent
-   Search, Review Copilot, Evidence, Claims, Wiki, and Article generation.
+3. Under **AI roles**, assign an exact profile to Embeddings, Search
+   (AI Review / Discuss), Review Copilot, Evidence, Claims, Wiki, and Article generation.
 4. Save Config.
 
 Knowte includes adapters for OpenAI-compatible endpoints, OpenAI, Google
@@ -267,6 +321,21 @@ panel can expand into the main workspace for detailed context management.
 Custom instructions and supported request parameters are configurable; stage
 prompts remain separate so Search discussion, Evidence extraction, Claim
 review, and Wiki maintenance do not share the wrong task contract.
+
+In **Config → Stage skills**, select a stage and choose **Create custom copy** to create
+an editable `~/.knowte/skills/<stage>/SKILL.md`. **Show in Finder / Open folder**
+opens its location; **Reload** validates your edits and refreshes the preview.
+Edits apply to the next request. **Use built-in** disables the custom version
+without deleting it; **Use custom** reactivates it. Knowte updates do not
+overwrite your files.
+
+Keep the `stage` and `contract_version` metadata in the file. Incompatible
+versions block the affected stage until you update the Skill or select the
+built-in version. Product rules and output contracts are read-only: a custom
+Skill changes methods and preferences, not object types, review permissions,
+or accepted output fields. Invalid model output is shown for inspection without
+an automatic retry. Search Skills also include editable, Area-specific examples;
+arbitrary scripts and other referenced files are not executed or loaded.
 
 API keys are stored in `~/.knowte/config.yml`, are exposed to the UI only as
 configured / not configured, and are never copied into Plans. Choose providers
@@ -304,82 +373,6 @@ extension does not need to be reinstalled after ordinary Knowte restarts.
 
 ---
 
-## 🌐 Enable Web Search
-
-Web Search uses [SearXNG](https://github.com/searxng/searxng), a separate
-open-source metasearch engine. Knowte can set up and operate a private local
-instance, but Docker must already be installed and running.
-
-### Managed setup
-
-Open **Config → Source Connections → Web Search · SearXNG**, then choose
-**Set up**. Knowte will:
-
-- pull the official `docker.io/searxng/searxng:latest` image, automatically
-  trying the official `ghcr.io/searxng/searxng:latest` package if that registry
-  cannot be reached;
-- create a local-only service and verify its JSON search API;
-- prefer port `8888`, falling back through `8889`–`8898`;
-- save and enable the working endpoint.
-
-Docker Desktop, Docker Engine, Colima, and compatible alternatives are
-supported. The Docker Desktop window does not need to remain open.
-
-Use **Start / Stop** to control the container, **Update** to pull and recreate
-it, **View logs** to inspect recent output, and **Remove** to remove the managed
-service. The image remains cached unless **Delete cached image too** is
-selected. Managed logs are capped at about 30 MB and image pulls time out after
-10 minutes. If a pull is interrupted, Docker keeps completed image layers, so a
-later **Set up** attempt can reuse them; an unfinished layer may need to resume
-or restart.
-
-If both official registries are slow or unavailable, configure a registry
-mirror in Docker itself. This keeps authentication, caching, and mirror policy
-consistent for every Docker client instead of storing registry-specific image
-paths in Knowte.
-
-SearXNG can run locally without a proxy, but it is not a network bypass: each
-enabled engine still needs outbound access to its upstream service. A healthy
-container may therefore return few or no results when those upstreams are not
-reachable. When required, configure an outgoing proxy in SearXNG itself; AI
-model proxy settings in Knowte do not affect the SearXNG container. See the
-[SearXNG outgoing-request settings](https://docs.searxng.org/admin/settings/settings_outgoing.html).
-
-### Existing SearXNG
-
-Follow the official
-[SearXNG Docker installation guide](https://docs.searxng.org/admin/installation-docker.html)
-and enable JSON output:
-
-```yaml
-search:
-  formats:
-    - html
-    - json
-```
-
-Then enable Web Search, enter the endpoint, and save Config:
-
-```text
-http://127.0.0.1:8888/search
-```
-
-Verify it with:
-
-```bash
-curl --noproxy '*' -s \
-  'http://127.0.0.1:8888/search?q=alpha&format=json' \
-  | python -m json.tool
-```
-
-For a custom Docker installation, set `KNOWTE_DOCKER_BIN` to the Docker
-executable. See the
-[SearXNG Search API documentation](https://docs.searxng.org/dev/search_api.html)
-for endpoint details. SearXNG is distributed under
-[its own license](https://github.com/searxng/searxng/blob/master/LICENSE).
-
----
-
 ## 🔎 Search sources and result limits
 
 | Source | Coverage | Optional configuration |
@@ -387,21 +380,16 @@ for endpoint details. SearXNG is distributed under
 | **arXiv** | Preprints and open research papers | None |
 | **OpenAlex** | Broad scholarly metadata | Contact email recommended |
 | **Semantic Scholar** | Papers and citation metadata | API key |
-| **SearXNG** | General web results | Running SearXNG endpoint |
 
-**Keyword results** defaults to `100`. It is the initial academic target and
+**Search results (AI Review off)** defaults to `100`. It is the initial academic target and
 the increment used by **Find More**. Academic providers cap a single request at
 `100`, so Knowte caches surplus candidates and avoids another provider request
 while usable cached results remain.
 
-**Intelligent results** defaults to `20` and controls how many candidates may
-pass final model verification. Web-only searches use the actual results in
-each SearXNG page rather than pretending every page contains a fixed number.
-
-For mixed searches, the initial source allocation is `3:3:3:1` for three
-academic sources plus Web, `4:4:2` for two plus Web, and `7:3` for one plus Web.
-Academic sources share evenly without Web. These are targets: available
-academic results fill shortages after filtering and deduplication.
+**AI-reviewed results** defaults to `20` and controls how many Strong or
+Possible candidates may pass final model verification. Excluded candidates
+remain available in a folded section for inspection. The same three levels are
+used by Source-based related-paper discovery.
 
 ---
 

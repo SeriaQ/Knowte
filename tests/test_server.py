@@ -1,5 +1,7 @@
 import json
 import os
+import socket
+from contextlib import ExitStack
 from http.client import HTTPConnection
 import tempfile
 import threading
@@ -24,6 +26,327 @@ from knowte.server import KnowteTCPServer, _import_candidates, create_server
 
 
 class SearchApiTests(unittest.TestCase):
+    def test_new_claim_relations_resolve_from_one_model_call(self):
+        from knowte.knowledge import accept_claim_proposal, list_claim_proposals
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "knowte.db"
+            source, _, _ = save_source({"title": "RL", "url": "https://example.test/rl"}, path=db)
+            workspace = store_capture(source["id"], {"url": source["url"], "media_type": "text/html",
+                "sha256": "relations", "raw_path": str(root / "page.html"),
+                "segments": ["RL policies select actions and thereby affect returns."]}, db)
+            segment = workspace["segments"][0]
+            evidence = create_evidence({"segment_id": segment["id"], "quote": segment["text"],
+                "start_offset": 0, "end_offset": len(segment["text"])}, db)
+            old = create_claim({"statement": "RL policies affect returns", "basis": "reported",
+                "evidence": [{"evidence_id": evidence["id"], "stance": "supports"}]}, db)
+            client = MagicMock()
+            client.chat_json.return_value = {"claims": [
+                {"temp_id": "new:1", "statement": "Policies select actions", "basis": "reported",
+                 "evidence": [{"evidence_id": evidence["id"], "stance": "supports"}]},
+                {"temp_id": "new:2", "statement": "Actions affect returns", "basis": "reported",
+                 "evidence": [{"evidence_id": evidence["id"], "stance": "supports"}]},
+            ], "claim_relations": [
+                {"subject_claim_id": "new:1", "object_claim_id": "new:2", "relation_type": "related", "rationale": "Action mechanism"},
+                {"subject_claim_id": "new:2", "object_claim_id": old["id"], "relation_type": "supports", "rationale": "Effect on return"},
+                {"subject_claim_id": "invented", "object_claim_id": "new:1", "relation_type": "supports"},
+            ]}
+            client.usage_snapshot.return_value = {"chat_requests": 1, "chat_tokens": 100}
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(usage, "USAGE_DIR", root), patch.object(usage, "USAGE_PATH", root / "usage.json"):
+                status, body = self._request(create_server("127.0.0.1", 0, root / "config.yml"), "POST",
+                    "/api/claim-proposals/generate", json.dumps({"evidence_ids": [evidence["id"]]}))
+            self.assertEqual(status, 201, body)
+            self.assertEqual(client.chat_json.call_count, 1)
+            self.assertEqual(len(body["proposals"]), 4)
+            for proposal in body["proposals"][:2]:
+                accept_claim_proposal(proposal["id"], path=db)
+            for proposal in list_claim_proposals(db):
+                self.assertFalse(proposal["payload"]["subject_claim_id"].startswith("proposal:"))
+                accept_claim_proposal(proposal["id"], path=db)
+
+    def test_audit_discovers_support_and_reviews_existing_relation(self):
+        from knowte.knowledge import create_claim_relation, create_claim_audit, accept_claim_proposal, get_claim
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "knowte.db"
+            a = create_claim({"statement": "Policy selects actions", "basis": "background", "intentionally_ungrounded": True, "tags": ["RL"]}, db)
+            b = create_claim({"statement": "Behavior determines return", "basis": "background", "intentionally_ungrounded": True, "tags": ["RL"]}, db)
+            client = MagicMock()
+            assessment = {"left_claim_id": a["id"], "right_claim_id": b["id"],
+                "judgment": "supports", "subject_claim_id": b["id"], "object_claim_id": a["id"], "rationale": "Directional reason"}
+            client.chat_json.return_value = {"assessments": [assessment]}
+            client.usage_snapshot.return_value = {"chat_requests": 1, "chat_tokens": 100}
+            with patch("knowte.server._client_from_config", return_value=client), patch.object(usage, "USAGE_DIR", root), patch.object(usage, "USAGE_PATH", root / "usage.json"):
+                audit = create_claim_audit(path=db)
+                status, body = self._request(create_server("127.0.0.1", 0, root / "config.yml"), "POST", f"/api/claim-audits/{audit['id']}/run", "{}")
+                self.assertEqual(status, 200, body)
+                proposal = body["proposals"][0]
+                self.assertEqual(proposal["payload"]["subject_claim_id"], b["id"])
+                accept_claim_proposal(proposal["id"], path=db)
+                old = get_claim(a["id"], db)["relations"][0]
+                assessment.update({"judgment": "distinct", "relation_reviews": [{**old, "action": "remove", "rationale": "Not justified"}]})
+                audit = create_claim_audit(path=db)
+                status, body = self._request(create_server("127.0.0.1", 0, root / "config.yml"), "POST", f"/api/claim-audits/{audit['id']}/run", "{}")
+                self.assertEqual(status, 200, body)
+                sent = json.loads(client.chat_json.call_args.args[1])
+                self.assertEqual(len(sent["pairs"][0]["existing_relations"]), 1)
+                self.assertEqual(body["proposals"][0]["payload"]["operation"], "revise_relation")
+                self.assertEqual(len(get_claim(a["id"], db)["relations"]), 1)
+                accept_claim_proposal(body["proposals"][0]["id"], path=db)
+                self.assertEqual(get_claim(a["id"], db)["relations"], [])
+
+    def test_wiki_reset_requires_confirmation_and_returns_unorganized_claims(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.yml"
+            database = config.with_name("knowte.db")
+            claim = create_claim({"statement": "Keep this Claim", "basis": "background",
+                                  "intentionally_ungrounded": True}, database)
+            draft = create_wiki_proposal({"pages": [{"key": "root", "title": "Root",
+                                                    "claim_ids": [claim["id"]]}]}, "test", path=database)
+            accept_wiki_proposal(draft["id"], database)
+            status, _ = self._request(create_server("127.0.0.1", 0, config), "POST", "/api/wiki/reset", "{}")
+            self.assertEqual(status, 400)
+            from knowte.knowledge import get_wiki
+            self.assertEqual(len(get_wiki(database)["pages"]), 1)
+            status, result = self._request(create_server("127.0.0.1", 0, config), "POST", "/api/wiki/reset", '{"confirmed":true}')
+            self.assertEqual(status, 200)
+            self.assertEqual(result["pages"], [])
+            self.assertEqual(result["unorganized_claim_ids"], [claim["id"]])
+
+    def test_startup_connection_burst_fits_listen_queue(self):
+        # Deliberately do not accept yet: startup connections must fit in the
+        # kernel queue, not depend on the serving thread winning a race.
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            server = create_server("127.0.0.1", 0, Path(directory) / "config.yml")
+            stack.callback(server.server_close)
+            for _ in range(20):
+                stack.enter_context(socket.create_connection(server.server_address, timeout=1))
+
+    def test_article_claim_limit_is_one_hundred(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.yml"
+            claims = [{"id": f"claim-{i}", "statement": f"Fact {i}", "lifecycle": "active"} for i in range(100)]
+            project = {"title": "Test", "purpose": "Test", "claims": claims}
+            client = MagicMock()
+            client.usage_snapshot.return_value = {}
+            client.chat_json.side_effect = [
+                {"claim_ids": [claim["id"] for claim in claims]},
+                {"title": "Test", "introduction": "Test", "sections": [{"heading": "Test", "paragraphs": [{"text": "Fact", "claim_ids": [claims[-1]["id"]]}]}]},
+            ]
+            with patch("knowte.server.get_project", return_value=project), patch("knowte.server._client_from_config", return_value=client):
+                status, response = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/project-articles/generate", json.dumps({"project_id": "test", "goal": "Test"}))
+                self.assertEqual(status, 200, response)
+                self.assertEqual(len(json.loads(client.chat_json.call_args_list[1].args[1])["claims"]), 100)
+                claims.append({"id": "extra", "statement": "Extra", "lifecycle": "active"})
+                client.reset_mock()
+                status, response = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/project-articles/generate", json.dumps({"project_id": "test", "goal": "Test"}))
+                self.assertEqual(status, 400, response)
+                client.chat_json.assert_not_called()
+
+    def test_wiki_model_receives_only_configured_batch(self):
+        from knowte.knowledge import get_wiki, prepare_wiki_batch
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.yml"
+            config_path.write_text("ai_wiki_claim_limit: 1\n", encoding="utf-8")
+            database = Path(directory) / "knowte.db"
+            for i in range(3):
+                create_claim({"statement": f"Fact {i}", "basis": "background", "intentionally_ungrounded": True}, database)
+            selected, _ = prepare_wiki_batch(get_wiki(database), 1)
+            client = MagicMock()
+            client.chat_json.return_value = {"pages": [{"key": "new", "title": "First batch", "claim_ids": [selected[0]["id"]]}]}
+            client.usage_snapshot.return_value = {}
+            with patch("knowte.server._client_from_config", return_value=client), patch("knowte.server._model_name_from_config", return_value="test"):
+                status, response = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/wiki/proposals/generate", "{}")
+            self.assertEqual(status, 201, response)
+            sent = json.loads(client.chat_json.call_args.args[1])
+            self.assertEqual(len(sent["claims"]), 1)
+            self.assertTrue(sent["batch_mode"])
+            accepted = accept_wiki_proposal(response["proposal"]["id"], database)
+            self.assertEqual(len(accepted["unorganized_claim_ids"]), 2)
+            page_id = accepted["pages"][0]["id"]
+            original_id = selected[0]["id"]
+            next_batch, _ = prepare_wiki_batch(accepted, 1)
+            client.reset_mock()
+            client.chat_json.side_effect = [
+                {"page_ids": [page_id]},
+                {"pages": [{"key": page_id, "title": "First batch", "summary": "Combined context",
+                            "claim_ids": [next_batch[0]["id"]]}]},
+            ]
+            with patch("knowte.server._client_from_config", return_value=client), patch("knowte.server._model_name_from_config", return_value="test"):
+                status, response = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/wiki/proposals/generate", "{}")
+            self.assertEqual(status, 201, response)
+            self.assertEqual(client.chat_json.call_count, 2)
+            selection_input = json.loads(client.chat_json.call_args_list[0].args[1])
+            self.assertNotIn("claim_ids", selection_input["directory"][0])
+            self.assertEqual(len(selection_input["claims"]), 1)
+            organization_input = json.loads(client.chat_json.call_args_list[1].args[1])
+            self.assertEqual(organization_input["reference_pages"][0]["claims"][0]["id"], original_id)
+            self.assertEqual(len(organization_input["claims"]), 1)
+            accepted = accept_wiki_proposal(response["proposal"]["id"], database)
+            self.assertIn(original_id, accepted["pages"][0]["claim_ids"])
+            self.assertEqual(len(accepted["unorganized_claim_ids"]), 1)
+            client.reset_mock()
+            client.chat_json.side_effect = [{"page_ids": ["invented-page"]}]
+            with patch("knowte.server._client_from_config", return_value=client):
+                status, response = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/wiki/proposals/generate", "{}")
+            self.assertEqual(status, 400, response)
+            self.assertEqual(client.chat_json.call_count, 1)
+
+    def test_batch_deletion_preview_and_confirmation_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.yml"
+            database = Path(directory) / "knowte.db"
+            source = save_source({"title": "Temporary", "url": "https://example.org/delete"}, path=database)[0]
+            payload = {"entity_type": "source", "entity_ids": [source["id"]]}
+            status, plan = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/knowledge/delete-preview", json.dumps(payload))
+            self.assertEqual(status, 200, plan)
+            self.assertEqual(plan["sources"], 1)
+            status, result = self._request(create_server("127.0.0.1", 0, config_path), "POST", "/api/knowledge/delete", json.dumps({**payload, "token": plan["token"]}))
+            self.assertEqual(status, 200, result)
+
+    def test_configured_selection_limits_reject_instead_of_truncating(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.yml"
+            config_path.write_text("ai_evidence_source_limit: 2\nai_claim_evidence_limit: 3\nai_copilot_context_limit: 2\n", encoding="utf-8")
+            cases = [
+                ("/api/evidence-proposals/generate", {"source_ids": ["a", "b", "c"], "focus": "test"}),
+                ("/api/claim-proposals/generate", {"evidence_ids": ["a", "b", "c", "d"]}),
+                ("/api/review/chat", {"question": "test", "sources": [{}], "evidence": [{}], "claims": [{}]}),
+            ]
+            for route, payload in cases:
+                server = create_server("127.0.0.1", 0, config_path)
+                status, result = self._request(server, "POST", route, json.dumps(payload))
+                self.assertEqual(status, 400, result)
+                self.assertIn("message", result)
+
+    def setUp(self):
+        self.image_directory = patch("knowte.server.discover_source_images", return_value=[]).start()
+        self.addCleanup(patch.stopall)
+
+    def test_web_image_candidates_preserve_caption_and_reject_invented_url(self):
+        import base64
+        import io
+        from PIL import Image
+        raw = io.BytesIO()
+        Image.new("RGB", (2, 2)).save(raw, "PNG")
+        png = "data:image/png;base64," + base64.b64encode(raw.getvalue()).decode()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = create_server("127.0.0.1", 0, root / "config.yml")
+            source = save_source({"title": "Intro", "url": "https://example.org/intro", "result_type": "web"}, path=root / "knowte.db")[0]
+            self.image_directory.return_value = [{"image_url": "https://example.org/figure.jpg", "caption": "Original caption", "alt": "Diagram", "title": ""}]
+            client = MagicMock()
+            client.usage_snapshot.return_value = {}
+            client.grounded_json.return_value = {"evidence": [
+                {"source_id": source["id"], "evidence_type": "snapshot", "image_url": url, "quote": "Invented caption"}
+                for url in ["https://example.org/figure.jpg", "https://example.org/fake.png"]]}
+            with patch("knowte.server.load_config", return_value={}), patch("knowte.server.ai_model_profiles", return_value=[]), patch("knowte.server.ai_profile_for_role", return_value={"capabilities": ["url_fetch"]}), patch("knowte.server._client_from_config", return_value=client), patch("knowte.server._model_name_from_config", return_value="dummy"), patch("knowte.server.record_ai_usage", return_value={}), patch("knowte.server.capture_evidence_image", return_value=png) as download:
+                status, result = self._request(server, "POST", "/api/evidence-proposals/generate", json.dumps({"source_ids": [source["id"]], "focus": "concepts"}))
+            self.assertEqual(status, 201)
+            self.assertEqual(len(result["proposals"]), 1, result)
+            self.assertEqual(result["proposals"][0]["payload"]["quote"], "Original caption")
+            self.assertEqual(download.call_count, 1)
+            self.assertIn("not in this page", " ".join(result["warnings"]))
+            manifest = json.loads(client.grounded_json.call_args.args[1])
+            self.assertEqual(manifest["sources"][0]["images"][0]["caption"], "Original caption")
+
+    def test_related_pages_call_counts_and_deferred_sources(self):
+        from knowte.knowledge import list_sources
+        for mode, extraction_calls in [("combined", 1), ("individual", 2)]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                server = create_server("127.0.0.1", 0, root / "config.yml")
+                source = save_source({"title": "Intro", "url": "https://example.org/intro", "result_type": "web"}, path=root / "knowte.db")[0]
+                pages = [{"id": str(n), "title": f"Chapter {n}", "url": f"https://example.org/{n}", "parent_source_id": source["id"]} for n in range(2)]
+                client = MagicMock()
+                client.usage_snapshot.return_value = {}
+                client.chat_json.return_value = {"page_ids": ["0", "1"], "summary": "Both relevant"}
+                def extraction(prompt, request, **kwargs):
+                    items = json.loads(request)["sources"]
+                    self.assertTrue(all(not item["segments"] for item in items))
+                    return {"evidence": [{"source_id": item["source_id"], "quote": "Original passage"} for item in items]}
+                client.grounded_json.side_effect = extraction
+                with patch("knowte.server.load_config", return_value={"ai_evidence_request_mode": mode}), patch("knowte.server.ai_model_profiles", return_value=[]), patch("knowte.server.ai_profile_for_role", return_value={"capabilities": ["url_fetch"]}), patch("knowte.server._client_from_config", return_value=client), patch("knowte.server._model_name_from_config", return_value="dummy"), patch("knowte.server.discover_pages", return_value=(pages, [])), patch("knowte.server.record_ai_usage", return_value={}):
+                    status, selected = self._request(server, "POST", "/api/evidence-pages/select", json.dumps({"source_ids": [source["id"]], "focus": "learn"}))
+                    self.assertEqual(status, 200)
+                    server = create_server("127.0.0.1", 0, root / "config.yml")
+                    status, result = self._request(server, "POST", "/api/evidence-proposals/generate", json.dumps({"source_ids": [source["id"]], "focus": "learn", "related_pages": selected["pages"], "related_request_mode": selected["request_mode"]}))
+                self.assertEqual(status, 201)
+                self.assertEqual(len(result["proposals"]), 2, result)
+                self.assertEqual(client.chat_json.call_count, 1)
+                self.assertEqual(client.grounded_json.call_count, extraction_calls)
+                self.assertEqual(len(list_sources(root / "knowte.db")), 1)
+
+    def test_evidence_request_mode_config_roundtrip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_server("127.0.0.1", 0, Path(directory) / "config.yml")
+            status, data = self._request(server, "GET", "/api/config")
+            self.assertEqual(data["ai_evidence_request_mode"], "combined")
+            server = create_server("127.0.0.1", 0, Path(directory) / "config.yml")
+            status, data = self._request(server, "POST", "/api/config", json.dumps({"ai_evidence_request_mode": "individual"}))
+            self.assertEqual(status, 200)
+            self.assertEqual(data["ai_evidence_request_mode"], "individual")
+            server = create_server("127.0.0.1", 0, Path(directory) / "config.yml")
+            status, data = self._request(server, "GET", "/api/config")
+            self.assertEqual(data["ai_evidence_request_mode"], "individual")
+
+    def test_evidence_url_requests_and_partial_failures(self):
+        from knowte.ai import AIError
+        for mode, expected_calls in [("combined", 1), ("individual", 2)]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                server = create_server("127.0.0.1", 0, root / "config.yml")
+                sources = [save_source({"title": f"Web {n}", "url": f"https://example.org/{n}"}, path=root / "knowte.db")[0] for n in range(2)]
+                client = MagicMock()
+                client.usage_snapshot.return_value = {}
+                def result(prompt, request, **kwargs):
+                    items = json.loads(request)["sources"]
+                    self.assertTrue(all(not item["segments"] for item in items))
+                    if mode == "individual" and items[0]["source_id"] == sources[1]["id"]:
+                        raise AIError("timeout", "Timed out")
+                    return {"evidence": [{"source_id": items[0]["source_id"], "quote": "An exact externally read passage.", "locator": "Section 1"}]}
+                client.grounded_json.side_effect = result
+                with patch("knowte.server.load_config", return_value={"ai_evidence_request_mode": mode}), patch("knowte.server.ai_model_profiles", return_value=[]), patch("knowte.server.ai_profile_for_role", return_value={"capabilities": ["url_fetch"]}), patch("knowte.server._client_from_config", return_value=client), patch("knowte.server._model_name_from_config", return_value="test"), patch("knowte.server.capture_source_content") as capture, patch("knowte.server.record_ai_usage", return_value={}):
+                    status, data = self._request(server, "POST", "/api/evidence-proposals/generate", json.dumps({"source_ids": [s["id"] for s in sources], "focus": "learn"}))
+                self.assertEqual(status, 201)
+                self.assertEqual(client.grounded_json.call_count, expected_calls)
+                client.chat_json.assert_not_called()
+                capture.assert_not_called()
+                self.assertEqual(len(data["proposals"]), 1)
+                self.assertEqual(data["proposals"][0]["payload"]["verification"], "external_unverified")
+                if mode == "individual":
+                    self.assertIn("Timed out", " ".join(data["warnings"]))
+
+    def test_discovery_empty_focus_and_retrieval_outcomes(self):
+        seed = {"id": "seed", "title": "Seed", "url": "https://arxiv.org/abs/2309.16609"}
+        for success, candidates, expected_status, reason in [
+            (0, [], 502, None),
+            (3, [], 200, "no_candidates"),
+            (3, [seed], 200, "already_saved"),
+        ]:
+            with self.subTest(success=success, reason=reason), tempfile.TemporaryDirectory() as directory:
+                server = create_server("127.0.0.1", 0, Path(directory) / "config.yml")
+                with patch("knowte.server.list_sources", return_value=[seed]), \
+                     patch("knowte.server.can_request", return_value={"allowed_paper": True}), \
+                     patch("knowte.server.get_usage", return_value={}), \
+                     patch("knowte.server.record_request", return_value={}) as record, \
+                     patch("knowte.server._client_from_config") as client, \
+                     patch("knowte.server.discover_related_papers", return_value={
+                         "candidates": candidates, "requests": 3,
+                         "successful_requests": success,
+                         "retrieval_failures": [] if success else [{"code": "rate_limited", "status": 429}],
+                     }):
+                    status, payload = self._request(server, "POST", "/api/source-discovery",
+                                                    json.dumps({"source_ids": ["seed"], "focus": ""}))
+                self.assertEqual(status, expected_status)
+                self.assertEqual(record.call_count, 3)
+                client.assert_not_called()
+                if reason:
+                    self.assertEqual(payload["empty_reason"], reason)
+                else:
+                    self.assertEqual(payload["error"], "discovery_retrieval_failed")
+                    self.assertIn("429", payload["message"])
+
     def test_client_disconnect_does_not_print_a_server_traceback(self):
         server = object.__new__(KnowteTCPServer)
         with patch("socketserver.ThreadingTCPServer.handle_error") as parent:
@@ -48,7 +371,7 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(
             payload["message"],
-            "The Wiki needs at least one active Claim to organize",
+            "The Wiki needs at least one reviewed active Claim to organize",
         )
 
     def test_article_generation_selects_from_the_project_claims(self):
@@ -120,6 +443,12 @@ class SearchApiTests(unittest.TestCase):
         self.assertIn(second["id"], article_input)
 
     def test_import_parser_accepts_human_links_and_structured_llm_output(self):
+        urls = _import_candidates("https://arxiv.org/abs/1706.03762\nhttps://arxiv.org/pdf/1706.03762.pdf\nhttps://doi.org/10.1000/example")
+        self.assertEqual(len(urls), 2)
+        self.assertEqual(urls[0]["result_type"], "paper")
+        self.assertEqual(urls[0]["title"], "arXiv 1706.03762")
+        self.assertEqual(urls[0]["pdf_url"], "https://arxiv.org/pdf/1706.03762")
+        self.assertEqual(urls[1]["doi_url"], "https://doi.org/10.1000/example")
         human = _import_candidates(
             "https://example.test/article\narXiv: 2412.15115\ndoi: 10.1000/example"
         )
@@ -152,7 +481,7 @@ class SearchApiTests(unittest.TestCase):
             server.server_close()
             thread.join()
 
-    def test_unconfigured_websearch_is_removed_without_web_usage(self):
+    def test_legacy_websearch_setting_is_ignored_without_web_usage(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config_path = temp_path / "config.yml"
@@ -181,7 +510,7 @@ class SearchApiTests(unittest.TestCase):
                     thread.join()
 
         self.assertEqual(payload["enabled_backends"], ["arxiv"])
-        self.assertEqual(payload["warnings"], ["websearch_unconfigured"])
+        self.assertEqual(payload["warnings"], [])
         self.assertEqual(payload["usage"]["last_day"], 1)
         self.assertEqual(payload["usage"]["last_day_web"], 0)
 
@@ -537,7 +866,7 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(payload["usage"]["last_day_ai_chat"], 1)
         self.assertIn("selected_evidence", client.chat_json.call_args.args[1])
         self.assertIn("grouped-query attention", client.chat_json.call_args.args[1])
-        self.assertIn("local-first system", client.chat_json.call_args.args[0])
+        self.assertIn("local-first knowledge workspace", client.chat_json.call_args.args[0])
         self.assertEqual(client.chat_json.call_args.kwargs["temperature"], 0.2)
         self.assertEqual(client.chat_json.call_args.kwargs["extra_parameters"], {"top_p": 0.9})
 
@@ -713,6 +1042,10 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertEqual(proposal["payload"]["operation"], "link_evidence")
         self.assertEqual(generated["comparison_claim_count"], 1)
+        self.assertEqual(generated["comparison_scope"]["limit"], 100)
+        self.assertEqual(generated["comparison_scope"]["covered_evidence_count"], 1)
+        self.assertFalse(generated["comparison_scope"]["truncated"])
+        self.assertEqual(client.chat_json.call_count, 1)
         self.assertEqual(accept_status, 201)
         self.assertEqual(accepted["id"], existing["id"])
         self.assertEqual(len(accepted["evidence"]), 2)
@@ -854,6 +1187,8 @@ class SearchApiTests(unittest.TestCase):
         )
         self.assertNotIn("websearch", payload["enabled_backends"])
         self.assertEqual(payload["max_papers"], 100)
+        self.assertEqual(payload["ai_wiki_claim_limit"], 100)
+        self.assertEqual(payload["ai_claim_comparison_limit"], 100)
         self.assertEqual(payload["intelligent_max_results"], 20)
         self.assertEqual(payload["default_search_mode"], "keyword")
         self.assertTrue(payload["web_ignore_year_filter"])
@@ -895,6 +1230,33 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(saved["default_search_mode"], "import")
         self.assertEqual(fetched["default_search_mode"], "import")
+
+    def test_legacy_search_defaults_and_independent_ai_review(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config_path = Path(folder) / "config.yml"
+            for legacy, expected in (("keyword", False), ("intelligent", True), ("import", False)):
+                config_path.write_text(f"default_search_mode: {legacy}\n", encoding="utf-8")
+                server = create_server("127.0.0.1", 0, config_path)
+                _, data = self._request(server, "GET", "/api/config")
+                self.assertEqual(data["search_ai_review"], expected)
+            for enabled in (True, False):
+                server = create_server("127.0.0.1", 0, config_path)
+                status, saved = self._request(server, "POST", "/api/config/default-search-mode",
+                    json.dumps({"mode": "import", "ai_review": enabled}))
+                self.assertEqual(status, 200)
+                self.assertEqual(saved["default_search_mode"], "import")
+                self.assertEqual(saved["search_ai_review"], enabled)
+                server = create_server("127.0.0.1", 0, config_path)
+                _, loaded = self._request(server, "GET", "/api/config")
+                self.assertEqual(loaded["search_ai_review"], enabled)
+            server = create_server("127.0.0.1", 0, config_path)
+            status, saved = self._request(server, "POST", "/api/config/default-search-mode",
+                json.dumps({"mode": "intelligent", "ai_review": False}))
+            self.assertEqual(saved["default_search_mode"], "keyword")
+            server = create_server("127.0.0.1", 0, config_path)
+            status, _ = self._request(server, "POST", "/api/config/default-search-mode",
+                json.dumps({"mode": "keyword", "ai_review": "false"}))
+            self.assertEqual(status, 400)
 
     def test_debug_replay_uses_saved_artifact_sources_without_search_or_ai(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1079,7 +1441,7 @@ class SearchApiTests(unittest.TestCase):
         self.assertTrue(payload["image_cache_removed"])
         manage.assert_called_once_with("remove", remove_image=True)
 
-    def test_search_reports_source_counts_and_strict_web_year_warning(self):
+    def test_search_ignores_legacy_web_year_settings(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config_path = temp_path / "config.yml"
@@ -1106,7 +1468,7 @@ class SearchApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["source_counts"], {"arXiv": 2, "Google": 1})
-        self.assertIn("websearch_strict_year_filter", payload["warnings"])
+        self.assertNotIn("websearch_strict_year_filter", payload["warnings"])
 
     def test_search_reports_unavailable_web_backend(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1137,7 +1499,7 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("websearch_unavailable", payload["warnings"])
 
-    def test_search_passes_web_page_count_and_reports_more_from_actual_page(self):
+    def test_legacy_web_only_search_falls_back_to_academic_defaults(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config_path = temp_path / "config.yml"
@@ -1177,7 +1539,8 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(search.call_args.kwargs["web_pages"], 2)
         self.assertEqual(payload["web_pages"], 2)
-        self.assertTrue(payload["can_find_more"])
+        self.assertFalse(payload["can_find_more"])
+        self.assertEqual(payload["enabled_backends"], ["arxiv", "openalex", "semanticscholar"])
         self.assertEqual(
             [page["returned"] for page in payload["search_diagnostics"]["websearch"]["pages"]],
             [7, 6],
@@ -1261,7 +1624,75 @@ class SearchApiTests(unittest.TestCase):
             self.assertEqual(payload["error"], "no_search_backends")
             self.assertEqual(config_path.read_text(encoding="utf-8"), original)
 
-    def test_config_persists_web_year_filter_exemption(self):
+    def test_config_requires_confirmation_before_removing_obsolete_items(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            original = (
+                "email: old@example.com\n"
+                "enabled_backends: arxiv,websearch\n"
+                "searxng_url: http://127.0.0.1:8888/search\n"
+                "web_ignore_year_filter: true\n"
+                "ai_base_url: http://127.0.0.1:8000/v1\n"
+                "ai_chat_model: old-model\n"
+            )
+            config_path.write_text(original, encoding="utf-8")
+
+            server = create_server("127.0.0.1", 0, config_path)
+            status, payload = self._request(
+                server,
+                "POST",
+                "/api/config",
+                json.dumps({"email": "new@example.com", "enabled_backends": ["arxiv"]}),
+            )
+
+            self.assertEqual(status, 409)
+            self.assertEqual(payload["error"], "obsolete_config_confirmation_required")
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+            keys = {item["key"] for item in payload["obsolete_config_items"]}
+            self.assertTrue({
+                "searxng_url",
+                "web_ignore_year_filter",
+                "ai_base_url",
+                "ai_chat_model",
+                "enabled_backends:websearch",
+            }.issubset(keys))
+
+    def test_confirmed_config_save_removes_obsolete_items(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            config_path.write_text(
+                "enabled_backends: arxiv,websearch\n"
+                "searxng_proxy: http://host.docker.internal:7890\n"
+                "ai_timeout_seconds: 120\n"
+                "ai_verify_limit: 30\n"
+                "future_setting: keep-me\n",
+                encoding="utf-8",
+            )
+
+            server = create_server("127.0.0.1", 0, config_path)
+            status, payload = self._request(
+                server,
+                "POST",
+                "/api/config",
+                json.dumps({
+                    "email": "new@example.com",
+                    "enabled_backends": ["arxiv"],
+                    "confirm_remove_obsolete_config": True,
+                }),
+            )
+
+            self.assertEqual(status, 200)
+            stored = config_path.read_text(encoding="utf-8")
+            self.assertIn("email: new@example.com", stored)
+            self.assertIn("enabled_backends: arxiv", stored)
+            self.assertNotIn("websearch", stored)
+            self.assertNotIn("searxng_proxy", stored)
+            self.assertNotIn("ai_timeout_seconds", stored)
+            self.assertNotIn("ai_verify_limit", stored)
+            self.assertIn("future_setting: keep-me", stored)
+            self.assertEqual(payload["enabled_backends"], ["arxiv"])
+
+    def test_config_rejects_web_only_backend_selection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yml"
             server = create_server("127.0.0.1", 0, config_path)
@@ -1278,12 +1709,8 @@ class SearchApiTests(unittest.TestCase):
                 ),
             )
 
-            self.assertEqual(status, 200)
-            self.assertTrue(payload["web_ignore_year_filter"])
-            self.assertIn(
-                "web_ignore_year_filter: true",
-                config_path.read_text(encoding="utf-8"),
-            )
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], "no_search_backends")
 
     def test_search_request_can_override_configured_sources_for_a_plan(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1339,7 +1766,7 @@ class SearchApiTests(unittest.TestCase):
             self.assertNotIn("semanticscholar_api_key", listing["plans"][0])
             self.assertNotIn("searxng_url", listing["plans"][0])
 
-    def test_ai_config_is_write_only_and_supports_separate_embedding_connection(self):
+    def test_ai_profile_config_is_write_only_and_routes_embedding_separately(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yml"
             server = create_server("127.0.0.1", 0, config_path)
@@ -1350,18 +1777,40 @@ class SearchApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "enabled_backends": ["openalex"],
-                        "ai_base_url": "https://chat.test/v1",
-                        "ai_api_key": "chat-secret",
-                        "ai_chat_model": "chat-model",
-                        "ai_embedding_model": "embed-model",
-                        "ai_embedding_separate_connection": True,
-                        "ai_enable_thinking": False,
-                        "ai_embedding_base_url": "http://127.0.0.1:11434/v1",
-                        "ai_embedding_api_key": "embed-secret",
+                        "ai_model_profiles": [
+                            {
+                                "id": "chat",
+                                "name": "Chat model",
+                                "provider": "openai_compatible",
+                                "base_url": "https://chat.test/v1",
+                                "model": "chat-model",
+                                "api_key": "chat-secret",
+                                "capabilities": ["chat"],
+                            },
+                            {
+                                "id": "embed",
+                                "name": "Embedding model",
+                                "provider": "openai_compatible",
+                                "base_url": "http://127.0.0.1:11434/v1",
+                                "model": "embed-model",
+                                "api_key": "embed-secret",
+                                "capabilities": ["embeddings"],
+                            },
+                        ],
+                        "ai_role_assignments": {
+                            "intelligent_search": "chat",
+                            "embedding": "embed",
+                        },
                         "intelligent_max_results": 25,
                         "ai_verify_batch_size": 4,
                         "ai_verify_concurrency": 2,
-                        "ai_timeout_seconds": 600,
+                        "ai_search_timeout_seconds": 600,
+                        "ai_stage_timeout_seconds": 300,
+                        "ai_evidence_source_limit": 9,
+                        "ai_claim_evidence_limit": 45,
+                        "ai_wiki_claim_limit": 350,
+                        "ai_claim_comparison_limit": 150,
+                        "ai_copilot_context_limit": 24,
                     }
                 ),
             )
@@ -1371,18 +1820,26 @@ class SearchApiTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(get_status, 200)
             self.assertTrue(saved["ai_configured"])
-            self.assertTrue(fetched["ai_api_key_configured"])
-            self.assertTrue(fetched["ai_embedding_api_key_configured"])
+            profiles = {item["id"]: item for item in fetched["ai_model_profiles"]}
+            self.assertTrue(profiles["chat"]["api_key_configured"])
+            self.assertTrue(profiles["embed"]["api_key_configured"])
             self.assertEqual(fetched["ai_api_key"], "")
             self.assertEqual(fetched["ai_embedding_api_key"], "")
             self.assertEqual(fetched["intelligent_max_results"], 25)
             self.assertEqual(fetched["ai_verify_batch_size"], 4)
             self.assertEqual(fetched["ai_verify_concurrency"], 2)
-            self.assertEqual(fetched["ai_timeout_seconds"], 600)
-            self.assertFalse(fetched["ai_enable_thinking"])
+            self.assertEqual(fetched["ai_search_timeout_seconds"], 600)
+            self.assertEqual(fetched["ai_stage_timeout_seconds"], 300)
+            self.assertEqual(fetched["ai_evidence_source_limit"], 9)
+            self.assertEqual(fetched["ai_claim_evidence_limit"], 45)
+            self.assertEqual(fetched["ai_wiki_claim_limit"], 350)
+            self.assertEqual(fetched["ai_claim_comparison_limit"], 150)
+            self.assertEqual(fetched["ai_copilot_context_limit"], 24)
             config_text = config_path.read_text(encoding="utf-8")
-            self.assertIn("ai_api_key: chat-secret", config_text)
-            self.assertIn("ai_embedding_api_key: embed-secret", config_text)
+            self.assertIn("chat-secret", config_text)
+            self.assertIn("embed-secret", config_text)
+            self.assertNotIn("ai_base_url:", config_text)
+            self.assertNotIn("ai_timeout_seconds:", config_text)
 
     def test_intelligent_search_endpoint_reports_and_records_retrieval_rounds(self):
         with tempfile.TemporaryDirectory() as temp_dir:

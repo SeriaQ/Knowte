@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "rationale"
+        ]
+      },
+      "maxItems": 20
+    }
+  },
+  "required": [
+    "recommendations"
+  ]
+}

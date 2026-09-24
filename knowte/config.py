@@ -9,7 +9,7 @@ CONFIG_DIR = Path.home() / ".knowte"
 CONFIG_PATH = CONFIG_DIR / "config.yml"
 
 AI_ROLES = (
-    "embedding", "intelligent_search", "copilot",
+    "embedding", "intelligent_search", "source_discovery", "copilot",
     "evidence", "claims", "wiki", "article",
 )
 AI_CHAT_ROLES = tuple(role for role in AI_ROLES if role != "embedding")
@@ -17,6 +17,26 @@ AI_CHAT_ROLES = tuple(role for role in AI_ROLES if role != "embedding")
 AI_CAPABILITIES = {
     "chat", "embeddings", "native_documents", "file_extraction",
     "web_search", "url_fetch",
+}
+
+OBSOLETE_CONFIG_FIELDS = {
+    "searxng_url": "SearXNG URL",
+    "searxng_proxy": "SearXNG proxy",
+    "web_ignore_year_filter": "Web Search year-filter setting",
+    "ai_provider": "legacy AI provider",
+    "ai_custom_recipe": "legacy AI custom recipe",
+    "ai_base_url": "legacy AI base URL",
+    "ai_api_key": "legacy AI API key",
+    "ai_chat_model": "legacy language model",
+    "ai_embedding_model": "legacy embedding model",
+    "ai_embedding_separate_connection": "legacy embedding connection setting",
+    "ai_enable_thinking": "legacy model thinking setting",
+    "ai_disable_reasoning": "legacy model reasoning setting",
+    "ai_embedding_base_url": "legacy embedding base URL",
+    "ai_embedding_api_key": "legacy embedding API key",
+    "ai_timeout_seconds": "legacy shared AI timeout",
+    "ai_verify_limit": "legacy verification limit",
+    "ai_candidate_limit": "legacy candidate limit",
 }
 
 
@@ -217,6 +237,45 @@ def save_config(config: Dict[str, str], path: Path | None = None) -> None:
         pass
 
 
+def obsolete_config_items(config: Dict[str, str]) -> list[dict[str, str]]:
+    items = [
+        {"key": key, "label": label}
+        for key, label in OBSOLETE_CONFIG_FIELDS.items()
+        if key in config
+    ]
+    backends = [
+        item.strip()
+        for item in str(config.get("enabled_backends") or "").split(",")
+        if item.strip()
+    ]
+    if "websearch" in backends:
+        items.append({
+            "key": "enabled_backends:websearch",
+            "label": "Web Search backend",
+        })
+    return items
+
+
+def remove_obsolete_config_items(
+    path: Path | None = None,
+) -> Dict[str, str]:
+    config = load_config(path)
+    for key in OBSOLETE_CONFIG_FIELDS:
+        config.pop(key, None)
+    if "enabled_backends" in config:
+        backends = [
+            item.strip()
+            for item in config["enabled_backends"].split(",")
+            if item.strip() and item.strip() != "websearch"
+        ]
+        if backends:
+            config["enabled_backends"] = ",".join(backends)
+        else:
+            config.pop("enabled_backends", None)
+    save_config(config, path)
+    return config
+
+
 def export_config(path: Path | None = None, redact_secrets: bool = True) -> bytes:
     config = load_config(path)
     secret_markers = ("api_key", "token", "secret", "password", "credential")
@@ -326,11 +385,20 @@ def set_intelligent_max_results(
 def set_default_search_mode(
     mode: str,
     path: Path | None = None,
+    ai_review: bool | None = None,
 ) -> Dict[str, str]:
     normalized = str(mode or "").strip().lower()
     if normalized not in {"keyword", "intelligent", "import"}:
         raise ValueError("default search mode must be keyword, intelligent, or import")
     config = load_config(path)
+    if ai_review is not None:
+        if not isinstance(ai_review, bool):
+            raise ValueError("AI Review must be a boolean")
+        config["search_ai_review"] = "true" if ai_review else "false"
+        if normalized != "import":
+            normalized = "intelligent" if ai_review else "keyword"
+    elif normalized != "import":
+        config["search_ai_review"] = "true" if normalized == "intelligent" else "false"
     config["default_search_mode"] = normalized
     save_config(config, path)
     return config
@@ -365,12 +433,21 @@ def set_ai_settings(
             config[field] = value
         else:
             config.pop(field, None)
+    request_mode = settings.get("ai_evidence_request_mode") or config.get("ai_evidence_request_mode", "combined")
+    if request_mode not in {"combined", "individual"}:
+        raise ValueError("Evidence request mode must be combined or individual")
+    config["ai_evidence_request_mode"] = request_mode
     legacy_timeout = (
         settings.get("ai_timeout_seconds")
         or config.get("ai_timeout_seconds")
         or 45
     )
     for field, default, minimum, maximum in (
+        ("ai_evidence_source_limit", config.get("ai_evidence_source_limit") or 6, 1, 100),
+        ("ai_wiki_claim_limit", config.get("ai_wiki_claim_limit") or 100, 1, 1000),
+        ("ai_claim_evidence_limit", config.get("ai_claim_evidence_limit") or 30, 1, 100),
+        ("ai_claim_comparison_limit", config.get("ai_claim_comparison_limit") or 100, 1, 1000),
+        ("ai_copilot_context_limit", config.get("ai_copilot_context_limit") or 12, 1, 100),
         ("ai_verify_batch_size", 5, 1, 20),
         ("ai_verify_concurrency", 1, 1, 8),
         ("ai_timeout_seconds", legacy_timeout, 5, 600),

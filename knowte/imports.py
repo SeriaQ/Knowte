@@ -7,11 +7,14 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 from zipfile import BadZipFile, ZipFile
+from .documents import parse_document, MAX_DOCUMENT_BYTES
 
 from .knowledge import (
     create_artifact,
     create_claim,
     create_claim_relation,
+    create_wiki_proposal,
+    accept_project_wiki_proposal,
     finish_project_import,
     finish_wiki_import,
     get_project_import,
@@ -23,8 +26,10 @@ from .knowledge import (
     save_project_document,
     save_source,
     merge_imported_wiki,
+    remap_wiki_claim_links,
     stage_project_import,
     stage_wiki_import,
+    store_capture,
 )
 
 
@@ -166,8 +171,28 @@ def _accept_package(
     created = {"sources": 0, "evidence": 0, "claims": 0}
     reused = {"sources": 0, "evidence": 0, "claims": 0}
 
+    documents = {}
+    for source in imported_sources:
+        if source.get("document_hash"):
+            filename = str(source.get("document_filename") or "")
+            asset = f"assets/source-{source.get('id')}{Path(filename).suffix.lower()}"
+            if asset not in archive.namelist() or archive.getinfo(asset).file_size > MAX_DOCUMENT_BYTES:
+                raise ValueError("Local document is missing or exceeds 20 MB")
+            raw = archive.read(asset)
+            captured = parse_document(raw, filename)
+            if captured["sha256"] != source["document_hash"]:
+                raise ValueError("Local document checksum does not match")
+            documents[source["id"]] = (raw, captured, Path(filename).suffix.lower())
     for source in imported_sources:
         saved, was_created, _ = save_source(source, project_id or None, database_path)
+        if source.get("id") in documents:
+            raw, captured, suffix = documents[source["id"]]
+            document_dir = database_path.parent / "content"
+            document_dir.mkdir(parents=True, exist_ok=True)
+            original = document_dir / f"{captured['sha256']}{suffix}"
+            original.write_bytes(raw)
+            captured["raw_path"] = str(original)
+            store_capture(saved["id"], captured, database_path)
         source_map[str(source.get("id") or "")] = saved["id"]
         created["sources"] += int(was_created)
         reused["sources"] += int(not was_created)
@@ -268,12 +293,41 @@ def _accept_package(
     if project_id:
         for document in project_payload.get("documents") or []:
             if isinstance(document, dict) and isinstance(document.get("content"), dict):
+                content = document["content"]
+                for section in content.get("sections") or []:
+                    for paragraph in section.get("paragraphs") or []:
+                        paragraph["claim_ids"] = [
+                            claim_map[item] for item in paragraph.get("claim_ids", [])
+                            if item in claim_map
+                        ]
+                if "selected_claim_ids" in content:
+                    content["selected_claim_ids"] = [
+                        claim_map[item] for item in content["selected_claim_ids"]
+                        if item in claim_map
+                    ]
                 save_project_document({
                     "artifact_id": project_id,
                     "title": document.get("title") or "Imported Article",
                     "goal": document.get("goal") or "",
-                    "content": document["content"],
+                    "content": content,
                 }, database_path)
+        exported_wiki = project_payload.get("wiki") or {}
+        structure = exported_wiki.get("graph_state") or {}
+        pages = structure.get("pages") or []
+        if pages:
+            for page in pages:
+                page["summary"] = remap_wiki_claim_links(page.get("summary"), claim_map)
+                page["claim_ids"] = [
+                    claim_map[item] for item in page.get("claim_ids", [])
+                    if item in claim_map
+                ]
+            if any(page["claim_ids"] for page in pages):
+                proposal = create_wiki_proposal(
+                    {"pages": pages, "gaps": structure.get("gaps", [])},
+                    "project-import-v1", scope={"project_id": project_id},
+                    path=database_path, proposal_type="project_wiki_patch",
+                )
+                accept_project_wiki_proposal(proposal["id"], database_path)
     if project_id and isinstance(data.get("wiki"), dict):
         save_project_document({
             "artifact_id": project_id,

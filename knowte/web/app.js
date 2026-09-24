@@ -15,6 +15,68 @@ const searchStrategyDiscussAgainBtn = document.querySelector("#search-strategy-d
 const searchImportEl = document.querySelector("#search-import");
 const importContentInput = document.querySelector("#import-content");
 const parseImportBtn = document.querySelector("#parse-import");
+const documentFilesInput = document.querySelector("#document-files");
+const documentUploadBtn = document.querySelector("#document-upload");
+const documentUploadList = document.querySelector("#document-upload-list");
+const documentUploadStatus = document.querySelector("#document-upload-status");
+let documentUploads = [];
+let documentsUploading = false;
+const renderDocumentUploads = () => {
+  documentUploadList.replaceChildren();
+  documentUploads.forEach((item) => {
+    const row = document.createElement("div"); row.className = "document-upload-row";
+    const name = document.createElement("small");
+    name.textContent = `${item.file.name} · ${(item.file.size / 1024 / 1024).toFixed(2)} MB${item.status ? ` · ${item.status}` : ""}`;
+    const title = document.createElement("input"); title.type = "text"; title.value = item.title;
+    title.setAttribute("aria-label", `Title for ${item.file.name}`);
+    title.disabled = documentsUploading || item.done;
+    title.addEventListener("input", () => { item.title = title.value; });
+    const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${item.file.name}`); remove.disabled = documentsUploading;
+    remove.addEventListener("click", () => { documentUploads = documentUploads.filter((entry) => entry !== item); renderDocumentUploads(); });
+    row.append(name, title, remove); documentUploadList.append(row);
+  });
+  documentUploadBtn.disabled = documentsUploading || !documentUploads.some((item) => !item.done);
+};
+const queueDocuments = (files) => {
+  if (documentsUploading) return;
+  const errors = [];
+  for (const file of files) {
+    if (!/\.(pdf|md|markdown|txt|docx)$/i.test(file.name) || !file.size || file.size > 20 * 1024 * 1024) {
+      errors.push(`${file.name}: use PDF, Markdown, TXT or DOCX, between 1 byte and 20 MB.`); continue;
+    }
+    documentUploads.push({ file, title: file.name.replace(/\.[^.]+$/, ""), done: false, status: "" });
+  }
+  documentUploadStatus.textContent = errors.join("\n"); renderDocumentUploads();
+};
+documentFilesInput.addEventListener("change", () => { queueDocuments(documentFilesInput.files); documentFilesInput.value = ""; });
+const documentDropZone = document.querySelector("#document-drop-zone");
+documentDropZone.addEventListener("dragover", (event) => event.preventDefault());
+documentDropZone.addEventListener("drop", (event) => { event.preventDefault(); queueDocuments(event.dataTransfer.files); });
+documentUploadBtn.addEventListener("click", async () => {
+  documentsUploading = true; renderDocumentUploads();
+  documentUploadStatus.textContent = "Parsing and importing documents…";
+  let imported = 0;
+  try {
+    for (const item of documentUploads.filter((entry) => !entry.done)) {
+      try {
+        const data = await new Promise((resolve, reject) => {
+          const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1]);
+          reader.onerror = () => reject(new Error("Could not read file")); reader.readAsDataURL(item.file);
+        });
+        const response = await fetch("/api/library/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: item.file.name, title: item.title, data }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || "Import failed");
+        item.done = true; imported += 1;
+        item.status = result.duplicate ? "Already in Sources" : result.text_available ? "Added to Sources" : "Added · use region capture or a native PDF model";
+      } catch (error) { item.status = error.message; }
+      renderDocumentUploads();
+    }
+    if (imported) { await fetchLibrary(); setTabActivity("sources-panel", "result"); }
+    documentUploadStatus.textContent = `${imported} document(s) ready in Sources. Inspect there to read and create Evidence.`;
+  } catch (error) { documentUploadStatus.textContent = error.message; }
+  finally { documentsUploading = false; renderDocumentUploads(); }
+});
 const importStatusEl = document.querySelector("#import-status");
 const copyImportPromptBtn = document.querySelector("#copy-import-prompt");
 const importPromptPreviewEl = document.querySelector("#import-prompt-preview");
@@ -23,6 +85,9 @@ const defaultSearchModeButtons = document.querySelectorAll(
   "[data-default-search-mode]",
 );
 const searchModeHint = document.querySelector("#search-mode-hint");
+const searchAIReviewInput = document.querySelector("#search-ai-review");
+let searchAIReview = false;
+let lastSearchQueries = [];
 const intelligentProgressEl = document.querySelector("#intelligent-progress");
 const academicStagesEl = document.querySelector("#academic-stages");
 const webStagesEl = document.querySelector("#web-stages");
@@ -69,6 +134,12 @@ const aiEmbeddingApiKeyRemoveNote = document.querySelector("#ai-embedding-api-ke
 const aiVerifyBatchSizeInput = document.querySelector("#ai-verify-batch-size");
 const aiVerifyConcurrencyInput = document.querySelector("#ai-verify-concurrency");
 const aiSearchTimeoutInput = document.querySelector("#ai-search-timeout");
+const evidenceRequestModeInput = document.querySelector("#evidence-request-mode");
+const ai_evidence_source_limitInput = document.querySelector("#ai-evidence-source-limit");
+const ai_claim_evidence_limitInput = document.querySelector("#ai-claim-evidence-limit");
+const aiClaimComparisonLimitInput = document.querySelector("#ai-claim-comparison-limit");
+const aiWikiClaimLimitInput = document.querySelector("#ai-wiki-claim-limit");
+const ai_copilot_context_limitInput = document.querySelector("#ai-copilot-context-limit");
 const aiStageTimeoutInput = document.querySelector("#ai-stage-timeout");
 const aiCopilotInstructionsInput = document.querySelector("#ai-copilot-instructions");
 const aiCopilotTemperatureInput = document.querySelector("#ai-copilot-temperature");
@@ -91,6 +162,7 @@ const contextModelSelect = document.querySelector("#context-model-select");
 const searchModelControl = document.querySelector("#search-model-control");
 const searchModelSelect = document.querySelector("#search-model-select");
 const evidenceModelSelect = document.querySelector("#evidence-model-select");
+const sourceDiscoveryModelSelect = document.querySelector("#source-discovery-model-select");
 const claimsModelSelect = document.querySelector("#claims-model-select");
 const wikiModelSelect = document.querySelector("#wiki-model-select");
 const articleModelSelect = document.querySelector("#article-model-select");
@@ -150,6 +222,8 @@ const collectArtifactSelect = document.querySelector("#collect-artifact");
 const libraryListEl = document.querySelector("#library-list");
 const libraryStatusEl = document.querySelector("#library-status");
 const libraryAbstractToggleBtn = document.querySelector("#library-abstract-toggle");
+const sourceEvidenceProposerEl = document.querySelector(".source-evidence-proposer");
+const sourceDiscoveryLauncherEl = document.querySelector(".source-discovery-launcher");
 const evidenceLibraryListEl = document.querySelector("#evidence-library-list");
 const libraryProposeClaimsBtn = document.querySelector("#library-propose-claims");
 const claimProposalFocusInput = document.querySelector("#claim-proposal-focus");
@@ -158,8 +232,45 @@ const evidenceBatchTagBtn = document.querySelector("#evidence-batch-tag");
 const evidenceStatusEl = document.querySelector("#evidence-status");
 const resultsSelectAllInput = document.querySelector("#results-select-all");
 const librarySelectAllInput = document.querySelector("#library-select-all");
+const libraryBatchTagBtn = document.querySelector("#library-batch-tag");
+const libraryBatchDeleteBtn = document.querySelector("#library-batch-delete");
+const evidenceBatchDeleteBtn = document.querySelector("#evidence-batch-delete");
+const libraryTagFilterInput = document.querySelector("#library-tag-filter");
+const libraryTagAllFilterInput = document.querySelector("#library-tag-all-filter");
+const selectedSourceTagFilters = new Set();
+const selectedSourceAllTagFilters = new Set();
 const evidenceProposalFocusInput = document.querySelector("#evidence-proposal-focus");
+const evidenceReadScope = document.querySelector("#evidence-read-scope");
+const evidenceRelatedLimit = document.querySelector("#evidence-related-limit");
+const evidenceRelatedReport = document.querySelector("#evidence-related-report");
+let savedEvidenceRequestMode = "combined";
+const updateEvidenceReadScope = () => {
+  const related = evidenceReadScope.value === "related";
+  document.querySelector("#evidence-related-limit-label").hidden = !related;
+  const note = document.querySelector("#evidence-related-cost");
+  note.hidden = false;
+  const individual = savedEvidenceRequestMode === "individual";
+  const selected = selectedLibrarySourceKeys.size;
+  const count = related ? Number(evidenceRelatedLimit.value) : selected;
+  const calls = selected ? (individual ? count : 1) + (related ? 1 : 0) : 0;
+  const estimate = document.createElement("strong");
+  estimate.textContent = `Estimated model calls: ${related && individual && selected ? "up to " : ""}${calls}`;
+  const explanation = document.createElement("span");
+  explanation.textContent = `${individual ? "One by one" : "Combined"}`
+    + (related ? ` · 1 page selection + ${individual ? "up to " + count : "1"} extraction. Fewer if no relevant pages or a request fails.` : ` · ${selected} selected Source${selected === 1 ? "" : "s"}.`);
+  note.replaceChildren(estimate, explanation);
+};
+evidenceReadScope.addEventListener("change", updateEvidenceReadScope);
+evidenceRelatedLimit.addEventListener("change", updateEvidenceReadScope);
 const proposeEvidenceBtn = document.querySelector("#propose-evidence");
+const sourceDiscoveryFocusInput = document.querySelector("#source-discovery-focus");
+const sourceDiscoveryRunBtn = document.querySelector("#source-discovery-run");
+const sourceDiscoveryResultsEl = document.querySelector("#source-discovery-results");
+const sourceDiscoveryListEl = document.querySelector("#source-discovery-list");
+const sourceDiscoverySummaryEl = document.querySelector("#source-discovery-summary");
+const sourceDiscoveryStatusEl = document.querySelector("#source-discovery-status");
+const sourceDiscoveryCloseBtn = document.querySelector("#source-discovery-close");
+const sourceDiscoveryAddBtn = document.querySelector("#source-discovery-add");
 const evidenceProposalsToggleBtn = document.querySelector("#evidence-proposals-toggle");
 const evidenceProposalBoardEl = document.querySelector("#evidence-proposal-board");
 const evidenceProposalListEl = document.querySelector("#evidence-proposal-list");
@@ -360,6 +471,7 @@ const wikiModeWikiBtn = document.querySelector("#wiki-mode-wiki");
 const wikiModeGraphBtn = document.querySelector("#wiki-mode-graph");
 const wikiOrganizeBtn = document.querySelector("#wiki-organize");
 const wikiEditStructureBtn = document.querySelector("#wiki-edit-structure");
+const wikiResetStructureBtn = document.querySelector("#wiki-reset-structure");
 const wikiExportBtn = document.querySelector("#wiki-export");
 const wikiImportFileInput = document.querySelector("#wiki-import-file");
 const wikiImportsToggleBtn = document.querySelector("#wiki-imports-toggle");
@@ -406,6 +518,12 @@ let lastAreas = "";
 let lastYearFrom = "";
 let lastYearTo = "";
 let fullResults = [];
+let excludedSearchResults = [];
+let sourceDiscoveryResults = [];
+let sourceDiscoveryExcluded = [];
+let sourceDiscoveryOpen = false;
+let sourceDiscoveryBusy = false;
+let sourceDiscoveryEmptyMessage = "No related candidates were returned by Semantic Scholar.";
 let isSearching = false;
 let canFindMore = false;
 let abstractsHidden = false;
@@ -426,13 +544,12 @@ let searchStrategyStaleAcknowledged = false;
 const SEARCH_STRATEGY_TOP_LIMIT = 5;
 const SEARCH_STRATEGY_CANDIDATE_LIMIT = 15;
 let searchStrategyAttentionTimer = null;
-let aiCopilotPromptPreviews = {};
-let aiCopilotPromptShared = "";
 let aiModelProfiles = [];
 let aiRoleAssignments = {};
 const AI_ROLE_DEFINITIONS = [
   ["embedding", "Embedding", "embeddings"],
-  ["intelligent_search", "Intelligent Search", "chat"],
+  ["intelligent_search", "Search · AI Review / Discuss", "chat"],
+  ["source_discovery", "Related Source discovery", "chat"],
   ["copilot", "Review Copilot", "chat"],
   ["evidence", "Evidence proposal", "chat"],
   ["claims", "Claim proposal", "chat"],
@@ -440,21 +557,66 @@ const AI_ROLE_DEFINITIONS = [
   ["article", "Article generation", "chat"],
 ];
 
-const renderCopilotPromptPreview = () => {
+let skillPreviewRequest = 0;
+const renderCopilotPromptPreview = async () => {
+  const request = ++skillPreviewRequest;
   const stage = aiCopilotPromptStageInput?.value || "search_strategy";
-  const dedicated = [
-    "search_strategy", "evidence_proposal", "claim_proposal",
-    "wiki_maintenance", "project_claim_recommendation", "article_selection", "article_writing",
-  ].includes(stage);
-  aiCopilotPromptSharedBlockEl.hidden = dedicated;
-  aiCopilotPromptSharedEl.textContent = aiCopilotPromptShared;
-  aiCopilotPromptStageLabelEl.textContent = dedicated
-    ? "Dedicated capability prompt" : "Stage-specific addition";
-  aiCopilotPromptNoteEl.textContent = dedicated
-    ? "This capability uses the complete dedicated prompt shown above; the shared Review Copilot prompt is not added."
-    : "The actual system prompt combines the shared prompt, this stage-specific addition, and your Custom instructions.";
-  aiCopilotPromptPreviewEl.textContent = aiCopilotPromptPreviews[stage] || "";
+  try {
+    const response = await fetch("/api/skills");
+    if (!response.ok) throw new Error("Could not load stage skills.");
+    const data = await response.json();
+    if (request !== skillPreviewRequest) return;
+    aiCopilotPromptStageInput.replaceChildren();
+    (data.skills || []).forEach((skill) => {
+      const option = new Option(skill.label, skill.id);
+      aiCopilotPromptStageInput.add(option);
+    });
+    aiCopilotPromptStageInput.value = stage;
+    if (!aiCopilotPromptStageInput.value) aiCopilotPromptStageInput.value = "search_strategy";
+    const info = data.skills.find((skill) => skill.id === aiCopilotPromptStageInput.value);
+    if (!info) throw new Error("Stage skill is unavailable.");
+    aiCopilotPromptSharedBlockEl.hidden = false;
+    aiCopilotPromptSharedEl.textContent = info.rules;
+    aiCopilotPromptStageLabelEl.textContent = `Stage skill · ${info.mode === "custom" ? "Custom" : "Built-in"}`;
+    aiCopilotPromptPreviewEl.textContent = info.error
+      ? "Custom Skill could not be loaded. Fix the file and reload, or use the built-in Skill."
+      : info.skill;
+    aiCopilotPromptNoteEl.textContent = info.error || "Custom instructions guide the stage; product rules and output contracts always apply. File edits take effect on the next request. Reload checks the file and refreshes this preview.";
+    aiCopilotPromptNoteEl.classList.toggle("skill-error", Boolean(info.error));
+    document.querySelector("#skill-path").textContent = info.path;
+    document.querySelector("#skill-contract").textContent = JSON.stringify(info.contract, null, 2);
+    const preferences = (info.id.startsWith("copilot_") || info.id === "search_strategy")
+      ? aiCopilotInstructionsInput.value.trim() : "";
+    document.querySelector("#skill-assembled").textContent = info.error ? "Blocked until the custom Skill is fixed or disabled." : `${info.system}\n\nUSER MESSAGE — Stage guidance:\n${info.guidance}${preferences ? `\n\nUser preferences:\n${preferences}` : ""}\n\n[Task input is appended at runtime]`;
+    document.querySelector("#skill-customize").textContent = info.custom_exists ? "Use custom" : "Create custom copy";
+    document.querySelector("#skill-customize").disabled = info.mode === "custom" && !info.error;
+    document.querySelector("#skill-builtin").disabled = info.mode === "built-in";
+    document.querySelector("#skill-reveal").textContent = data.platform === "darwin" ? "Show in Finder" : "Open folder";
+  } catch (error) {
+    aiCopilotPromptNoteEl.textContent = error.message;
+  }
 };
+
+document.querySelectorAll("[data-skill-action]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/skills", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage: aiCopilotPromptStageInput.value, action: button.dataset.skillAction }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not update the Skill.");
+      await renderCopilotPromptPreview();
+    } catch (error) {
+      aiCopilotPromptNoteEl.textContent = error.message;
+      aiCopilotPromptNoteEl.classList.add("skill-error");
+      button.disabled = false;
+    } finally {
+      if (!["customize", "builtin"].includes(button.dataset.skillAction)) button.disabled = false;
+    }
+  });
+});
 
 aiCopilotPromptStageInput?.addEventListener("change", renderCopilotPromptPreview);
 let defaultSearchMode = "keyword";
@@ -498,6 +660,7 @@ let currentWikiReadingGoal = "";
 let activeArticleProjectId = "";
 const selectedResultKeys = new Set();
 const selectedLibrarySourceKeys = new Set();
+const selectedDiscoverySourceKeys = new Set();
 const selectedEvidenceIds = new Set();
 const selectedClaimIds = new Set();
 const selectedEvidenceTagFilters = new Set();
@@ -508,12 +671,16 @@ const selectedClaimAuditAnyTags = new Set();
 const selectedClaimAuditAllTags = new Set();
 const incomingClaimEvidenceIds = new Set();
 const incomingClaimEvidenceStances = new Map();
+let incomingLLMEvidenceIds = null;
 const incomingViewClaimIds = new Set();
 let evidenceReturnToClaim = false;
 let claimsReturnToView = false;
 const chatContextSources = new Map();
 const chatContextEvidence = new Map();
-const CHAT_CONTEXT_LIMIT = 12;
+let CHAT_CONTEXT_LIMIT = 12;
+let evidenceSourceLimit = 6;
+let claimEvidenceLimit = 30;
+let wikiClaimLimit = 100;
 const CHAT_SNAPSHOT_LIMIT = 4;
 let libraryAbstractsHidden = false;
 let activeSourceWorkspace = null;
@@ -804,7 +971,7 @@ const aiThinkingAvailable = (profile) => {
   return false;
 };
 
-const renderAIRoles = () => {
+const renderAIRoles = (useAssignedModels = false) => {
   aiRoleGridEl.replaceChildren();
   const firstChatProfile = aiModelProfiles.find(
     (profile) => (profile.capabilities || []).includes("chat"),
@@ -838,7 +1005,7 @@ const renderAIRoles = () => {
     field.append(name, select);
     aiRoleGridEl.appendChild(field);
   });
-  const selectedCopilotModel = contextModelSelect.value
+  const selectedCopilotModel = (useAssignedModels ? "" : contextModelSelect.value)
     || aiRoleAssignments.copilot || "";
   contextModelSelect.replaceChildren(new Option("Select a Copilot model", ""));
   aiModelProfiles.filter((profile) => (profile.capabilities || []).includes("chat"))
@@ -848,12 +1015,13 @@ const renderAIRoles = () => {
   contextModelSelect.value = [...contextModelSelect.options].some(
     (option) => option.value === selectedCopilotModel,
   ) ? selectedCopilotModel : "";
-  renderActionModelSelectors();
+  renderActionModelSelectors(useAssignedModels);
 };
 
-const renderActionModelSelectors = () => {
+const renderActionModelSelectors = (useAssignedModels = false) => {
   const definitions = [
     [searchModelSelect, "intelligent_search", "Select a Search model"],
+    [sourceDiscoveryModelSelect, "source_discovery", "Select a discovery model"],
     [evidenceModelSelect, "evidence", "Select an Evidence model"],
     [claimsModelSelect, "claims", "Select a Claims model"],
     [claimAuditModelSelect, "claims", "Select a Claims model"],
@@ -865,7 +1033,7 @@ const renderActionModelSelectors = () => {
   );
   definitions.forEach(([select, role, placeholder]) => {
     if (!select) return;
-    const current = select.value || aiRoleAssignments[role] || "";
+    const current = (useAssignedModels ? "" : select.value) || aiRoleAssignments[role] || "";
     select.replaceChildren(new Option(placeholder, ""));
     chatProfiles.forEach((profile) => select.appendChild(new Option(
       profile.name || profile.model || "Unnamed model", profile.id,
@@ -1085,8 +1253,6 @@ const serializedAIProfiles = () => aiModelProfiles.map((profile) => ({
 
 const serializeProfileState = (overrides = {}) => JSON.stringify({
   email: overrides.email ?? emailInput.value.trim(),
-  searxng_url: overrides.searxng_url ?? (searxngInput?.value.trim() || ""),
-  searxng_proxy: overrides.searxng_proxy ?? (searxngProxyInput?.value.trim() || ""),
   max_papers: overrides.max_papers ?? parseMaxPapers(maxPapersInput.value || "100"),
   intelligent_max_results: overrides.intelligent_max_results
     ?? Number(intelligentMaxResultsInput.value || 20),
@@ -1095,7 +1261,6 @@ const serializeProfileState = (overrides = {}) => JSON.stringify({
   ).map((box) => box.value).sort(),
   api_key_update: s2KeyInput.value.trim(),
   api_key_clear: semanticscholarKeyRemovalPending,
-  web_ignore_year_filter: Boolean(webIgnoreYearFilterInput?.checked),
   ai_model_profiles: overrides.ai_model_profiles ?? serializedAIProfiles(),
   ai_role_assignments: overrides.ai_role_assignments ?? aiRoleAssignments,
   ai_verify_batch_size: overrides.ai_verify_batch_size
@@ -1104,6 +1269,12 @@ const serializeProfileState = (overrides = {}) => JSON.stringify({
     ?? Number(aiVerifyConcurrencyInput.value || 1),
   ai_search_timeout_seconds: overrides.ai_search_timeout_seconds
     ?? Number(aiSearchTimeoutInput.value || 45),
+  ai_evidence_source_limit: overrides.ai_evidence_source_limit ?? Number(ai_evidence_source_limitInput.value || 6),
+  ai_claim_evidence_limit: overrides.ai_claim_evidence_limit ?? Number(ai_claim_evidence_limitInput.value || 30),
+  ai_claim_comparison_limit: overrides.ai_claim_comparison_limit ?? Number(aiClaimComparisonLimitInput.value || 100),
+  ai_wiki_claim_limit: overrides.ai_wiki_claim_limit ?? Number(aiWikiClaimLimitInput.value || 100),
+  ai_copilot_context_limit: overrides.ai_copilot_context_limit ?? Number(ai_copilot_context_limitInput.value || 12),
+  ai_evidence_request_mode: overrides.ai_evidence_request_mode ?? evidenceRequestModeInput.value,
   ai_stage_timeout_seconds: overrides.ai_stage_timeout_seconds
     ?? Number(aiStageTimeoutInput.value || 45),
   ai_copilot_instructions: overrides.ai_copilot_instructions
@@ -1427,6 +1598,7 @@ const clearDisplayedSearchResults = () => {
   isSearching = false;
   isIntelligentSearching = false;
   fullResults = [];
+  excludedSearchResults = [];
   selectedResultKeys.clear();
   lastQuery = "";
   lastAreas = "";
@@ -1464,13 +1636,7 @@ const renderSearchStrategy = () => {
     query.placeholder = "Retrieval query";
     query.setAttribute("aria-label", `${isWaiting ? "Waiting" : "Active"} search action ${index + 1} query`);
     query.addEventListener("input", () => { action.query = query.value; });
-    const target = document.createElement("select");
-    ["academic", "web", "both"].forEach((value) => target.appendChild(new Option(
-      value === "both" ? "Both" : value[0].toUpperCase() + value.slice(1), value,
-    )));
-    target.value = action.target || "both";
-    target.setAttribute("aria-label", `${isWaiting ? "Waiting" : "Active"} search action ${index + 1} target`);
-    target.addEventListener("change", () => { action.target = target.value; });
+    action.target = "academic";
     const purpose = document.createElement("textarea");
     purpose.rows = 2;
     purpose.value = action.purpose || "";
@@ -1521,7 +1687,6 @@ const renderSearchStrategy = () => {
     });
     controls.append(transfer, remove);
     row.append(
-      makeField("Source", target, "search-strategy-target"),
       makeField("Query", query, "search-strategy-query"),
       controls,
       makeField("Purpose", purpose, "search-strategy-purpose"),
@@ -1564,23 +1729,18 @@ function updateSearchStrategyIntentState() {
 
 const importPrompt = () => {
   const intent = input.value.trim() || "<describe what you want to discover>";
-  const areas = [...getEffectiveAreas()];
-  const { yearFrom, yearTo } = normalizeSearchYears();
-  return `You are helping me discover real, independently verifiable Sources for a local knowledge workspace called Knowte.
+  return `Find real, independently verifiable sources that help answer my research question.
 
 Research request:
 ${intent}
 
-Filters:
-- Since: ${yearFrom || "none"}
-- Until: ${yearTo || "none"}
-- Preferred areas: ${areas.length ? areas.join(", ") : "none"}
-- Maximum sources: 10
+Maximum sources: 10. Follow any area or date requirements stated in the research request.
 
-Find primary and high-value secondary Sources relevant to this request. Prioritize original papers, technical reports, official documentation or engineering posts, followed by materially useful surveys, benchmarks, follow-up work, and independent analyses.
+Choose source types according to the question: papers and reports for original findings, documentation and code repositories for implementation, and substantive web pages or blogs for explanation and independent analysis. Prefer primary sources where possible. Do not restrict results to academic papers or force a quota for each type.
 
 Requirements:
 - Include only Sources that you believe really exist.
+- If browsing is available, verify the links and metadata. Never claim to have read a source you could not access.
 - Every item must contain at least one resolvable URL, DOI, or arXiv ID.
 - Do not invent missing metadata; use an empty string, empty array, or 0 instead.
 - Keep Source metadata separate from your explanation of relevance.
@@ -1589,37 +1749,44 @@ Requirements:
 - Return JSON only, without Markdown fences or additional prose.
 
 Use this exact structure:
-{"knowte_import_version":1,"request":"${intent.replaceAll('"', '\\"')}","sources":[{"title":"Exact Source title","source_type":"paper","url":"https://...","doi":"","arxiv_id":"","authors":["Author name"],"year":2025,"why_relevant":"Why this Source may help answer the request"}]}
+{"knowte_import_version":1,"request":${JSON.stringify(intent)},"sources":[{"title":"Exact Source title","source_type":"paper","url":"https://...","doi":"","arxiv_id":"","authors":["Author name"],"year":0,"why_relevant":"What this source contributes to answering the question, and any important limitation"}]}
 
 Valid source_type values: paper, report, documentation, web, book, dataset, other.
+Use web for blogs and general web pages; use other for code repositories. Return fewer than 10 sources if there are not enough useful, verifiable results.
 
-Example:
-{"knowte_import_version":1,"request":"How does Qwen optimize long-context processing?","sources":[{"title":"Qwen2.5 Technical Report","source_type":"report","url":"https://arxiv.org/abs/2412.15115","doi":"","arxiv_id":"2412.15115","authors":[],"year":2024,"why_relevant":"A primary technical report describing the Qwen2.5 model family."}]}`;
+Example only — answer my research request above, not this example question:
+{"knowte_import_version":1,"request":"How does PPO constrain policy updates, and how can I implement it?","sources":[{"title":"Proximal Policy Optimization Algorithms","source_type":"paper","url":"https://arxiv.org/abs/1707.06347","doi":"","arxiv_id":"1707.06347","authors":[],"year":2017,"why_relevant":"Introduces PPO objectives; useful for understanding the motivation for limiting policy updates."},{"title":"Proximal Policy Optimization","source_type":"documentation","url":"https://spinningup.openai.com/en/latest/algorithms/ppo.html","doi":"","arxiv_id":"","authors":[],"year":0,"why_relevant":"Explains PPO-Clip and practical training steps, bridging the objective and implementation."},{"title":"CleanRL","source_type":"other","url":"https://github.com/vwxyzjn/cleanrl","doi":"","arxiv_id":"","authors":[],"year":0,"why_relevant":"Provides runnable PPO implementations for examining training details; implementation choices are not universal theoretical guarantees."}]}`;
 };
 
 const updateImportPrompt = () => { importPromptPreviewEl.textContent = importPrompt(); };
 
 const setSearchMode = (mode) => {
-  const nextMode = ["smart", "import"].includes(mode) ? mode : "keyword";
+  // Keep legacy execution modes so old Config and Plans retain their behavior.
+  const nextMode = mode === "search" ? (searchAIReview ? "smart" : "keyword")
+    : ["smart", "import"].includes(mode) ? mode : "keyword";
   const modeChanged = nextMode !== searchMode;
   searchMode = nextMode;
+  if (searchMode !== "import") searchAIReview = searchMode === "smart";
+  searchAIReviewInput.checked = searchAIReview;
+  document.querySelector("#search-ai-review-control").hidden = searchMode === "import";
   searchModeButtons.forEach((button) => {
-    const active = button.dataset.searchMode === searchMode;
+    const active = button.dataset.searchMode === (searchMode === "import" ? "import" : "search");
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
-  searchStrategyEl.hidden = searchMode !== "smart"
+  searchStrategyEl.hidden = searchMode === "import"
     || !(searchStrategyActions.length || searchStrategyWaitingActions.length);
   searchImportEl.hidden = searchMode !== "import";
-  discussSearchBtn.hidden = searchMode !== "smart";
-  if (searchModelControl) searchModelControl.hidden = searchMode !== "smart";
-  form.classList.toggle("has-model-control", searchMode === "smart");
+  filtersEl.hidden = searchMode === "import";
+  discussSearchBtn.hidden = searchMode === "import";
+  if (searchModelControl) searchModelControl.hidden = searchMode === "import";
+  form.classList.toggle("has-model-control", searchMode !== "import");
   searchSubmitBtn.hidden = searchMode === "import";
   savePlanBtn.hidden = searchMode === "import";
   if (searchMode === "smart") {
     input.placeholder = "Describe what you want to understand...";
     searchSubmitBtn.textContent = "Search";
-    searchModeHint.textContent = "Discover and verify results against your full intent.";
+    searchModeHint.textContent = "Search academic sources, then rank and review results against your intent.";
   } else if (searchMode === "import") {
     input.placeholder = "Describe what you asked the external service to find…";
     searchModeHint.textContent = "Import links or structured results from people, tools, or external LLMs.";
@@ -1628,28 +1795,28 @@ const setSearchMode = (mode) => {
   } else {
     input.placeholder = "Enter keywords, authors, or domains...";
     searchSubmitBtn.textContent = "Search";
-    searchModeHint.textContent = "Search providers directly with your keywords.";
+    searchModeHint.textContent = "Search academic sources without model review. Discuss can help prepare queries using the selected model.";
     intelligentProgressEl.hidden = true;
   }
   if (modeChanged) {
     clearDisplayedSearchResults();
     statusEl.textContent = searchMode === "smart"
-      ? "Intelligent mode ready. Search directly or discuss a retrieval strategy first."
+      ? "AI Review on. Search directly or discuss academic queries first."
       : searchMode === "import"
         ? "Import mode ready. Paste human-curated links or structured external results."
-        : "Keyword mode ready. Enter a query to search providers directly.";
+        : "AI Review off. Search uses active candidates, or your original input if there are none.";
   }
 };
 
 const renderDefaultSearchMode = () => {
   defaultSearchModeButtons.forEach((button) => {
-    const isDefault = button.dataset.defaultSearchMode === defaultSearchMode;
+    const isDefault = button.dataset.defaultSearchMode === (defaultSearchMode === "import" ? "import" : "search");
     const label = isDefault ? "Default search mode" : "Set as default";
     const modeName = ({
-      intelligent: "Intelligent",
+      search: "Search",
       import: "Import",
       keyword: "Keyword",
-    })[button.dataset.defaultSearchMode] || "Keyword";
+    })[button.dataset.defaultSearchMode] || "Search";
     button.classList.toggle("is-default", isDefault);
     button.textContent = isDefault ? "★" : "☆";
     button.setAttribute("aria-pressed", String(isDefault));
@@ -1822,9 +1989,12 @@ const resultKey = (source) => String(
   source.id || source.doi_url || source.paper_url || source.url || source.title || "",
 );
 
-const selectedResults = () => fullResults.filter(
+const selectedResults = () => [...fullResults, ...excludedSearchResults].filter(
   (source) => selectedResultKeys.has(resultKey(source)),
 );
+const selectedPrimaryResultCount = () => fullResults.filter(
+  (source) => selectedResultKeys.has(resultKey(source)),
+).length;
 
 const selectedLibrarySources = () => librarySources.filter(
   (source) => selectedLibrarySourceKeys.has(resultKey(source)),
@@ -1832,7 +2002,7 @@ const selectedLibrarySources = () => librarySources.filter(
 
 const selectedClaims = () => [...selectedClaimIds]
   .map((id) => claims.find((claim) => claim.id === id))
-  .filter(Boolean);
+  .filter(claim => claim && !claim.needs_review);
 
 const exportKnowledge = async (type, ids, statusEl, button) => {
   const original = button.textContent;
@@ -1902,10 +2072,10 @@ const activeReviewArtifact = () => (
 );
 
 const selectedEvidence = () => (
-  activeSourceWorkspace
-    ? activeSourceWorkspace.evidence.filter((item) => selectedEvidenceIds.has(item.id))
-    : currentReviewContext() === "evidence"
-      ? libraryEvidence.filter((item) => selectedEvidenceIds.has(item.id))
+  currentReviewContext() === "evidence"
+    ? libraryEvidence.filter((item) => selectedEvidenceIds.has(item.id))
+    : currentReviewContext() === "library" && activeSourceWorkspace
+      ? activeSourceWorkspace.evidence.filter((item) => selectedEvidenceIds.has(item.id))
       : []
 );
 
@@ -2011,7 +2181,7 @@ resultsSelectAllInput.addEventListener("change", () => {
 });
 
 librarySelectAllInput.addEventListener("change", () => {
-  librarySources.forEach((source) => {
+  visibleSources().forEach((source) => {
     const key = resultKey(source);
     if (librarySelectAllInput.checked) selectedLibrarySourceKeys.add(key);
     else selectedLibrarySourceKeys.delete(key);
@@ -2021,6 +2191,7 @@ librarySelectAllInput.addEventListener("change", () => {
 });
 
 evidenceLibrarySelectAllInput.addEventListener("change", () => {
+  if (evidenceProposalQueueOpen) return selectAllReview("evidence", evidenceLibrarySelectAllInput.checked);
   visibleEvidence().forEach((item) => {
     if (evidenceLibrarySelectAllInput.checked) selectedEvidenceIds.add(item.id);
     else selectedEvidenceIds.delete(item.id);
@@ -2030,10 +2201,11 @@ evidenceLibrarySelectAllInput.addEventListener("change", () => {
 });
 
 evidenceTagFilterInput.addEventListener("change", () => {
+  if (evidenceProposalQueueOpen) return renderEvidenceProposals();
   renderEvidenceLibrary();
   const filtered = visibleEvidence();
   evidenceStatusEl.textContent = selectedEvidenceTagFilters.size || selectedEvidenceAllTagFilters.size
-    ? `${filtered.length} of ${libraryEvidence.length} Evidence · Any: ${[...selectedEvidenceTagFilters].join(", ") || "—"} · All: ${[...selectedEvidenceAllTagFilters].join(", ") || "—"}`
+    ? `${filtered.length} of ${libraryEvidence.length} Evidence · Any: ${[...selectedEvidenceTagFilters].map(name => name === "__has_related__" ? "Has Claims" : name === "__no_related__" ? "No Claims" : name).join(", ") || "—"} · All: ${[...selectedEvidenceAllTagFilters].map(name => name === "__has_related__" ? "Has Claims" : name === "__no_related__" ? "No Claims" : name).join(", ") || "—"}`
     : `${libraryEvidence.length} Evidence`;
 });
 
@@ -2054,6 +2226,16 @@ evidenceBatchTagBtn.addEventListener("click", () => {
   });
 });
 
+libraryTagFilterInput.addEventListener("change", () => { renderLibrary(); renderReviewWorkspace(); });
+libraryTagAllFilterInput.addEventListener("change", () => { renderLibrary(); renderReviewWorkspace(); });
+libraryBatchTagBtn.addEventListener("click", () => {
+  const ids = librarySources.filter(item => selectedLibrarySourceKeys.has(resultKey(item))).map(item => item.id);
+  if (ids.length) openBatchTagEditor("source", ids, async () => { await fetchLibrary(); renderReviewWorkspace(); });
+});
+libraryBatchDeleteBtn.addEventListener("click", () => deleteSelectedKnowledge("source",
+  librarySources.filter(item => selectedLibrarySourceKeys.has(resultKey(item))).map(item => item.id)));
+evidenceBatchDeleteBtn.addEventListener("click", () => deleteSelectedKnowledge("evidence", [...selectedEvidenceIds]));
+
 claimsBatchTagBtn.addEventListener("click", () => {
   const ids = claims
     .filter((item) => selectedClaimIds.has(item.id))
@@ -2068,6 +2250,7 @@ claimsBatchTagBtn.addEventListener("click", () => {
 });
 
 claimsSelectAllInput.addEventListener("change", () => {
+  if (claimProposalQueueOpen) return selectAllReview("claim", claimsSelectAllInput.checked);
   visibleClaims().forEach((claim) => {
     if (viewAddingClaims && viewDraftClaimIds.includes(claim.id)) return;
     if (claimsSelectAllInput.checked) selectedClaimIds.add(claim.id);
@@ -2078,8 +2261,10 @@ claimsSelectAllInput.addEventListener("change", () => {
 });
 
 claimsTagFilterInput.addEventListener("change", () => {
+  if (claimProposalQueueOpen) return renderClaimProposals();
   renderClaims();
   updateClaimsStatus();
+  renderReviewWorkspace();
 });
 
 claimsTagAllFilterInput.addEventListener("change", () => {
@@ -2097,7 +2282,9 @@ document.addEventListener("click", (event) => {
   });
 });
 
-const copySelectedEvidenceToClaimDraft = () => {
+const copySelectedEvidenceToClaimDraft = (viaLLM = false) => {
+  incomingLLMEvidenceIds = viaLLM ? [...selectedEvidenceIds] : null;
+  if (viaLLM) { renderIncomingTrays(); return; }
   libraryEvidence.forEach((item) => {
     if (selectedEvidenceIds.has(item.id)) {
       incomingClaimEvidenceIds.add(item.id);
@@ -2346,7 +2533,7 @@ const renderReviewWorkspace = () => {
       ? `Add ${selectedClaims().length} Claim${selectedClaims().length === 1 ? "" : "s"} to Project`
       : "Add to Project";
     reviewStageAdvanceBtn.title = activeProject
-      ? `Add to ${activeProject.title}` : "Choose an active Project in Search first";
+      ? `Add to ${activeProject.title}` : "Choose a Project from the target menu";
   }
   reviewKnowledgeSection.hidden = context !== "library" || !activeSourceWorkspace;
   const copilotAvailable = ["search", "library", "evidence", "claims", "views", "artifact"].includes(context);
@@ -2479,38 +2666,18 @@ const renderReviewWorkspace = () => {
 
   contextCollectSelectedBtn.disabled = selected.length === 0;
   contextCollectSelectedBtn.textContent = selected.length
-    ? `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Sources`
+    ? `Add ${selected.length} Source${selected.length === 1 ? "" : "s"} to Library`
     : "Add selected Sources";
   renderKnowledgeReview();
   renderChatContext();
   if (contextChanged && copilotAvailable) renderReviewConversation();
 };
 
-const renderResults = () => {
-  resultsEl.innerHTML = "";
-  updateSelectAllState(resultsSelectAllInput, selectedResultKeys.size, fullResults.length);
-  const totalPages = Math.max(1, Math.ceil(fullResults.length / pageSize));
-  const currentPage = Math.min(
-    totalPages,
-    Math.max(1, Number(pageSelectTop.value || "1")),
-  );
-  const start = (currentPage - 1) * pageSize;
-  const visible = fullResults.slice(start, start + pageSize);
-
-  if (!fullResults.length) {
-    const empty = document.createElement("div");
-    empty.className = "result-empty";
-    empty.textContent = "No papers surfaced. Try widening the signal.";
-    resultsEl.appendChild(empty);
-    renderPaginationControls();
-    return;
-  }
-
-  visible.forEach((paper) => {
+const createRelevanceCard = (paper, selectionKeys, onSelection) => {
     const card = document.createElement("article");
     card.className = "result-card";
     const key = resultKey(paper);
-    const isSelected = selectedResultKeys.has(key);
+    const isSelected = selectionKeys.has(key);
     card.classList.toggle("is-selected", isSelected);
 
     const selection = document.createElement("label");
@@ -2523,13 +2690,12 @@ const renderResults = () => {
     selectionText.textContent = "Select";
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) {
-        selectedResultKeys.add(key);
+        selectionKeys.add(key);
       } else {
-        selectedResultKeys.delete(key);
+        selectionKeys.delete(key);
       }
       card.classList.toggle("is-selected", checkbox.checked);
-      updateSelectAllState(resultsSelectAllInput, selectedResultKeys.size, fullResults.length);
-      renderReviewWorkspace();
+      onSelection();
     });
     selection.append(checkbox, selectionText);
 
@@ -2550,7 +2716,9 @@ const renderResults = () => {
     const meta = document.createElement("p");
     meta.className = "result-meta";
     const sourceLabel = paper.source ? ` · ${paper.source}` : "";
-    meta.textContent = `${paper.authors} · ${paper.year}${sourceLabel}`;
+    const citations = Number.isInteger(paper.citation_count) && paper.citation_count >= 0
+      ? paper.citation_count.toLocaleString() : "Unknown";
+    meta.textContent = `${paper.authors || "Unknown"} · ${paper.year || "Undated"}${sourceLabel} · Citations: ${citations}`;
     if (paper.import_status) {
       const importState = document.createElement("span");
       importState.className = `import-state is-${paper.import_status}`;
@@ -2564,6 +2732,14 @@ const renderResults = () => {
 
     const intelligence = document.createElement("div");
     intelligence.className = "result-intelligence";
+    if (paper.relevance_tier) {
+      const tier = document.createElement("span");
+      tier.className = `relevance-tier is-${paper.relevance_tier}`;
+      tier.textContent = ({
+        strong: "Strong match", possible: "Possible match", excluded: "Excluded",
+      })[paper.relevance_tier] || "Possible match";
+      intelligence.appendChild(tier);
+    }
     if (paper.discovery_path) {
       const path = document.createElement("span");
       path.className = "result-path";
@@ -2577,8 +2753,14 @@ const renderResults = () => {
       const score = Number.isFinite(Number(fitScore))
         ? ` · ${Math.round(Number(fitScore) * 100)}% verified fit`
         : "";
-      reason.textContent = `Why it matches${score}: ${paper.match_reason}`;
+      reason.textContent = `Assessment${score}: ${paper.match_reason}`;
       intelligence.appendChild(reason);
+    }
+    if (paper.verification_basis) {
+      const basis = document.createElement("small");
+      basis.className = "verification-basis";
+      basis.textContent = `Basis: ${paper.verification_basis}`;
+      intelligence.appendChild(basis);
     }
 
     const actions = document.createElement("div");
@@ -2595,8 +2777,72 @@ const renderResults = () => {
     card.append(selection, title, meta, abstract);
     if (intelligence.childElementCount) card.appendChild(intelligence);
     if (actions.childElementCount) card.appendChild(actions);
-    resultsEl.appendChild(card);
-  });
+    return card;
+};
+
+const sortSearchResults = (results, order) => {
+  const number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : -1;
+  return results.map((paper, index) => ({ paper, index })).sort((a, b) => {
+    let difference = 0;
+    if (order === "recent") {
+      difference = number(b.paper.year || null) - number(a.paper.year || null);
+    } else if (order === "citations") {
+      difference = number(b.paper.citation_count) - number(a.paper.citation_count);
+    } else {
+      const tiers = { strong: 2, possible: 1, excluded: 0 };
+      difference = (tiers[b.paper.relevance_tier] ?? -1) - (tiers[a.paper.relevance_tier] ?? -1)
+        || number(b.paper.verification_score) - number(a.paper.verification_score)
+        || number(b.paper.semantic_score) - number(a.paper.semantic_score);
+    }
+    return difference || a.index - b.index;
+  }).map(({ paper }) => paper);
+};
+
+const resultsSortSelect = document.querySelector("#results-sort");
+resultsSortSelect.addEventListener("change", () => {
+  pageSelectTop.value = "1";
+  renderResults();
+});
+
+const renderResults = () => {
+  resultsEl.innerHTML = "";
+  updateSelectAllState(resultsSelectAllInput, selectedPrimaryResultCount(), fullResults.length);
+  const totalPages = Math.max(1, Math.ceil(fullResults.length / pageSize));
+  const currentPage = Math.min(
+    totalPages,
+    Math.max(1, Number(pageSelectTop.value || "1")),
+  );
+  const start = (currentPage - 1) * pageSize;
+  const visible = sortSearchResults(fullResults, resultsSortSelect.value).slice(start, start + pageSize);
+
+  if (!fullResults.length && !excludedSearchResults.length) {
+    const empty = document.createElement("div");
+    empty.className = "result-empty";
+    empty.textContent = "No papers surfaced. Try widening the signal.";
+    resultsEl.appendChild(empty);
+    renderPaginationControls();
+    return;
+  }
+
+  visible.forEach((paper) => resultsEl.appendChild(createRelevanceCard(
+    paper, selectedResultKeys, () => {
+      updateSelectAllState(resultsSelectAllInput, selectedPrimaryResultCount(), fullResults.length);
+      renderReviewWorkspace();
+    },
+  )));
+  if (excludedSearchResults.length) {
+    const excluded = document.createElement("details");
+    excluded.className = "excluded-results";
+    const summary = document.createElement("summary");
+    summary.textContent = `Excluded by LLM verification · ${excludedSearchResults.length}`;
+    const list = document.createElement("div");
+    list.className = "excluded-results-list";
+    sortSearchResults(excludedSearchResults, resultsSortSelect.value).forEach((paper) => list.appendChild(createRelevanceCard(
+      paper, selectedResultKeys, renderReviewWorkspace,
+    )));
+    excluded.append(summary, list);
+    resultsEl.appendChild(excluded);
+  }
   renderPaginationControls();
   renderReviewWorkspace();
 };
@@ -2704,6 +2950,12 @@ const fetchConfig = async () => {
       return;
     }
     const data = await response.json();
+    const libraryBadge = document.querySelector("#library-badge");
+    const libraryName = data.library_name || "default";
+    libraryBadge.hidden = false;
+    libraryBadge.textContent = libraryName;
+    libraryBadge.title = `Library: ${libraryName}. API requests are real.`;
+    document.title = `Knowte · ${libraryName}`;
     aiModelProfiles = (data.ai_model_profiles || []).map((profile) => ({
       ...profile, api_key: "", remove_api_key: false,
       custom_recipe_text: JSON.stringify(profile.custom_recipe || {}, null, 2),
@@ -2744,6 +2996,18 @@ const fetchConfig = async () => {
     aiSearchTimeoutInput.value = String(
       data.ai_search_timeout_seconds || data.ai_timeout_seconds || 45,
     );
+    evidenceRequestModeInput.value = data.ai_evidence_request_mode || "combined";
+    savedEvidenceRequestMode = evidenceRequestModeInput.value;
+    evidenceSourceLimit = Number(data.ai_evidence_source_limit || 6);
+    ai_evidence_source_limitInput.value = String(evidenceSourceLimit);
+    claimEvidenceLimit = Number(data.ai_claim_evidence_limit || 30);
+    aiWikiClaimLimitInput.value = String(data.ai_wiki_claim_limit || 100);
+    wikiClaimLimit = Number(data.ai_wiki_claim_limit || 100);
+    ai_claim_evidence_limitInput.value = String(claimEvidenceLimit);
+    aiClaimComparisonLimitInput.value = String(data.ai_claim_comparison_limit || 100);
+    CHAT_CONTEXT_LIMIT = Number(data.ai_copilot_context_limit || 12);
+    ai_copilot_context_limitInput.value = String(CHAT_CONTEXT_LIMIT);
+    updateEvidenceReadScope();
     aiStageTimeoutInput.value = String(
       data.ai_stage_timeout_seconds || data.ai_timeout_seconds || 45,
     );
@@ -2751,10 +3015,6 @@ const fetchConfig = async () => {
     aiCopilotTemperatureInput.value = String(data.ai_copilot_temperature ?? 0.2);
     aiCopilotMaxTokensInput.value = String(data.ai_copilot_max_tokens || 1200);
     renderCopilotAdvancedParameters(data.ai_copilot_advanced_parameters ?? { top_p: 0.9 });
-    aiCopilotPromptPreviews = data.ai_copilot_prompt_previews || {
-      search: data.ai_copilot_prompt_preview || "",
-    };
-    aiCopilotPromptShared = data.ai_copilot_prompt_shared || "";
     renderCopilotPromptPreview();
     semanticscholarKeyRemovalPending = false;
     aiApiKeyRemovalPending = false;
@@ -2772,8 +3032,9 @@ const fetchConfig = async () => {
     configuredIntelligentMaxResults = Number(data.intelligent_max_results || 20);
     defaultSearchMode = ["intelligent", "import"].includes(data.default_search_mode)
       ? data.default_search_mode : "keyword";
+    searchAIReview = data.search_ai_review ?? (defaultSearchMode === "intelligent");
     renderDefaultSearchMode();
-    setSearchMode(defaultSearchMode === "intelligent" ? "smart" : defaultSearchMode);
+    setSearchMode(defaultSearchMode === "import" ? "import" : "search");
     activeLimit = configuredMaxPapers;
     maxPapersInput.value = String(configuredMaxPapers);
     intelligentMaxResultsInput.value = String(configuredIntelligentMaxResults);
@@ -2807,9 +3068,6 @@ const saveConfig = async () => {
   const semanticscholar_api_key = clear_semanticscholar_api_key
     ? ""
     : s2KeyInput.value.trim();
-  const searxng_url = searxngInput?.value.trim() || "";
-  const searxng_proxy = searxngProxyInput?.value.trim() || "";
-  const web_ignore_year_filter = Boolean(webIgnoreYearFilterInput?.checked);
   const enabled_backends = Array.from(
     backendGrid.querySelectorAll("input[type='checkbox']:checked"),
   ).map((box) => box.value);
@@ -2833,40 +3091,66 @@ const saveConfig = async () => {
   saveConfigBtn.textContent = "Saving…";
   setConfigStatus("Saving config…");
   try {
-    const response = await fetch("/api/config", {
+    const configPayload = {
+      email,
+      ...(semanticscholar_api_key || clear_semanticscholar_api_key
+        ? { semanticscholar_api_key }
+        : {}),
+      enabled_backends,
+      max_papers,
+      intelligent_max_results,
+      ai_model_profiles: serializedAIProfiles(),
+      ai_role_assignments: aiRoleAssignments,
+      ai_verify_batch_size: Number(aiVerifyBatchSizeInput.value || 5),
+      ai_verify_concurrency: Number(aiVerifyConcurrencyInput.value || 1),
+      ai_search_timeout_seconds: Number(aiSearchTimeoutInput.value || 45),
+      ai_evidence_source_limit: Number(ai_evidence_source_limitInput.value || 6),
+      ai_claim_evidence_limit: Number(ai_claim_evidence_limitInput.value || 30),
+      ai_claim_comparison_limit: Number(aiClaimComparisonLimitInput.value || 100),
+      ai_wiki_claim_limit: Number(aiWikiClaimLimitInput.value || 100),
+      ai_copilot_context_limit: Number(ai_copilot_context_limitInput.value || 12),
+      ai_stage_timeout_seconds: Number(aiStageTimeoutInput.value || 45),
+      ai_evidence_request_mode: evidenceRequestModeInput.value,
+      ai_copilot_instructions: aiCopilotInstructionsInput.value.trim(),
+      ai_copilot_temperature: Number(aiCopilotTemperatureInput.value || 0),
+      ai_copilot_max_tokens: Number(aiCopilotMaxTokensInput.value || 1200),
+      ai_copilot_advanced_parameters: copilotAdvancedParameters(),
+    };
+    const submitConfig = (body) => fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        ...(semanticscholar_api_key || clear_semanticscholar_api_key
-          ? { semanticscholar_api_key }
-          : {}),
-        searxng_url,
-        searxng_proxy,
-        web_ignore_year_filter,
-        enabled_backends,
-        max_papers,
-        intelligent_max_results,
-        ai_model_profiles: serializedAIProfiles(),
-        ai_role_assignments: aiRoleAssignments,
-        ai_verify_batch_size: Number(aiVerifyBatchSizeInput.value || 5),
-        ai_verify_concurrency: Number(aiVerifyConcurrencyInput.value || 1),
-        ai_search_timeout_seconds: Number(aiSearchTimeoutInput.value || 45),
-        ai_stage_timeout_seconds: Number(aiStageTimeoutInput.value || 45),
-        ai_copilot_instructions: aiCopilotInstructionsInput.value.trim(),
-        ai_copilot_temperature: Number(aiCopilotTemperatureInput.value || 0),
-        ai_copilot_max_tokens: Number(aiCopilotMaxTokensInput.value || 1200),
-        ai_copilot_advanced_parameters: copilotAdvancedParameters(),
-      }),
+      body: JSON.stringify(body),
     });
+    let response = await submitConfig(configPayload);
+    let data = await response.json().catch(() => ({}));
+    if (
+      response.status === 409
+      && data.error === "obsolete_config_confirmation_required"
+    ) {
+      const labels = (data.obsolete_config_items || [])
+        .map((item) => `• ${item.label || item.key}`)
+        .join("\n");
+      const confirmed = await confirmAction(
+        "This Config contains settings from older Knowte versions:\n\n"
+          + `${labels}\n\nRemove them and save? `
+          + "Cancel if you want to export the current Config first.",
+      );
+      if (!confirmed) {
+        setConfigStatus("Config was not saved. Older settings were kept.");
+        return false;
+      }
+      response = await submitConfig({
+        ...configPayload,
+        confirm_remove_obsolete_config: true,
+      });
+      data = await response.json().catch(() => ({}));
+    }
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      if (error.error === "no_search_backends") {
+      if (data.error === "no_search_backends") {
         throw new Error("no_search_backends");
       }
       throw new Error("save_failed");
     }
-    const data = await response.json();
     aiModelProfiles = (data.ai_model_profiles || []).map((profile) => ({
       ...profile, api_key: "", remove_api_key: false,
       custom_recipe_text: JSON.stringify(profile.custom_recipe || {}, null, 2),
@@ -2877,6 +3161,12 @@ const saveConfig = async () => {
     aiCustomRecipeInput.value = JSON.stringify(data.ai_custom_recipe || {}, null, 2);
     renderProviderConfig();
     setConfigStatus("Config saved.", 1000);
+    renderAIRoles(true);
+    projectClaimScopes.forEach((state) => {
+      state.recommendationModel = aiRoleAssignments.article || "";
+      state.wikiModel = aiRoleAssignments.wiki || "";
+    });
+    renderArtifacts();
     if (data.email) {
       emailInput.value = data.email;
     }
@@ -2913,6 +3203,16 @@ const saveConfig = async () => {
     aiSearchTimeoutInput.value = String(
       data.ai_search_timeout_seconds || data.ai_timeout_seconds || 45,
     );
+    evidenceRequestModeInput.value = data.ai_evidence_request_mode || "combined";
+    savedEvidenceRequestMode = evidenceRequestModeInput.value;
+    evidenceSourceLimit = Number(data.ai_evidence_source_limit || 6);
+    ai_evidence_source_limitInput.value = String(evidenceSourceLimit);
+    claimEvidenceLimit = Number(data.ai_claim_evidence_limit || 30);
+    ai_claim_evidence_limitInput.value = String(claimEvidenceLimit);
+    aiClaimComparisonLimitInput.value = String(data.ai_claim_comparison_limit || 100);
+    CHAT_CONTEXT_LIMIT = Number(data.ai_copilot_context_limit || 12);
+    ai_copilot_context_limitInput.value = String(CHAT_CONTEXT_LIMIT);
+    updateEvidenceReadScope();
     aiStageTimeoutInput.value = String(
       data.ai_stage_timeout_seconds || data.ai_timeout_seconds || 45,
     );
@@ -2920,12 +3220,10 @@ const saveConfig = async () => {
     aiCopilotTemperatureInput.value = String(data.ai_copilot_temperature ?? 0.2);
     aiCopilotMaxTokensInput.value = String(data.ai_copilot_max_tokens || 1200);
     renderCopilotAdvancedParameters(data.ai_copilot_advanced_parameters ?? { top_p: 0.9 });
-    aiCopilotPromptPreviews = data.ai_copilot_prompt_previews || {
-      search: data.ai_copilot_prompt_preview || "",
-    };
-    aiCopilotPromptShared = data.ai_copilot_prompt_shared || "";
     renderCopilotPromptPreview();
     renderSecretControls();
+    aiWikiClaimLimitInput.value = String(data.ai_wiki_claim_limit || 100);
+    wikiClaimLimit = Number(data.ai_wiki_claim_limit || 100);
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
     }
@@ -2985,7 +3283,7 @@ exportConfigBtn.addEventListener("click", async () => {
 
 searxngSetupBtn.addEventListener("click", async () => {
   const willSaveConfig = isConfigDirty();
-  const confirmed = window.confirm(
+  const confirmed = await confirmAction(
     "Knowte will download the official SearXNG image and create a private local container bound to an available localhost port."
       + (willSaveConfig ? " Your unsaved Config changes will be saved first." : "")
       + " Continue?",
@@ -3000,7 +3298,7 @@ searxngStartBtn.addEventListener("click", async () => {
 });
 
 searxngUpdateBtn.addEventListener("click", async () => {
-  const confirmed = window.confirm(
+  const confirmed = await confirmAction(
     "Check the official SearXNG image for updates? If it is already current, Knowte will not restart the container. If a newer image is available, the service will restart briefly and the previous image will be removed only when Docker confirms it is unused.",
   );
   if (confirmed) await runSearxngAction("update");
@@ -3016,7 +3314,7 @@ searxngLogsBtn.addEventListener("click", async () => {
 
 searxngRemoveBtn.addEventListener("click", async () => {
   const removeImage = Boolean(searxngRemoveCacheInput?.checked);
-  const confirmed = window.confirm(
+  const confirmed = await confirmAction(
     "Remove the Knowte-managed SearXNG container and its generated configuration?"
       + (removeImage
         ? " The exact cached image will also be removed if Docker confirms that no other container uses it."
@@ -3024,6 +3322,27 @@ searxngRemoveBtn.addEventListener("click", async () => {
   );
   if (confirmed) await runSearxngAction("remove", { remove_image: removeImage });
 });
+
+const mergeSearchQueryResults = (pages, query, limit) => {
+  const unique = new Map();
+  const length = Math.max(0, ...pages.map((page) => (page.results || []).length));
+  for (let index = 0; index < length; index += 1) {
+    pages.forEach((page) => {
+      const item = page.results?.[index];
+      if (!item) return;
+      const key = String(item.doi_url || item.paper_url || item.url || item.id || item.title).replace(/\/$/, "").toLowerCase();
+      if (!unique.has(key)) unique.set(key, item);
+    });
+  }
+  const results = [...unique.values()].slice(0, limit);
+  return {
+    ...pages[0], query, results, count: results.length,
+    usage: pages.at(-1)?.usage,
+    warnings: [...new Set(pages.flatMap((page) => page.warnings || []))],
+    source_counts: results.reduce((counts, item) => { const key = item.source || "Unknown"; counts[key] = (counts[key] || 0) + 1; return counts; }, {}),
+    can_find_more: limit < 1000 && (unique.size > limit || pages.some((page) => page.can_find_more)),
+  };
+};
 
 const runSearch = async () => {
   if (!lastQuery) return;
@@ -3035,6 +3354,7 @@ const runSearch = async () => {
   statusEl.textContent = `Scanning for "${lastQuery}"...`;
   resultsEl.innerHTML = "";
   setSearching(true);
+  statusEl.scrollIntoView({ behavior: "smooth", block: "center" });
 
   try {
     const params = new URLSearchParams({
@@ -3046,8 +3366,17 @@ const runSearch = async () => {
     });
     if (lastYearFrom) params.set("year_from", lastYearFrom);
     if (lastYearTo) params.set("year_to", lastYearTo);
-    const queryString = params.toString();
-    const response = await fetch(`/api/search?${queryString}`, { signal: controller.signal });
+    const pages = [];
+    let response;
+    const queries = lastSearchQueries.length ? lastSearchQueries : [lastQuery];
+    for (const [index, query] of queries.entries()) {
+      params.set("q", query);
+      statusEl.textContent = `Searching query ${index + 1}/${queries.length}: ${query} · AI Review off`;
+      response = await fetch(`/api/search?${params}`, { signal: controller.signal });
+      if (searchController !== controller) return;
+      if (!response.ok) break;
+      pages.push(await response.json());
+    }
     if (searchController !== controller) return;
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => null);
@@ -3066,8 +3395,9 @@ const runSearch = async () => {
       }
       throw new Error("Search failed");
     }
-    const data = await response.json();
+    const data = pages.length === 1 ? pages[0] : mergeSearchQueryResults(pages, lastQuery, activeLimit);
     fullResults = data.results || [];
+    excludedSearchResults = [];
     canFindMore = Boolean(data.can_find_more);
     canFindMoreWeb = Boolean(data.search_diagnostics?.websearch?.has_more);
     let timeHint = "";
@@ -3107,7 +3437,8 @@ const runSearch = async () => {
     const sourceSummary = Object.entries(data.source_counts || {})
       .map(([source, count]) => `${source}: ${count}`)
       .join(", ");
-    const sourceHint = sourceSummary ? ` Sources: ${sourceSummary}.` : "";
+    const sourceHint = (sourceSummary ? ` Sources: ${sourceSummary}.` : "")
+      + (queries.length > 1 ? ` Searched ${queries.length} active queries; duplicates removed.` : "");
     const replay = data.debug_replay || {};
     const replayVerification = replay.unverified_count
       ? `${replay.verified_count || 0} previously verified and ${replay.unverified_count} unverified`
@@ -3158,7 +3489,7 @@ const configuredBackends = () => Array.from(
 ).map((box) => box.value);
 
 const activeBackends = () => {
-  const available = new Set(["arxiv", "openalex", "semanticscholar", "websearch"]);
+  const available = new Set(["arxiv", "openalex", "semanticscholar"]);
   const selected = (planSourceOverride || configuredBackends()).filter((source) => available.has(source));
   return selected.length ? selected : configuredBackends();
 };
@@ -3169,19 +3500,23 @@ const beginSearch = async (query, areas, yearFrom, yearTo, backends = activeBack
     return;
   }
 
-  const wantsWeb = backends.includes("websearch");
+  const wantsWeb = false;
   const academicBackends = new Set(["arxiv", "openalex", "semanticscholar"]);
   lastQuery = query;
   lastAreas = areas;
   lastYearFrom = yearFrom;
   lastYearTo = yearTo;
   lastBackends = [...backends];
+  lastSearchQueries = [...new Set(searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT)
+    .map((action) => action.query.trim()).filter(Boolean))];
+  if (!lastSearchQueries.length) lastSearchQueries = [query];
   activeLimit = configuredMaxPapers;
   activeWebPages = 1;
   lastSearchHasWeb = wantsWeb;
   lastSearchHasAcademic = backends.some((backend) => academicBackends.has(backend));
   canFindMoreWeb = false;
   fullResults = [];
+  excludedSearchResults = [];
   selectedResultKeys.clear();
   canFindMore = false;
   pageSelectTop.value = "1";
@@ -3226,8 +3561,8 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
   let elapsedTimer = null;
   let progressTimer = null;
   const academicEnabled = backends.some((source) => ["arxiv", "openalex", "semanticscholar"].includes(source));
-  const webEnabled = backends.includes("websearch");
-  if (!academicEnabled && !webEnabled) {
+  const webEnabled = false;
+  if (!academicEnabled) {
     statusEl.textContent = "Select at least one source in Config.";
     return;
   }
@@ -3240,12 +3575,14 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
   lastSearchHasAcademic = academicEnabled;
   lastSearchHasWeb = webEnabled;
   fullResults = [];
+  excludedSearchResults = [];
   selectedResultKeys.clear();
   canFindMore = false;
   canFindMoreWeb = false;
   pageSelectTop.value = "1";
   resultsEl.innerHTML = "";
   intelligentProgressEl.hidden = false;
+  intelligentProgressEl.scrollIntoView({ behavior: "smooth", block: "start" });
   resetStageGroup(academicStagesEl, academicEnabled);
   resetStageGroup(webStagesEl, webEnabled);
   intelligentBudgetEl.textContent = "Request counts will appear when the pipeline completes.";
@@ -3256,7 +3593,7 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
   const renderElapsed = () => {
     if (token !== intelligentRunToken) return;
     const elapsedSeconds = Math.floor((performance.now() - startedAt) / 1000);
-    statusEl.textContent = `Running Intelligent discovery for “${query}”…\n${elapsedSeconds}s elapsed.`;
+    statusEl.textContent = `Searching with AI Review for “${query}”…\n${elapsedSeconds}s elapsed.`;
   };
   renderElapsed();
   elapsedTimer = window.setInterval(renderElapsed, 1000);
@@ -3333,7 +3670,7 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
       if (data.error === "intelligent_rate_limited") {
         throw new Error("A search channel is rate limited. Wait before retrying.");
       }
-      throw new Error(data.message || "Intelligent Search could not complete.");
+      throw new Error(data.message || "Search with AI Review could not complete.");
     }
     const stages = data.stages || {};
     if (academicEnabled) {
@@ -3356,6 +3693,7 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
     intelligentExpandedEl.hidden = true;
     intelligentExpandedEl.replaceChildren();
     fullResults = data.results || [];
+    excludedSearchResults = data.excluded_results || [];
     updateUsage(data.usage);
     renderResults();
     if (fullResults.length) setFiltersCollapsed(true);
@@ -3377,11 +3715,11 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
       : "";
     statusEl.textContent = data.debug_replay
       ? `Debug Replay: loaded ${fullResults.length} baseline Source(s): ${replayVerification}. No retrieval, Embedding, or LLM verification requests were made; active search filters were not applied.${sourceHint}`
-      : `Found ${fullResults.length} verified result(s) from ${counts.academic || 0} academic and ${counts.web || 0} Web candidate(s).${sourceHint}${degraded}`;
+      : `Found ${fullResults.length} relevant result(s) from ${counts.academic || 0} academic candidate(s); ${excludedSearchResults.length} excluded.${sourceHint}${degraded}`;
   } catch (error) {
     if (token !== intelligentRunToken) return;
     if (error.name === "AbortError") {
-      statusEl.textContent = "Intelligent Search stopped.";
+      statusEl.textContent = "Search with AI Review stopped.";
     } else {
       statusEl.textContent = error.message;
     }
@@ -3410,7 +3748,7 @@ searchStrategyAddBtn.addEventListener("click", () => {
   }
   const collection = searchStrategyActions.length < SEARCH_STRATEGY_TOP_LIMIT
     ? searchStrategyActions : searchStrategyWaitingActions;
-  collection.push({ query: "", target: "both", purpose: "" });
+  collection.push({ query: "", target: "academic", purpose: "" });
   searchStrategyEl.hidden = false;
   renderSearchStrategy();
 });
@@ -3431,7 +3769,7 @@ discussSearchBtn.addEventListener("click", async () => {
   contextPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   discussSearchBtn.disabled = true;
   discussSearchBtn.textContent = "Discussing…";
-  searchStrategyStatusEl.textContent = "Copilot is proposing source-specific retrieval actions…";
+  searchStrategyStatusEl.textContent = "Copilot is proposing academic queries…";
   try {
     const { yearFrom, yearTo } = normalizeSearchYears();
     const response = await fetch("/api/search/strategy", {
@@ -3455,7 +3793,7 @@ discussSearchBtn.addEventListener("click", async () => {
     searchStrategyStaleAcknowledged = false;
     searchStrategyEl.hidden = false;
     renderSearchStrategy();
-    const strategyMessage = `I proposed ${searchStrategyActions.length} source-specific retrieval action${searchStrategyActions.length === 1 ? "" : "s"}. You can edit them directly or continue discussing the strategy here.`;
+    const strategyMessage = `I proposed ${searchStrategyActions.length} academic quer${searchStrategyActions.length === 1 ? "y" : "ies"}. You can edit them directly or continue discussing the strategy here.`;
     appendReviewMessage(strategyMessage, "assistant");
     reviewConversations.search.push({ role: "assistant", content: strategyMessage });
   } catch (error) {
@@ -3472,7 +3810,7 @@ copyImportPromptBtn.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(importPromptPreviewEl.textContent);
     copyImportPromptBtn.textContent = "✓ Copied";
-    window.setTimeout(() => { copyImportPromptBtn.textContent = "Copy import prompt"; }, 1000);
+    window.setTimeout(() => { copyImportPromptBtn.textContent = "Copy suggested prompt"; }, 1000);
   } catch (_error) {
     importStatusEl.textContent = "Could not access the clipboard. Expand Preview prompt and copy it manually.";
   }
@@ -3541,14 +3879,15 @@ form.addEventListener("submit", async (event) => {
   const areas = Array.from(getEffectiveAreas()).join(",");
   const { yearFrom, yearTo } = normalizeSearchYears();
   const backends = activeBackends();
-  if (searchMode === "smart") {
-    if (isSearchStrategyStale() && !searchStrategyStaleAcknowledged) {
+  if (searchMode === "import") return;
+  if (isSearchStrategyStale() && !searchStrategyStaleAcknowledged) {
       searchStrategyStaleEl.hidden = false;
       searchStrategyStatusEl.dataset.state = "error";
       searchStrategyStatusEl.textContent = "Review the outdated strategy before searching.";
       searchStrategyEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
       return;
-    }
+  }
+  if (searchMode === "smart") {
     await runIntelligentSearch(query, areas, yearFrom, yearTo, backends);
   } else {
     intelligentProgressEl.hidden = true;
@@ -3562,7 +3901,8 @@ searchModeButtons.forEach((button) => {
 
 defaultSearchModeButtons.forEach((button) => {
   button.addEventListener("click", async () => {
-    const requestedMode = button.dataset.defaultSearchMode;
+    const requestedMode = button.dataset.defaultSearchMode === "search"
+      ? (searchAIReview ? "intelligent" : "keyword") : "import";
     if (!requestedMode || requestedMode === defaultSearchMode) return;
     defaultSearchModeButtons.forEach((item) => {
       item.disabled = true;
@@ -3571,7 +3911,7 @@ defaultSearchModeButtons.forEach((button) => {
       const response = await fetch("/api/config/default-search-mode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: requestedMode }),
+        body: JSON.stringify({ mode: requestedMode, ai_review: searchAIReview }),
       });
       if (!response.ok) throw new Error("save_failed");
       const data = await response.json();
@@ -3585,6 +3925,24 @@ defaultSearchModeButtons.forEach((button) => {
       });
     }
   });
+});
+
+searchAIReviewInput.addEventListener("change", async () => {
+  const previous = searchAIReview;
+  searchAIReview = searchAIReviewInput.checked;
+  setSearchMode("search");
+  searchAIReviewInput.disabled = true;
+  try {
+    const response = await fetch("/api/config/default-search-mode", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: defaultSearchMode, ai_review: searchAIReview }),
+    });
+    if (!response.ok) throw new Error("Could not save AI Review preference.");
+    const data = await response.json(); defaultSearchMode = data.default_search_mode;
+    renderDefaultSearchMode();
+  } catch (error) {
+    searchAIReview = previous; setSearchMode("search"); statusEl.textContent = error.message;
+  } finally { searchAIReviewInput.disabled = false; }
 });
 
 selectedAreasEl.addEventListener("click", (event) => {
@@ -3668,7 +4026,7 @@ stopBtn.addEventListener("click", () => {
       searchController = null;
     }
     isIntelligentSearching = false;
-    statusEl.textContent = "Intelligent Search stopped.";
+    statusEl.textContent = "Search with AI Review stopped.";
     setSearching(false);
   } else if (isSearching && searchController) {
     searchController.abort();
@@ -3773,7 +4131,7 @@ const openBatchTagEditor = async (entityType, entityIds, afterSave) => {
     entityType, entityIds: [...entityIds], names: [], additive: true, afterSave,
   };
   const entityLabel = entityType === "evidence" ? "Evidence"
-    : entityType === "claim" ? "Claims" : "items";
+    : entityType === "claim" ? "Claims" : entityType === "source" ? "Sources" : "items";
   tagEditorTypeEl.textContent = `${entityIds.length} selected ${entityLabel} · add Tags`;
   const response = await fetch("/api/tags");
   const data = response.ok ? await response.json() : { tags: [] };
@@ -3835,6 +4193,8 @@ const saveTagEditor = async () => {
     tagEditorDialog.close();
     activeTagEditor = null;
     await afterSave?.(data.tags || []);
+  } catch (error) {
+    await appDialog(error.message || "Could not save Tags.", {title: "Tags not saved", confirmLabel: "Close"});
   } finally {
     tagEditorSaveBtn.disabled = false;
   }
@@ -3883,6 +4243,104 @@ const projectTagMenu = (label, selected, other, rerender) => {
   syncTagFilterOptions(control, claims, selected, other);
   control.addEventListener("change", rerender);
   return control;
+};
+
+const appDialog = (message, { value, title = "Confirm", confirmLabel = "Continue", destructive = false, highlights = [] } = {}) => new Promise((resolve) => {
+  const dialog = document.createElement("dialog"); dialog.className = "app-dialog";
+  dialog.setAttribute("aria-label", title);
+  const heading = document.createElement("h2"); heading.textContent = title;
+  const description = document.createElement("p"); description.textContent = message;
+  if (highlights.length) {
+    description.replaceChildren();
+    let remaining = message;
+    for (const text of highlights) {
+      const index = remaining.indexOf(text);
+      if (index < 0) continue;
+      description.appendChild(document.createTextNode(remaining.slice(0, index)));
+      const mark = document.createElement("strong"); mark.className = "deletion-impact"; mark.textContent = text;
+      description.appendChild(mark); remaining = remaining.slice(index + text.length);
+    }
+    description.appendChild(document.createTextNode(remaining));
+  }
+  dialog.append(heading, description);
+  let input;
+  if (value !== undefined) {
+    input = document.createElement("textarea"); input.value = value; input.rows = 3;
+    input.setAttribute("aria-label", message); dialog.appendChild(input);
+  }
+  const actions = document.createElement("div"); actions.className = "app-dialog-actions";
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary-action"; cancel.textContent = "Cancel";
+  const accept = document.createElement("button"); accept.type = "button";
+  accept.className = `semantic-action ${destructive ? "is-destructive" : "is-accept"}`; accept.textContent = confirmLabel;
+  let result = value === undefined ? false : null;
+  cancel.addEventListener("click", () => dialog.close());
+  accept.addEventListener("click", () => { result = input ? input.value : true; dialog.close(); });
+  dialog.addEventListener("close", () => { dialog.remove(); resolve(result); }, {once:true});
+  actions.append(cancel, accept); dialog.appendChild(actions); document.body.appendChild(dialog);
+  dialog.showModal(); (input || cancel).focus();
+});
+const confirmAction = (message, options = {}) => appDialog(message, {destructive: /^(Delete|Discard|Withdraw|Cancel this)/.test(message), ...options});
+const promptText = (message, value = "") => appDialog(message, {value, title: "Edit", confirmLabel: "Save"});
+
+const renderWikiSummary = (container, text, pages, navigate) => {
+  container.replaceChildren();
+  const pattern = /\[\[claim:([^|\]\s]+)\|([^\]\n]+)\]\]/g;
+  let offset = 0;
+  for (const match of String(text || "").matchAll(pattern)) {
+    container.appendChild(document.createTextNode(text.slice(offset, match.index)));
+    const home = pages.find((page) => (page.claim_ids || []).includes(match[1]));
+    if (home) {
+      const link = document.createElement("button"); link.type = "button";
+      link.className = "wiki-cross-reference"; link.textContent = match[2];
+      link.title = `Open in ${home.title}`;
+      link.addEventListener("click", () => navigate(home, match[1]));
+      container.appendChild(link);
+    } else container.appendChild(document.createTextNode(match[2]));
+    offset = match.index + match[0].length;
+  }
+  container.appendChild(document.createTextNode(String(text || "").slice(offset)));
+};
+
+const focusWikiClaim = (container, claimId) => {
+  const target = [...container.querySelectorAll("[data-wiki-claim-id]")]
+    .find((node) => node.dataset.wikiClaimId === claimId);
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.focus({ preventScroll: true });
+  }
+};
+
+const renderProjectWikiPages = (container, pages, claims, gaps = []) => {
+  pages.forEach((page) => {
+    const section = document.createElement("section");
+    let depth = 0; let parent = page.parent_key; const seen = new Set();
+    while (parent && depth < 6 && !seen.has(parent)) {
+      seen.add(parent); depth += 1;
+      parent = pages.find((candidate) => candidate.key === parent)?.parent_key || "";
+    }
+    section.style.setProperty("--project-wiki-depth", depth);
+    const title = document.createElement("h4"); title.textContent = page.title;
+    const summary = document.createElement("p");
+    renderWikiSummary(summary, page.summary || "", pages, (_, id) => focusWikiClaim(container, id));
+    const pageClaims = document.createElement("div");
+    (page.claim_ids || []).forEach((claimId) => {
+      const claim = claims.find((item) => item.id === claimId);
+      if (!claim) return;
+      const row = document.createElement("button"); row.type = "button"; row.textContent = claim.statement;
+      row.dataset.wikiClaimId = claim.id;
+      row.addEventListener("click", () => { selectedClaimIds.clear(); selectedClaimIds.add(claim.id); showPanel("claims-panel"); });
+      pageClaims.appendChild(row);
+    });
+    section.append(title); if (page.summary) section.append(summary); section.append(pageClaims);
+    container.appendChild(section);
+  });
+  if (gaps.length) {
+    const section = document.createElement("section");
+    const title = document.createElement("h4"); title.textContent = "Knowledge gaps";
+    const list = document.createElement("ul");
+    gaps.forEach((gap) => { const item = document.createElement("li"); item.textContent = gap; list.appendChild(item); });
+    section.append(title, list); container.appendChild(section);
+  }
 };
 
 const renderProjectClaimScope = (card, artifact, detail) => {
@@ -4070,12 +4528,25 @@ const renderProjectClaimScope = (card, artifact, detail) => {
   const review = document.createElement("div");
   review.className = "project-recommendation-list";
   const proposals = projectClaimRecommendations.get(artifact.id) || [];
+  const refreshReview = async (fetchData = false) => {
+    if (fetchData) {
+      await fetchProjectRecommendations(artifact.id);
+      const response = await fetch(`/api/projects/${encodeURIComponent(artifact.id)}`);
+      if (!response.ok) throw new Error("Could not refresh Project");
+      projectDetails.set(artifact.id, await response.json());
+      await fetchArtifacts();
+    } else renderArtifacts();
+  };
   if (proposals.length) {
     const reviewHead = document.createElement("strong");
     reviewHead.textContent = `Awaiting review · ${proposals.length}`;
     review.appendChild(reviewHead);
+    const batch = createReviewBatchBar(`project-claims-${artifact.id}`, proposals,
+      (proposal, accepted) => sendReviewDecision(`/api/project-claim-recommendations/${proposal.id}`, accepted), refreshReview, artifactStatusEl);
+    review.append(batch.bar);
     proposals.forEach((proposal) => {
       const item = document.createElement("article");
+      addReviewSelection(item, proposal, batch.state, batch.update);
       const statement = document.createElement("p"); statement.textContent = proposal.claim.statement;
       const rationale = document.createElement("small"); rationale.textContent = proposal.payload.rationale || "Recommended for this Project.";
       const actions = document.createElement("div");
@@ -4097,8 +4568,12 @@ const renderProjectClaimScope = (card, artifact, detail) => {
   }
   const wikiReview = document.createElement("div");
   wikiReview.className = "project-recommendation-list project-wiki-review";
+  const wikiBatch = createReviewBatchBar(`project-wiki-${artifact.id}`, detail.wiki_proposals || [],
+    (proposal, accepted) => sendReviewDecision(`/api/project-wiki-proposals/${proposal.id}`, accepted), refreshReview, artifactStatusEl, {singleAccept: true});
+  if (detail.wiki_proposals?.length) wikiReview.append(wikiBatch.bar);
   (detail.wiki_proposals || []).forEach((proposal) => {
     const item = document.createElement("article");
+    addReviewSelection(item, proposal, wikiBatch.state, wikiBatch.update);
     const title = document.createElement("strong"); title.textContent = "Project Wiki awaiting review";
     const pages = document.createElement("small"); pages.textContent = `${proposal.payload.pages?.length || 0} sections · ${proposal.payload.summary || "Review the proposed structure before applying it."}`;
     const actions = document.createElement("div");
@@ -4112,7 +4587,9 @@ const renderProjectClaimScope = (card, artifact, detail) => {
       projectDetails.set(artifact.id, refreshed); renderArtifacts();
     };
     discard.addEventListener("click", () => decide(false)); accept.addEventListener("click", () => decide(true));
-    actions.append(discard, accept); item.append(title, pages, actions); wikiReview.appendChild(item);
+    const preview = document.createElement("div"); preview.className = "project-wiki-display";
+    renderProjectWikiPages(preview, proposal.payload.pages || [], detail.claims || [], proposal.payload.gaps || []);
+    actions.append(discard, accept); item.append(title, pages, preview, actions); wikiReview.appendChild(item);
   });
   scope.append(heading, filters, scopeStats, tools, aiComposer, candidateList, review, wikiReview);
   card.appendChild(scope);
@@ -4275,43 +4752,20 @@ const renderArtifacts = () => {
         wikiHeading.textContent = detail.wiki.title || `${artifact.title} Wiki`;
         projectWiki.appendChild(wikiHeading);
         const pages = detail.wiki.graph_state?.pages || [];
-        pages.forEach((page) => {
-          const section = document.createElement("section");
-          const depth = (() => {
-            let value = 0; let parent = page.parent_key; const seen = new Set();
-            while (parent && value < 6 && !seen.has(parent)) {
-              seen.add(parent); value += 1;
-              parent = pages.find((candidate) => candidate.key === parent)?.parent_key || "";
-            }
-            return value;
-          })();
-          section.style.setProperty("--project-wiki-depth", depth);
-          const title = document.createElement("h4"); title.textContent = page.title;
-          const summary = document.createElement("p"); summary.textContent = page.summary || "";
-          const pageClaims = document.createElement("div");
-          (page.claim_ids || []).forEach((claimId) => {
-            const claim = (detail.claims || []).find((item) => item.id === claimId);
-            if (!claim) return;
-            const row = document.createElement("button"); row.type = "button"; row.textContent = claim.statement;
-            row.addEventListener("click", () => { selectedClaimIds.clear(); selectedClaimIds.add(claim.id); showPanel("claims-panel"); });
-            pageClaims.appendChild(row);
-          });
-          section.append(title); if (summary.textContent) section.append(summary); section.append(pageClaims);
-          projectWiki.appendChild(section);
-        });
+        renderProjectWikiPages(projectWiki, pages, detail.claims || [], detail.wiki.graph_state?.gaps || []);
       }
       const documents = document.createElement("div");
       documents.className = "project-knowledge-list";
       const documentHeading = document.createElement("strong");
       documentHeading.textContent = `Articles · ${(detail.documents || []).length}`;
       documents.appendChild(documentHeading);
-      (detail.documents || []).forEach((document) => {
+      (detail.documents || []).forEach((article) => {
         const row = document.createElement("button");
         row.type = "button";
-        row.textContent = document.title;
+        row.textContent = article.title;
         row.addEventListener("click", () => {
           activeArticleProjectId = artifact.id;
-          renderWikiReading(document.content, { saved: true, title: document.title });
+          renderWikiReading(article.content, { saved: true, documentId: article.id, goal: article.goal });
           card.appendChild(wikiReadingEl);
         });
         documents.appendChild(row);
@@ -4338,10 +4792,10 @@ const fetchArtifacts = async () => {
   }
 };
 
-const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags) => {
-  const names = [...new Set(items.flatMap(
+const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags, relationLabel = "") => {
+  const names = [...(relationLabel ? ["__has_related__", "__no_related__"] : []), ...[...new Set(items.flatMap(
     (item) => (item.tags || []).map((tag) => tag.name).filter(Boolean),
-  ))].sort((left, right) => left.localeCompare(right));
+  ))].sort((left, right) => left.localeCompare(right))];
   [...selectedTags].forEach((name) => {
     if (!names.includes(name)) selectedTags.delete(name);
   });
@@ -4356,7 +4810,7 @@ const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags) =
     const clear = menu.querySelector("button");
     if (clear) clear.disabled = selectedTags.size === 0;
   };
-  const signature = JSON.stringify(names);
+  const signature = JSON.stringify([names, relationLabel]);
   if (control.dataset.tagOptions === signature) {
     updateState();
     return;
@@ -4365,9 +4819,14 @@ const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags) =
   const wasOpen = details.open;
   menu.replaceChildren();
   const note = document.createElement("small");
-  note.textContent = "Choose one or more Tags";
+  note.textContent = relationLabel ? "Link status" : "Tags";
+  note.className = "tag-filter-group-title";
   menu.appendChild(note);
   names.forEach((name) => {
+    if (relationLabel && name === names[2]) {
+      const heading = document.createElement("small"); heading.textContent = "Tags";
+      heading.className = "tag-filter-group-title is-separated"; menu.appendChild(heading);
+    }
     const option = document.createElement("label");
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -4380,7 +4839,9 @@ const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags) =
       } else selectedTags.delete(name);
       control.dispatchEvent(new Event("change"));
     });
-    option.append(checkbox, document.createTextNode(name));
+    const label = name === "__has_related__" ? `Has ${relationLabel}` : name === "__no_related__" ? `No ${relationLabel}` : name;
+    if (relationLabel && name.startsWith("__")) option.className = "tag-filter-status";
+    option.append(checkbox, document.createTextNode(label));
     menu.appendChild(option);
   });
   const clear = document.createElement("button");
@@ -4396,8 +4857,9 @@ const syncTagFilterOptions = (control, items, selectedTags, otherSelectedTags) =
   details.open = wasOpen;
 };
 
-const matchesTagFilter = (item, anyTags, allTags) => {
+const matchesTagFilter = (item, anyTags, allTags, relationCount) => {
   const itemTags = new Set((item.tags || []).map((tag) => tag.name));
+  if (relationCount !== undefined) itemTags.add(Number(relationCount) > 0 ? "__has_related__" : "__no_related__");
   const matchesAny = anyTags.size === 0
     || [...anyTags].some((name) => itemTags.has(name));
   const matchesAll = [...allTags].every((name) => itemTags.has(name));
@@ -4406,12 +4868,16 @@ const matchesTagFilter = (item, anyTags, allTags) => {
 
 const visibleEvidence = () => libraryEvidence.filter(
   (item) => matchesTagFilter(
-    item, selectedEvidenceTagFilters, selectedEvidenceAllTagFilters,
+    item, selectedEvidenceTagFilters, selectedEvidenceAllTagFilters, item.claim_count || 0,
   ),
 );
 
+const visibleSources = () => librarySources.filter(item => matchesTagFilter(
+  item, selectedSourceTagFilters, selectedSourceAllTagFilters, item.evidence_count || 0,
+));
+
 const visibleClaims = () => claims.filter(
-  (item) => matchesTagFilter(
+  (item) => !item.needs_review && matchesTagFilter(
     item, selectedClaimTagFilters, selectedClaimAllTagFilters,
   )
     && (!claimsReviewFilterInput.value
@@ -4456,13 +4922,13 @@ const renderClaimAudit = () => {
     claimAuditProgressCountEl.textContent = `${audit.completed_count} / ${audit.candidate_count} pairs`;
     claimAuditProgressLabelEl.textContent = ({
       ready: "Ready to scan",
-      running: "Auditing likely Claim pairs…",
+      running: "Checking Claims and relations…",
       paused: "Audit paused",
       completed: `Audit complete · ${audit.proposal_count} change${audit.proposal_count === 1 ? "" : "s"} proposed`,
       cancelled: "Audit cancelled",
       failed: audit.error || "Audit failed",
     })[audit.status] || audit.status;
-    claimAuditEstimateEl.textContent = `${audit.claim_count} Claims in scope · ${audit.candidate_count} likely pairs · ${Math.ceil(audit.candidate_count / 8)} model batch${Math.ceil(audit.candidate_count / 8) === 1 ? "" : "es"}.`;
+    claimAuditEstimateEl.textContent = `${audit.claim_count} Claims in scope · ${audit.candidate_count} candidate pairs · ${Math.ceil(audit.candidate_count / 8)} estimated model calls. This is a candidate-based check, not every possible pair.`;
   }
 };
 
@@ -4556,14 +5022,15 @@ const updateClaimsStatus = () => {
 };
 
 const renderEvidenceLibrary = () => {
+  if (evidenceProposalQueueOpen) return renderEvidenceProposals();
   evidenceLibraryListEl.replaceChildren();
   syncTagFilterOptions(
     evidenceTagFilterInput, libraryEvidence,
-    selectedEvidenceTagFilters, selectedEvidenceAllTagFilters,
+    selectedEvidenceTagFilters, selectedEvidenceAllTagFilters, "Claims",
   );
   syncTagFilterOptions(
     evidenceTagAllFilterInput, libraryEvidence,
-    selectedEvidenceAllTagFilters, selectedEvidenceTagFilters,
+    selectedEvidenceAllTagFilters, selectedEvidenceTagFilters, "Claims",
   );
   const filteredEvidence = visibleEvidence();
   const selectedCount = libraryEvidence.filter(
@@ -4578,6 +5045,7 @@ const renderEvidenceLibrary = () => {
   libraryProposeClaimsBtn.disabled = selectedCount === 0;
   evidenceCreateClaimBtn.disabled = selectedCount === 0;
   evidenceBatchTagBtn.disabled = selectedCount === 0;
+  evidenceBatchDeleteBtn.disabled = selectedCount === 0;
   libraryProposeClaimsBtn.textContent = selectedCount
     ? `Propose Claims via LLM · ${selectedCount}` : "Propose Claims via LLM";
   evidenceCreateClaimBtn.textContent = selectedCount
@@ -4626,7 +5094,7 @@ const renderEvidenceLibrary = () => {
       content.src = `/api/evidence/${item.id}/snapshot`;
       content.alt = `Snapshot from ${item.source_title}`;
     } else {
-      content.textContent = item.quote;
+      renderEvidenceText(content, item.quote);
     }
     const meta = document.createElement("small");
     meta.textContent = [item.locator, item.source_provider, `${item.claim_count} Claims`]
@@ -4652,6 +5120,7 @@ const openEvidenceInWorkspace = (evidenceId) => {
   const item = libraryEvidence.find((evidence) => evidence.id === evidenceId);
   if (!item) return;
   claimProposalQueueOpen = false;
+  evidenceProposalQueueOpen = false;
   selectedEvidenceTagFilters.clear();
   selectedEvidenceAllTagFilters.clear();
   renderClaimProposals();
@@ -4672,8 +5141,13 @@ const renderIncomingTrays = () => {
   const incomingEvidence = [...incomingClaimEvidenceIds]
     .map((id) => libraryEvidence.find((item) => item.id === id))
     .filter(Boolean);
-  claimIncomingTrayEl.hidden = incomingEvidence.length === 0;
-  claimIncomingTitleEl.textContent = `Incoming Evidence · ${incomingEvidence.length}`;
+  const viaLLM = incomingLLMEvidenceIds !== null;
+  const incomingCount = viaLLM ? incomingLLMEvidenceIds.length : incomingEvidence.length;
+  claimIncomingTrayEl.hidden = incomingCount === 0;
+  claimIncomingTitleEl.textContent = `Incoming Evidence · ${incomingCount}`;
+  claimIncomingItemsEl.hidden = viaLLM;
+  claimIncomingTrayEl.querySelector("small").hidden = viaLLM;
+  claimAddEvidenceBtn.hidden = viaLLM;
   claimIncomingItemsEl.replaceChildren();
   claimCreateBtn.disabled = incomingEvidence.length === 0
     && claimBasisInput.value !== "background";
@@ -4786,6 +5260,7 @@ const syncProposalQueueButton = (button, count, isOpen) => {
 };
 
 const renderClaims = () => {
+  if (claimProposalQueueOpen) return renderClaimProposals();
   claimsListEl.replaceChildren();
   syncTagFilterOptions(
     claimsTagFilterInput, claims,
@@ -4859,7 +5334,7 @@ const renderClaims = () => {
     card.classList.toggle("is-withdrawn", claim.lifecycle !== "active");
     const statement = document.createElement("p");
     statement.className = "claim-statement";
-    statement.textContent = claim.statement;
+    renderEvidenceText(statement, claim.statement);
     const badges = document.createElement("div");
     badges.className = "claim-badges";
     [
@@ -4898,7 +5373,7 @@ const renderClaims = () => {
     revise.className = "semantic-action is-edit";
     revise.textContent = "Revise";
     revise.addEventListener("click", async () => {
-      const next = window.prompt("Revise Claim", claim.statement);
+      const next = await promptText("Revise Claim", claim.statement);
       if (!next || next.trim() === claim.statement) return;
       const response = await fetch(`/api/claims/${claim.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -4924,12 +5399,191 @@ const renderClaims = () => {
   });
 };
 
+const reviewSelections = new Map();
+let claimReviewCategory = "proposals";
+const isEvidenceChangeReview = item => item.payload?.operation === "review_evidence_change";
+for (const [id, category] of [["claim-review-new", "proposals"], ["claim-review-changed", "changed"]]) {
+  document.getElementById(id).addEventListener("click", () => {
+    claimReviewCategory = category;
+    const state = reviewState("claim"); state.selected.clear(); state.any.clear(); state.all.clear();
+    renderClaimProposals();
+  });
+}
+const sendReviewDecision = async (url, accepted) => {
+  const response = await fetch(`${url}${accepted ? "/accept" : ""}`, {method: accepted ? "POST" : "DELETE"});
+  if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "Could not review item"); }
+};
+const reviewState = (key) => {
+  if (!reviewSelections.has(key)) reviewSelections.set(key, {selected: new Set(), any: new Set(), all: new Set(), busy: false});
+  return reviewSelections.get(key);
+};
+const reviewItems = (kind) => (kind === "evidence" ? evidenceProposals : claimProposals.filter(item => isEvidenceChangeReview(item) === (claimReviewCategory === "changed"))).map(item => {
+  const payload = item.payload || {};
+  const relatedTags = kind === "claim" ? [payload.target_claim_id, payload.subject_claim_id, payload.object_claim_id, payload.source_claim_id]
+    .flatMap(id => claims.find(claim => claim.id === id)?.tags || []) : [];
+  return {...item, tags: [...(payload.tags || []).map(tag => typeof tag === "string" ? {name: tag} : tag), ...relatedTags]};
+});
+const visibleReviewItems = (kind) => {
+  const state = reviewState(kind);
+  return reviewItems(kind).filter(item => matchesTagFilter(item, state.any, state.all));
+};
+const selectAllReview = (kind, checked) => {
+  const state = reviewState(kind);
+  visibleReviewItems(kind).forEach(item => checked ? state.selected.add(item.id) : state.selected.delete(item.id));
+  (kind === "evidence" ? renderEvidenceProposals : renderClaimProposals)();
+};
+const addReviewSelection = (card, item, state, update) => {
+  const label = document.createElement("label"); label.className = "master-select proposal-select";
+  const checkbox = document.createElement("input"); checkbox.type = "checkbox";
+  checkbox.checked = state.selected.has(item.id); checkbox.disabled = state.busy;
+  card.classList.toggle("is-selected", checkbox.checked);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) state.selected.add(item.id); else state.selected.delete(item.id);
+    card.classList.toggle("is-selected", checkbox.checked); update();
+  });
+  label.append(checkbox, document.createTextNode("Select")); card.append(label);
+};
+const createReviewBatchBar = (key, items, decide, refresh, status, {singleAccept = false, externalSelectAll = null, discardVerb = "Discard", canDispute = null} = {}) => {
+  const state = reviewState(key);
+  const ids = new Set(items.map(item => item.id));
+  [...state.selected].forEach(id => { if (!ids.has(id)) state.selected.delete(id); });
+  const bar = document.createElement("div"); bar.className = "review-batch-bar";
+  const count = document.createElement("span");
+  const selectAll = externalSelectAll || document.createElement("input");
+  if (!externalSelectAll) {
+    selectAll.type = "checkbox";
+    const label = document.createElement("label"); label.className = "master-select";
+    label.append(selectAll, document.createTextNode("Select all")); bar.append(label);
+    selectAll.addEventListener("change", () => {
+      items.forEach(item => selectAll.checked ? state.selected.add(item.id) : state.selected.delete(item.id)); refresh();
+    });
+  }
+  const accept = document.createElement("button"); accept.type = "button"; accept.className = "semantic-action is-accept";
+  accept.append(createControlIcon("accept"), document.createTextNode("Accept selected"));
+  const discard = document.createElement("button"); discard.type = "button"; discard.className = "semantic-action is-destructive";
+  discard.append(createControlIcon("discard"), document.createTextNode(`${discardVerb} selected`));
+  const disputed = canDispute ? document.createElement("button") : null;
+  if (disputed) {
+    disputed.type = "button"; disputed.className = "proposal-disputed";
+    disputed.append(createControlIcon("disputed"), document.createTextNode("Keep selected disputed"));
+  }
+  const update = () => {
+    count.textContent = `${state.selected.size} selected · ${items.length} awaiting review`;
+    updateSelectAllState(selectAll, state.selected.size, items.length);
+    selectAll.disabled = state.busy || !items.length;
+    accept.disabled = state.busy || !state.selected.size || (singleAccept && state.selected.size !== 1);
+    discard.disabled = state.busy || !state.selected.size;
+    if (disputed) {
+      const unsupported = items.some(item => state.selected.has(item.id) && !canDispute(item));
+      disputed.disabled = state.busy || !state.selected.size || unsupported;
+      disputed.title = unsupported ? "Only new Claims and Evidence changed reviews can be kept disputed. Deselect other proposal types first." : "Keep selected Claims as disputed";
+    }
+  };
+  const run = async (accepted) => {
+    const selected = items.filter(item => state.selected.has(item.id));
+    if (accepted && key === "claim") selected.sort((a, b) => Number(["create_relation", "revise_relation"].includes(a.payload?.operation)) - Number(["create_relation", "revise_relation"].includes(b.payload?.operation)));
+    if (!selected.length || state.busy) return;
+    if (accepted === "disputed" && (!canDispute || selected.some(item => !canDispute(item)))) return;
+    if (accepted && singleAccept && selected.length !== 1) return;
+    if (!await confirmAction(`${accepted === "disputed" ? "Keep disputed:" : accepted ? "Accept" : discardVerb} ${selected.length} selected proposal(s)?${discardVerb === "Withdraw" && !accepted ? " The Claims will be withdrawn; their history and links remain." : ""}`)) return;
+    state.busy = true; update();
+    status.textContent = `Processing 0 of ${selected.length} selected proposals…`;
+    const controls = [...(bar.parentElement?.querySelectorAll("button, input, select, textarea") || [])]
+      .map(control => [control, control.disabled]);
+    controls.forEach(([control]) => { control.disabled = true; });
+    let completed = 0;
+    const errors = [];
+    for (const item of selected) {
+      try { await decide(item, accepted); state.selected.delete(item.id); completed++; }
+      catch (error) { errors.push(error.message); }
+      status.textContent = `Processed ${completed + errors.length} of ${selected.length} selected proposals…`;
+    }
+    state.busy = false;
+    try { await refresh(true); } catch (error) { errors.push(error.message); }
+    controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+    status.textContent = `${completed} ${accepted === "disputed" ? "kept disputed" : accepted ? "accepted" : discardVerb === "Withdraw" ? "withdrawn" : "discarded"}.` + (errors.length ? ` ${errors.length} failed; unsuccessful items remain pending. ${errors.join(" · ")}` : "");
+    update();
+  };
+  accept.addEventListener("click", () => run(true)); discard.addEventListener("click", () => run(false));
+  bar.append(count, discard);
+  if (disputed) { disputed.addEventListener("click", () => run("disputed")); bar.append(disputed); }
+  bar.append(accept);
+  if (singleAccept) {
+    const note = document.createElement("small"); note.textContent = "Structure patches may overlap. Apply one at a time; multiple drafts can be discarded together."; bar.append(note);
+  }
+  update(); return {bar, state, update};
+};
+const setupEntityReview = (kind, container) => {
+  const isEvidence = kind === "evidence";
+  const state = reviewState(kind), items = reviewItems(kind);
+  const any = isEvidence ? evidenceTagFilterInput : claimsTagFilterInput;
+  const all = isEvidence ? evidenceTagAllFilterInput : claimsTagAllFilterInput;
+  delete any.dataset.tagOptions; delete all.dataset.tagOptions;
+  syncTagFilterOptions(any, items, state.any, state.all);
+  syncTagFilterOptions(all, items, state.all, state.any);
+  const visible = visibleReviewItems(kind);
+  const refresh = async (fetchData = false) => {
+    if (fetchData) await Promise.all(isEvidence ? [fetchLibrary(), fetchEvidenceLibrary(), fetchEvidenceProposals()] : [fetchClaims(), fetchClaimProposals(), fetchWiki()]);
+    else (isEvidence ? renderEvidenceProposals : renderClaimProposals)();
+  };
+  const decide = async (item, accepted) => {
+    const payload = item.payload || {};
+    const operation = payload.operation || "create_claim";
+    if (operation === "review_evidence_change") {
+      const response = await fetch(`/api/claim-proposals/${item.id}/accept`, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({statement: payload.statement, change_token: payload.change_token, review_state: accepted === "disputed" ? "disputed" : accepted ? "accepted" : "withdrawn"})});
+      if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "Could not review changed Evidence"); }
+      return;
+    }
+    const edits = isEvidence ? {quote: payload.quote, tags: payload.tags || []}
+      : operation === "create_claim" ? {statement: payload.statement, basis: payload.basis, review_state: accepted === "disputed" ? "disputed" : "accepted", artifact_ids: collectArtifactSelect.value ? [collectArtifactSelect.value] : []}
+        : operation === "merge_claims" ? {merged_statement: payload.merged_statement || payload.target_statement} : {};
+    const response = await fetch(`/api/${kind}-proposals/${item.id}${accepted ? "/accept" : ""}`, {
+      method: accepted ? "POST" : "DELETE", headers: {"Content-Type": "application/json"},
+      ...(accepted ? {body: JSON.stringify(edits)} : {}),
+    });
+    if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "Could not review proposal"); }
+  };
+  const batch = createReviewBatchBar(kind, visible, decide, refresh, isEvidence ? evidenceStatusEl : claimsStatusEl,
+    {externalSelectAll: isEvidence ? evidenceLibrarySelectAllInput : claimsSelectAllInput, discardVerb: !isEvidence && claimReviewCategory === "changed" ? "Withdraw" : "Discard",
+      canDispute: isEvidence ? null : item => ["create_claim", "review_evidence_change"].includes(item.payload?.operation || "create_claim")});
+  const originalUpdate = batch.update;
+  batch.update = () => {
+    originalUpdate();
+    if (!isEvidence) claimsSelectedCountEl.textContent = `${state.selected.size} pending selected`;
+  };
+  batch.update();
+  container.append(batch.bar);
+  if (!visible.length) { const empty = document.createElement("p"); empty.textContent = "No pending proposals match these Tags."; container.append(empty); }
+  return {...batch, items: visible};
+};
+const revealClaimProposal = (id) => {
+  const state = reviewState("claim"); state.any.clear(); state.all.clear();
+  claimReviewCategory = "proposals";
+  renderClaimProposals();
+  document.getElementById(`claim-proposal-${id}`)?.scrollIntoView({behavior: "smooth", block: "center"});
+};
 const renderClaimProposals = () => {
   claimProposalListEl.replaceChildren();
   if (!claimProposals.length) claimProposalQueueOpen = false;
+  const changedCount = claimProposals.filter(isEvidenceChangeReview).length;
+  document.getElementById("claim-review-new").textContent = `Proposals · ${claimProposals.length - changedCount}`;
+  document.getElementById("claim-review-changed").textContent = `Evidence changed · ${changedCount}`;
+  document.getElementById("claim-review-new").setAttribute("aria-pressed", String(claimReviewCategory === "proposals"));
+  document.getElementById("claim-review-changed").setAttribute("aria-pressed", String(claimReviewCategory === "changed"));
+  claimProposalBoardEl.querySelector(".claim-section-head small").textContent = claimReviewCategory === "changed"
+    ? "Recheck the existing Claim. Accept confirms it; Withdraw keeps history but removes active status."
+    : "Kept until you Accept, Keep disputed, or Discard.";
   claimProposalBoardEl.hidden = !claimProposalQueueOpen || claimProposals.length === 0;
   claimsListEl.hidden = claimProposalQueueOpen && claimProposals.length > 0;
-  claimsListControlsEl.hidden = claimProposalQueueOpen && claimProposals.length > 0;
+  claimsListControlsEl.hidden = false;
+  claimsBatchTagBtn.hidden = claimProposalQueueOpen;
+  claimsReviewFilterInput.closest("label").hidden = claimProposalQueueOpen;
+  claimsRelateBtn.disabled = claimProposalQueueOpen || selectedClaimIds.size !== 2;
+  if (!claimProposalQueueOpen) {
+    delete claimsTagFilterInput.dataset.tagOptions; delete claimsTagAllFilterInput.dataset.tagOptions;
+    renderClaims();
+  }
   syncProposalQueueButton(
     claimsProposalsToggleBtn, claimProposals.length, claimProposalQueueOpen,
   );
@@ -4946,7 +5600,7 @@ const renderClaimProposals = () => {
       claimProposalReportBodyEl.appendChild(paragraph);
     }
     const context = document.createElement("small");
-    context.textContent = `${comparisonClaimCount} relevant Claim${comparisonClaimCount === 1 ? "" : "s"} compared locally from ${comparisonScope.total_claim_count || claims.length} total · matched through selected Evidence text, ${comparisonScope.tag_count || 0} Tag${comparisonScope.tag_count === 1 ? "" : "s"}, and ${comparisonScope.source_count || 0} Source${comparisonScope.source_count === 1 ? "" : "s"}.`;
+    context.textContent = `${comparisonClaimCount} existing Claims sent for comparison in the same model call · locally retrieved per Evidence from ${comparisonScope.total_claim_count ?? claims.length} total. ${comparisonScope.covered_evidence_count ?? 0}/${comparisonScope.evidence_count ?? 0} Evidence items have comparison candidates. ${comparisonScope.truncated ? `Limited to ${comparisonScope.limit} of ${comparisonScope.candidate_count} matching Claims. ` : ""}This is a partial check, not exhaustive library-wide deduplication.`;
     claimProposalReportBodyEl.appendChild(context);
     skipped.forEach((item) => {
       const row = document.createElement("div");
@@ -4956,17 +5610,22 @@ const renderClaimProposals = () => {
       claimProposalReportBodyEl.appendChild(row);
     });
   }
-  claimProposals.forEach((proposal) => {
+  const batch = claimProposalQueueOpen ? setupEntityReview("claim", claimProposalListEl) : null;
+  (batch?.items || []).forEach((proposal) => {
     const payload = proposal.payload || {};
     const operation = payload.operation || "create_claim";
     const card = document.createElement("article");
     card.className = `claim-proposal-card claim-operation-${operation.replaceAll("_", "-")}`;
+    card.id = `claim-proposal-${proposal.id}`;
+    addReviewSelection(card, proposal, batch.state, batch.update);
     const operationLabel = document.createElement("div");
     operationLabel.className = "claim-proposal-operation";
     operationLabel.textContent = ({
+      review_evidence_change: "Recheck existing Claim · Evidence changed",
       create_claim: payload.basis === "inference" ? "New inference" : "New reported Claim",
       link_evidence: "Update existing Claim",
       create_relation: "New Claim relation",
+      revise_relation: payload.relation_type === "remove" ? "Remove existing relation" : "Revise existing relation",
       merge_claims: payload.audit_judgment === "revises"
         ? "Audited revision" : "Possible duplicate",
     })[operation] || "Claim change";
@@ -4975,12 +5634,23 @@ const renderClaimProposals = () => {
     statement.value = operation === "merge_claims"
       ? (payload.merged_statement || payload.target_statement || "")
       : (payload.statement || "");
+    statement.addEventListener("input", () => { payload[operation === "merge_claims" ? "merged_statement" : "statement"] = statement.value; payload._draftEdited = true; });
+    const statementPreview = document.createElement("p");
+    statementPreview.className = "claim-statement";
+    renderEvidenceText(statementPreview, statement.value);
+    const statementEditor = document.createElement("details");
+    statementEditor.className = "evidence-quote-editor";
+    const statementEditorLabel = document.createElement("summary");
+    statementEditorLabel.textContent = "Edit statement";
+    statementEditor.append(statementEditorLabel, statement);
+    statement.addEventListener("input", () => renderEvidenceText(statementPreview, statement.value));
     const fields = document.createElement("div");
     fields.className = "claim-proposal-fields";
     const basis = document.createElement("select");
     ["background", "reported", "inference"]
       .forEach((value) => basis.appendChild(new Option(value, value)));
     basis.value = payload.basis || "reported";
+    basis.addEventListener("change", () => { payload.basis = basis.value; payload._draftEdited = true; });
     const basisField = document.createElement("label");
     const basisLabel = document.createElement("span");
     basisLabel.textContent = "Basis";
@@ -4992,26 +5662,44 @@ const renderClaimProposals = () => {
       const targetLabel = document.createElement("small");
       targetLabel.textContent = "Attach selected Evidence to";
       const targetStatement = document.createElement("strong");
-      targetStatement.textContent = payload.target_statement || payload.target_claim_id || "Existing Claim";
+      renderEvidenceText(targetStatement, payload.target_statement || payload.target_claim_id || "Existing Claim");
       target.append(targetLabel, targetStatement);
-    } else if (operation === "create_relation") {
+    } else if (["create_relation", "revise_relation"].includes(operation)) {
       const subject = document.createElement("strong");
-      subject.textContent = payload.subject_statement || payload.subject_claim_id || "Claim";
+      renderEvidenceText(subject, payload.subject_statement || payload.subject_claim_id || "Claim");
       const relation = document.createElement("span");
       relation.className = "claim-relation-preview";
       relation.textContent = `→ ${payload.relation_type || "related"} →`;
       const object = document.createElement("strong");
-      object.textContent = payload.object_statement || payload.object_claim_id || "Claim";
+      renderEvidenceText(object, payload.object_statement || payload.object_claim_id || "Claim");
       target.append(subject, relation, object);
+      if (payload.existing_relation) {
+        const before = document.createElement("small");
+        const old = payload.existing_relation;
+        before.textContent = `Previously: ${old.relation_type}${old.subject_claim_id !== payload.subject_claim_id ? " · opposite direction" : ""}`;
+        target.prepend(before);
+      }
+      const waiting = ["subject_claim_id", "object_claim_id"].filter(key => String(payload[key] || "").startsWith("proposal:"));
+      if (payload.blocked_reason || waiting.length) {
+        const notice = document.createElement("p"); notice.className = "claim-proposal-context";
+        notice.textContent = payload.blocked_reason || `Awaiting acceptance of ${waiting.length} endpoint Claim(s). Review those Claims first.`;
+        target.append(notice);
+        for (const key of payload.blocked_reason ? [] : waiting) {
+          const open = document.createElement("button"); open.type = "button"; open.className = "semantic-action is-navigate";
+          open.textContent = "Review endpoint Claim";
+          open.addEventListener("click", () => revealClaimProposal(payload[key].slice(9)));
+          target.append(open);
+        }
+      }
     } else if (operation === "merge_claims") {
       const targetLabel = document.createElement("small");
       targetLabel.textContent = "Keep and consolidate into";
       const targetStatement = document.createElement("strong");
-      targetStatement.textContent = payload.target_statement || payload.target_claim_id;
+      renderEvidenceText(targetStatement, payload.target_statement || payload.target_claim_id);
       const sourceLabel = document.createElement("small");
       sourceLabel.textContent = "Merge redundant Claim";
       const sourceStatement = document.createElement("strong");
-      sourceStatement.textContent = payload.source_statement || payload.source_claim_id;
+      renderEvidenceText(sourceStatement, payload.source_statement || payload.source_claim_id);
       target.append(targetLabel, targetStatement, sourceLabel, sourceStatement);
     }
     const evidence = document.createElement("div");
@@ -5024,10 +5712,10 @@ const renderClaimProposals = () => {
       const heading = document.createElement("span");
       heading.textContent = `${link.stance || "supports"} · ${sourceItem?.source_title || "Evidence unavailable"}`;
       const detail = document.createElement("small");
-      detail.textContent = sourceItem
+      renderEvidenceText(detail, sourceItem
         ? [sourceItem.locator, sourceItem.evidence_type === "snapshot"
           ? "Snapshot" : sourceItem.quote].filter(Boolean).join(" · ")
-        : String(link.evidence_id || "Unknown Evidence");
+        : String(link.evidence_id || "Unknown Evidence"));
       row.append(heading, detail);
       if (sourceItem) row.addEventListener("click", () => openEvidenceInWorkspace(sourceItem.id));
       evidence.appendChild(row);
@@ -5037,7 +5725,7 @@ const renderClaimProposals = () => {
     const rationaleLabel = document.createElement("strong");
     rationaleLabel.textContent = "Rationale";
     const rationaleBody = document.createElement("p");
-    rationaleBody.textContent = payload.rationale || "No rationale supplied.";
+    renderEvidenceText(rationaleBody, payload.rationale || (operation === "review_evidence_change" ? "Linked Evidence was edited. Check whether this Claim and its Evidence relationships still hold." : "No rationale supplied."));
     rationale.append(rationaleLabel, rationaleBody);
     const caveatItems = (payload.caveats || []).filter(Boolean);
     const caveats = document.createElement("section");
@@ -5045,7 +5733,7 @@ const renderClaimProposals = () => {
     const caveatsLabel = document.createElement("strong");
     caveatsLabel.textContent = "Caveats";
     const caveatsBody = document.createElement("p");
-    caveatsBody.textContent = caveatItems.join(" · ");
+    renderEvidenceText(caveatsBody, caveatItems.join(" · "));
     caveats.append(caveatsLabel, caveatsBody);
     const actions = document.createElement("div");
     actions.className = "claim-card-actions claim-proposal-actions";
@@ -5061,6 +5749,8 @@ const renderClaimProposals = () => {
       const edits = operation === "create_claim" ? {
         statement: statement.value.trim(), basis: basis.value, review_state: reviewState,
         artifact_ids: artifact?.id ? [artifact.id] : [],
+      } : operation === "review_evidence_change" ? {
+        statement: statement.value.trim(), change_token: payload.change_token, review_state: reviewState,
       } : operation === "merge_claims" ? {
         merged_statement: statement.value.trim(),
       } : {};
@@ -5074,7 +5764,7 @@ const renderClaimProposals = () => {
         [accept, keepDisputed].forEach((button) => { button.disabled = false; });
         return;
       }
-      await Promise.all([fetchClaims(), fetchClaimProposals()]);
+      await Promise.all([fetchClaims(), fetchClaimProposals(), fetchWiki()]);
     };
     accept.addEventListener("click", () => resolveProposal("accepted"));
     const keepDisputed = document.createElement("button");
@@ -5084,31 +5774,66 @@ const renderClaimProposals = () => {
     disputedLabel.textContent = "Keep disputed";
     keepDisputed.append(createControlIcon("disputed"), disputedLabel);
     keepDisputed.addEventListener("click", () => resolveProposal("disputed"));
-    keepDisputed.hidden = operation !== "create_claim";
+    keepDisputed.hidden = !["create_claim", "review_evidence_change"].includes(operation);
     acceptLabel.textContent = operation === "link_evidence"
       ? "Attach Evidence"
       : operation === "create_relation" ? "Create relation"
+        : operation === "revise_relation" ? "Apply relation change"
         : operation === "merge_claims" ? "Merge Claims" : "Accept";
+    if (["create_relation", "revise_relation"].includes(operation)) {
+      accept.disabled = Boolean(payload.blocked_reason) || ["subject_claim_id", "object_claim_id"].some(key => String(payload[key] || "").startsWith("proposal:"));
+    }
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "proposal-discard";
     const discardLabel = document.createElement("span");
     discardLabel.textContent = "Discard";
+    if (operation === "review_evidence_change") discardLabel.textContent = "Withdraw Claim";
     discard.append(createControlIcon("discard"), discardLabel);
     discard.addEventListener("click", async () => {
-      if (!window.confirm("Discard this Claim proposal?")) return;
+      if (operation === "review_evidence_change") {
+        if (await confirmAction("Withdraw this Claim? Its history and links will be retained.")) await resolveProposal("withdrawn");
+        return;
+      }
+      if (!await confirmAction("Discard this Claim proposal?")) return;
       const response = await fetch(`/api/claim-proposals/${proposal.id}`, { method: "DELETE" });
       if (response.ok) await fetchClaimProposals();
     });
     actions.append(discard, keepDisputed, accept);
     card.append(operationLabel);
-    if (operation === "create_claim") card.append(statement, fields);
-    else if (operation === "merge_claims") card.append(target, statement);
+    if (operation === "review_evidence_change") {
+      card.append(statementPreview, statementEditor);
+      for (const change of payload.changes || []) {
+        const section = document.createElement("section"); section.className = "evidence-change-comparison";
+        const title = document.createElement("strong"); title.textContent = `Evidence · v${change.before_revision} → v${change.revision}`;
+        if (change.deleted) title.textContent = `Evidence · v${change.before_revision} → Deleted`;
+        const before = document.createElement("blockquote"); renderEvidenceText(before, change.before_quote);
+        const beforeLabel = document.createElement("small"); beforeLabel.textContent = `Before · ${change.before_locator || "No locator"}`;
+        const after = document.createElement("blockquote"); renderEvidenceText(after, change.quote);
+        if (change.deleted) after.textContent = "This Evidence was deleted. Reassess whether the remaining basis supports this Claim.";
+        const afterLabel = document.createElement("small"); afterLabel.textContent = `Now · ${change.locator || "No locator"}`;
+        const open = document.createElement("button"); open.className = "semantic-action is-navigate"; open.type = "button"; open.textContent = "Open Evidence";
+        open.addEventListener("click", () => openEvidenceDetail(change.evidence_id));
+        open.hidden = Boolean(change.deleted);
+        section.append(title, beforeLabel, before, afterLabel, after, open); card.append(section);
+      }
+    } else if (operation === "create_claim") {
+      card.append(statementPreview, statementEditor, fields);
+      const relatedDrafts = claimProposals.filter(item => ["subject_claim_id", "object_claim_id"].some(key => item.payload?.[key] === `proposal:${proposal.id}`));
+      for (const draft of relatedDrafts) {
+        const link = document.createElement("button"); link.type = "button"; link.className = "semantic-action is-navigate";
+        link.textContent = `Review relation · ${draft.payload.relation_type}`;
+        link.addEventListener("click", () => revealClaimProposal(draft.id));
+        card.append(link);
+      }
+    }
+    else if (operation === "merge_claims") card.append(target, statementPreview, statementEditor);
     else card.append(target);
     if (payload.evidence?.length) card.append(evidence);
     card.append(rationale);
     if (caveatItems.length) card.append(caveats);
     card.append(actions);
+    if (batch.state.busy) card.querySelectorAll("button, input, select, textarea").forEach(control => { control.disabled = true; });
     claimProposalListEl.appendChild(card);
   });
 };
@@ -5122,6 +5847,7 @@ const fetchEvidenceLibrary = async () => {
     if (!available.has(id)) selectedEvidenceIds.delete(id);
   });
   renderEvidenceLibrary();
+  renderReviewWorkspace();
 };
 
 const fetchClaims = async () => {
@@ -5192,7 +5918,8 @@ const locateEvidenceProposal = async (payload) => {
 const fetchClaimProposals = async () => {
   const response = await fetch("/api/claim-proposals");
   if (!response.ok) throw new Error("Could not load Claim proposals.");
-  claimProposals = (await response.json()).proposals || [];
+  const drafts = new Map(claimProposals.filter(item => item.payload?._draftEdited).map(item => [item.id, item.payload]));
+  claimProposals = ((await response.json()).proposals || []).map(item => drafts.has(item.id) && drafts.get(item.id).change_token === item.payload.change_token ? {...item, payload: drafts.get(item.id)} : item);
   renderClaimProposals();
 };
 
@@ -5219,22 +5946,69 @@ const scrollClaimProposalQueueToStart = (behavior = "smooth") => {
 
 const renderEvidenceProposals = () => {
   evidenceProposalListEl.replaceChildren();
+  const shownReports = new Set();
   if (!evidenceProposals.length) evidenceProposalQueueOpen = false;
   evidenceProposalBoardEl.hidden = !evidenceProposalQueueOpen || evidenceProposals.length === 0;
   evidenceLibraryListEl.hidden = evidenceProposalQueueOpen && evidenceProposals.length > 0;
+  evidenceBatchTagBtn.hidden = evidenceProposalQueueOpen;
+  evidenceBatchDeleteBtn.hidden = evidenceProposalQueueOpen;
+  claimProposalFocusInput.closest("label").hidden = evidenceProposalQueueOpen;
+  libraryProposeClaimsBtn.disabled = evidenceProposalQueueOpen || !selectedEvidenceIds.size;
+  evidenceCreateClaimBtn.disabled = evidenceProposalQueueOpen || !selectedEvidenceIds.size;
+  if (!evidenceProposalQueueOpen) {
+    delete evidenceTagFilterInput.dataset.tagOptions; delete evidenceTagAllFilterInput.dataset.tagOptions;
+    renderEvidenceLibrary();
+  }
   syncProposalQueueButton(
     evidenceProposalsToggleBtn, evidenceProposals.length, evidenceProposalQueueOpen,
   );
-  evidenceProposals.forEach((proposal) => {
+  const batch = evidenceProposalQueueOpen ? setupEntityReview("evidence", evidenceProposalListEl) : null;
+  (batch?.items || []).forEach((proposal) => {
     const payload = proposal.payload || {};
+    const scope = proposal.scope || {};
+    const reportKey = JSON.stringify([scope, (proposal.created_at || "").slice(0, 16)]);
+    if ((scope.summary || scope.inputs?.length) && !shownReports.has(reportKey)) {
+      shownReports.add(reportKey);
+      const report = document.createElement("section");
+      report.className = "proposal-explanation";
+      const heading = document.createElement("strong"); heading.textContent = "Source coverage";
+      const detail = document.createElement("p"); detail.textContent = scope.summary || "";
+      const inputs = document.createElement("small");
+      inputs.textContent = (scope.inputs || []).map((item) => {
+        const title = librarySources.find((source) => source.id === item.source_id)?.title || item.title || "Source";
+        const method = {capture: "Captured text", url: "Provider URL Fetch", native_document: "Native document"}[item.input_kind] || item.input_kind;
+        return `${title} · ${method}${item.input_kind === "capture" ? ` · ${item.text_characters} characters` : ""}`;
+      }).join("\n");
+      report.append(heading, detail, inputs); evidenceProposalListEl.append(report);
+    }
     const source = librarySources.find((item) => item.id === payload.source_id);
     const card = document.createElement("article");
     card.className = "claim-proposal-card evidence-proposal-card";
+    addReviewSelection(card, proposal, batch.state, batch.update);
+    if (payload.evidence_type === "snapshot" && payload.image_data?.startsWith("data:image/png;base64,")) {
+      const image = document.createElement("img");
+      image.src = payload.image_data;
+      image.alt = payload.locator || "Original Source image";
+      image.style.maxWidth = "100%";
+      image.style.maxHeight = "320px";
+      image.style.objectFit = "contain";
+      card.append(image);
+    }
     const sourceLabel = document.createElement("small");
-    sourceLabel.textContent = `${source?.title || "Source"} · ${payload.locator || "Captured passage"}`;
+    sourceLabel.textContent = `${source?.title || payload.related_source?.title || "Source"} · ${payload.locator || "Captured passage"}`;
+    if (payload.related_source) sourceLabel.textContent += " · New Source — added only on acceptance";
     const quote = document.createElement("textarea");
     quote.rows = 4;
     quote.value = payload.quote || "";
+    quote.addEventListener("input", () => { payload.quote = quote.value; payload._draftEdited = true; });
+    const quotePreview = document.createElement("blockquote");
+    renderEvidenceText(quotePreview, quote.value);
+    const quoteEditor = document.createElement("details");
+    quoteEditor.className = "evidence-quote-editor";
+    const quoteEditorLabel = document.createElement("summary");
+    quoteEditorLabel.textContent = "Edit original text";
+    quoteEditor.append(quoteEditorLabel, quote);
+    quote.addEventListener("input", () => renderEvidenceText(quotePreview, quote.value));
     const rationale = document.createElement("section");
     rationale.className = "proposal-explanation proposal-rationale";
     const rationaleLabel = document.createElement("strong");
@@ -5253,13 +6027,28 @@ const renderEvidenceProposals = () => {
     const tags = document.createElement("input");
     tags.placeholder = "Comma-separated tags";
     tags.value = (payload.tags || []).join(", ");
+    tags.addEventListener("input", () => { payload.tags = tags.value.split(",").map(tag => tag.trim()).filter(Boolean); payload._draftEdited = true; });
     const actions = document.createElement("div");
     actions.className = "claim-card-actions claim-proposal-actions";
     const locate = document.createElement("button");
     locate.type = "button";
     locate.className = "proposal-locate";
     locate.append(createControlIcon("inspect"), document.createTextNode("Locate in Source"));
-    locate.addEventListener("click", () => locateEvidenceProposal(payload));
+    const unverified = payload.verification === "external_unverified";
+    if (unverified) {
+      sourceLabel.textContent += " · Not locally verified — check the original before accepting";
+      locate.replaceChildren(createControlIcon("inspect"), document.createTextNode("Open original"));
+    }
+    locate.addEventListener("click", () => {
+      if (unverified) {
+        if (source?.document_hash) {
+          window.open(`/api/library/sources/${source.id}/content`, "_blank", "noopener,noreferrer");
+          return;
+        }
+        const url = payload.source_url || source?.url;
+        if (/^https?:\/\//i.test(url || "")) window.open(url, "_blank", "noopener,noreferrer");
+      } else locateEvidenceProposal(payload);
+    });
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "proposal-discard";
@@ -5287,12 +6076,13 @@ const renderEvidenceProposals = () => {
         accept.disabled = false;
         return;
       }
-      await Promise.all([fetchEvidenceLibrary(), fetchEvidenceProposals()]);
+      await Promise.all([fetchLibrary(), fetchEvidenceLibrary(), fetchEvidenceProposals()]);
     });
     actions.append(locate, discard, accept);
-    card.append(sourceLabel, quote, rationale);
+    card.append(sourceLabel, quotePreview, quoteEditor, rationale);
     if (caveatItems.length) card.append(caveats);
     card.append(tags, actions);
+    if (batch.state.busy) card.querySelectorAll("button, input, select, textarea").forEach(control => { control.disabled = true; });
     evidenceProposalListEl.appendChild(card);
   });
 };
@@ -5300,13 +6090,20 @@ const renderEvidenceProposals = () => {
 const fetchEvidenceProposals = async () => {
   const response = await fetch("/api/evidence-proposals");
   if (!response.ok) throw new Error("Could not load Evidence proposals.");
-  evidenceProposals = (await response.json()).proposals || [];
+  const drafts = new Map(evidenceProposals.filter(item => item.payload?._draftEdited).map(item => [item.id, item.payload]));
+  evidenceProposals = ((await response.json()).proposals || []).map(item => drafts.has(item.id) ? {...item, payload: drafts.get(item.id)} : item);
   renderEvidenceProposals();
 };
 
 const wikiClaimById = (claimId) => wikiState.claims.find((claim) => claim.id === claimId);
 
 const openClaimFromWiki = (claimId) => {
+  if (claims.find(claim => claim.id === claimId)?.needs_review) {
+    claimProposalQueueOpen = true; claimReviewCategory = "changed";
+    showPanel("claims-panel"); renderClaimProposals(); scrollClaimProposalQueueToStart(); return;
+  }
+  claimProposalQueueOpen = false;
+  renderClaimProposals();
   selectedClaimIds.clear();
   selectedClaimIds.add(claimId);
   renderClaims();
@@ -5351,6 +6148,7 @@ const renderWikiIncoming = () => {
       : "Review the complete Wiki organization";
   const canEditStructure = wikiState.pages.length > 0 || wikiProposals.length > 0;
   wikiEditStructureBtn.disabled = wikiProposalRunning || !canEditStructure;
+  wikiResetStructureBtn.disabled = wikiProposalRunning || reviewState("wiki").busy || !canEditStructure;
   wikiEditStructureBtn.title = canEditStructure
     ? "Edit the current or awaiting Wiki structure"
     : "Organize the Wiki before editing its structure";
@@ -5391,7 +6189,11 @@ const renderWikiPage = () => {
   const title = document.createElement("h2");
   title.textContent = page.title;
   const summary = document.createElement("p");
-  summary.textContent = page.summary || "No overview has been written for this Page.";
+  renderWikiSummary(summary, page.summary || "No overview has been written for this Page.", wikiState.pages, (home, claimId) => {
+    activeWikiPageId = home.id;
+    renderWiki(); renderReviewWorkspace();
+    focusWikiClaim(wikiPageEl, claimId);
+  });
   head.append(eyebrow, title, summary);
   const list = document.createElement("div");
   list.className = "wiki-claim-list";
@@ -5400,8 +6202,10 @@ const renderWikiPage = () => {
     if (!claim) return;
     const card = document.createElement("article");
     card.className = "wiki-claim-card";
+    card.dataset.wikiClaimId = claim.id; card.tabIndex = -1;
     const meta = document.createElement("small");
     meta.textContent = `${String(index + 1).padStart(2, "0")} · ${claim.basis}${claim.review_state === "disputed" ? " · disputed" : ""}`;
+    if (claim.needs_review) meta.textContent += " · Evidence changed — awaiting recheck";
     const statement = document.createElement("button");
     statement.type = "button";
     statement.className = "wiki-claim-statement";
@@ -5471,157 +6275,351 @@ const renderWikiTree = () => {
   appendPages("root");
 };
 
-const renderWikiGraph = () => {
-  wikiGraphEl.replaceChildren();
-  const nodes = wikiState.graph?.nodes || [];
-  const edges = wikiState.graph?.edges || [];
-  if (!nodes.length) {
-    const empty = document.createElement("div");
-    empty.className = "wiki-empty";
-    empty.textContent = "Accepted Claims will appear here automatically.";
-    wikiGraphEl.appendChild(empty);
-    return;
-  }
-  const canvas = document.createElement("div");
-  canvas.className = "wiki-graph-canvas";
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 1000 640");
-  const positions = new Map();
-  nodes.forEach((node, index) => {
-    const angle = (-Math.PI / 2) + (index * Math.PI * 2 / Math.max(1, nodes.length));
-    positions.set(node.id, {
-      x: 500 + Math.cos(angle) * 330,
-      y: 320 + Math.sin(angle) * 220,
+const wikiGraphLayout = (wiki) => {
+  const claims = new Map((wiki.graph?.nodes || []).map(claim => [claim.id, claim]));
+  const edges = (wiki.graph?.edges || []).filter(edge => claims.has(edge.subject_claim_id)
+    && claims.has(edge.object_claim_id) && edge.subject_claim_id !== edge.object_claim_id
+    && ["supports", "contradicts", "related"].includes(edge.relation_type))
+    .map(edge => ({from: edge.subject_claim_id, to: edge.object_claim_id, type: edge.relation_type, rationale: edge.rationale || ""}));
+  const adjacency = new Map([...claims.keys()].map(id => [id, new Set()]));
+  edges.forEach(edge => { adjacency.get(edge.from).add(edge.to); adjacency.get(edge.to).add(edge.from); });
+  const visited = new Set(), groups = [];
+  [...claims.keys()].sort().forEach(seed => {
+    if (visited.has(seed) || !adjacency.get(seed).size) return;
+    const ids = [seed]; visited.add(seed);
+    for (let i = 0; i < ids.length; i++) [...adjacency.get(ids[i])].sort().forEach(id => {
+      if (!visited.has(id)) { visited.add(id); ids.push(id); }
     });
+    const nodes = ids.map((id, i) => {
+      const angle = i * 2.399963229728653, radius = 65 * Math.sqrt(i);
+      return {id, item: claims.get(id), x: Math.cos(angle) * radius * 1.8, y: Math.sin(angle) * radius};
+    });
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const links = edges.filter(edge => byId.has(edge.from));
+    // A bounded, deterministic simulation. Hover never restarts it.
+    for (let iteration = 0; iteration < 140; iteration++) {
+      const forces = new Map(nodes.map(node => [node.id, {x: -node.x * 0.001, y: -node.y * 0.001}]));
+      const cells = new Map();
+      nodes.forEach(node => {
+        const key = Math.floor(node.x / 220) + ":" + Math.floor(node.y / 100);
+        if (!cells.has(key)) cells.set(key, []);
+        cells.get(key).push(node);
+      });
+      nodes.forEach(a => {
+        const cx = Math.floor(a.x / 220), cy = Math.floor(a.y / 100);
+        for (let x = cx - 1; x <= cx + 1; x++) for (let y = cy - 1; y <= cy + 1; y++) {
+          (cells.get(x + ":" + y) || []).forEach(b => {
+            if (a.id >= b.id) return;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const ox = 190 - Math.abs(dx), oy = 62 - Math.abs(dy);
+            if (ox <= 0 || oy <= 0) return;
+            const fa = forces.get(a.id), fb = forces.get(b.id);
+            if (ox / 190 < oy / 62) {
+              const push = (dx >= 0 ? 1 : -1) * ox * 0.3;
+              fa.x -= push; fb.x += push;
+            } else {
+              const push = (dy >= 0 ? 1 : -1) * oy * 0.3;
+              fa.y -= push; fb.y += push;
+            }
+          });
+        }
+      });
+      links.forEach(edge => {
+        const a = byId.get(edge.from), b = byId.get(edge.to);
+        const dx = b.x - a.x, dy = b.y - a.y, distance = Math.hypot(dx, dy) || 1;
+        const pull = (distance - 185) * 0.012;
+        forces.get(a.id).x += dx / distance * pull; forces.get(a.id).y += dy / distance * pull;
+        forces.get(b.id).x -= dx / distance * pull; forces.get(b.id).y -= dy / distance * pull;
+      });
+      nodes.forEach(node => {
+        const force = forces.get(node.id);
+        node.x += Math.max(-18, Math.min(18, force.x));
+        node.y += Math.max(-18, Math.min(18, force.y));
+      });
+    }
+    // Resolve any residual label collisions without a running animation.
+    const placed = [];
+    nodes.forEach(node => {
+      while (placed.some(other => Math.abs(node.x - other.x) < 180 && Math.abs(node.y - other.y) < 44)) node.y += 46;
+      placed.push(node);
+    });
+    const minX = Math.min(...nodes.map(node => node.x)), minY = Math.min(...nodes.map(node => node.y));
+    nodes.forEach(node => { node.x -= minX; node.y -= minY; });
+    groups.push({nodes, width: Math.max(...nodes.map(node => node.x)) + 180, height: Math.max(...nodes.map(node => node.y)) + 44});
   });
-  for (let iteration = 0; iteration < 140; iteration += 1) {
-    const forces = new Map(nodes.map((node) => [node.id, {x: 0, y: 0}]));
-    nodes.forEach((node, index) => nodes.slice(index + 1).forEach((other) => {
-      const a = positions.get(node.id); const b = positions.get(other.id);
-      const dx = a.x - b.x; const dy = a.y - b.y;
-      const distanceSquared = Math.max(1600, dx * dx + dy * dy);
-      const strength = 85000 / distanceSquared;
-      const distance = Math.sqrt(distanceSquared);
-      forces.get(node.id).x += (dx / distance) * strength;
-      forces.get(node.id).y += (dy / distance) * strength;
-      forces.get(other.id).x -= (dx / distance) * strength;
-      forces.get(other.id).y -= (dy / distance) * strength;
-    }));
-    edges.forEach((edge) => {
-      const a = positions.get(edge.subject_claim_id); const b = positions.get(edge.object_claim_id);
-      if (!a || !b) return;
-      const dx = b.x - a.x; const dy = b.y - a.y;
-      const distance = Math.max(1, Math.hypot(dx, dy));
-      const strength = (distance - 250) * 0.018;
-      forces.get(edge.subject_claim_id).x += (dx / distance) * strength;
-      forces.get(edge.subject_claim_id).y += (dy / distance) * strength;
-      forces.get(edge.object_claim_id).x -= (dx / distance) * strength;
-      forces.get(edge.object_claim_id).y -= (dy / distance) * strength;
+  groups.sort((a, b) => b.nodes.length - a.nodes.length);
+  const shelfWidth = Math.max(650, Math.sqrt(groups.reduce((sum, group) => sum + (group.width + 80) * (group.height + 80), 0)) * 1.3);
+  let x = 36, y = 36, rowHeight = 0;
+  const nodes = [];
+  groups.forEach(group => {
+    if (x > 36 && x + group.width > shelfWidth) { x = 36; y += rowHeight + 90; rowHeight = 0; }
+    group.nodes.forEach(node => nodes.push({...node, x: node.x + x, y: node.y + y}));
+    x += group.width + 100; rowHeight = Math.max(rowHeight, group.height);
+  });
+  return {nodes, edges, groupCount: groups.length,
+    isolated: [...claims.values()].filter(claim => !adjacency.get(claim.id).size),
+    width: Math.max(400, ...nodes.map(node => node.x + 210)),
+    height: Math.max(240, ...nodes.map(node => node.y + 80))};
+};
+
+const wikiGraphOptions = {page: "", types: new Set(["supports", "contradicts", "related"]), selected: "", focused: false};
+let wikiGraphResizeObserver = null;
+const renderWikiGraph = () => {
+  wikiGraphResizeObserver?.disconnect();
+  wikiGraphEl.replaceChildren();
+  const options = wikiGraphOptions;
+  const pages = wikiState.pages || [];
+  if (!pages.some(page => page.id === options.page)) options.page = "";
+  const page = pages.find(page => page.id === options.page);
+  const included = page ? new Set(page.claim_ids || []) : null;
+  const claims = (wikiState.graph?.nodes || []).filter(claim => !included || included.has(claim.id));
+  const edges = (wikiState.graph?.edges || []).filter(edge => options.types.has(edge.relation_type));
+  const graph = wikiGraphLayout({graph: {nodes: claims, edges}});
+  if (!claims.some(claim => claim.id === options.selected)) { options.selected = ""; options.focused = false; }
+  const toolbar = document.createElement("div"); toolbar.className = "wiki-graph-controls";
+  const pageLabel = document.createElement("label"); pageLabel.textContent = "Page";
+  const filter = document.createElement("select"); filter.setAttribute("aria-label", "Filter Graph by Page");
+  filter.appendChild(new Option("All Claims", ""));
+  pages.forEach(page => filter.appendChild(new Option(page.title, page.id)));
+  filter.value = options.page;
+  filter.addEventListener("change", () => { options.page = filter.value; options.selected = ""; options.focused = false; renderWikiGraph(); });
+  pageLabel.appendChild(filter); toolbar.appendChild(pageLabel);
+  const button = (text, action) => {
+    const item = document.createElement("button"); item.type = "button"; item.className = "reader-toolbar-btn";
+    item.textContent = text; item.addEventListener("click", action); return item;
+  };
+  const info = document.createElement("p"); info.className = "wiki-graph-description";
+  info.textContent = `${claims.length} Claims · ${graph.edges.length} relations · ${graph.groupCount} connected groups`;
+  const viewport = document.createElement("div"); viewport.className = "wiki-graph-canvas";
+  const isMac = /Mac|iPhone|iPad/i.test(navigator.userAgentData?.platform || navigator.platform || "");
+  const zoomHint = `Pinch or ${isMac ? "Cmd" : "Ctrl"} + scroll to zoom.`;
+  viewport.setAttribute("aria-label", `Claim relations. Drag to pan. ${zoomHint}`);
+  const surface = document.createElement("div"); surface.className = "wiki-graph-surface";
+  surface.style.width = `${graph.width}px`; surface.style.height = `${graph.height}px`;
+  const tooltip = document.createElement("div"); tooltip.className = "wiki-graph-tooltip"; tooltip.hidden = true;
+  viewport.append(surface, tooltip);
+  const details = document.createElement("section"); details.className = "wiki-graph-detail";
+  details.setAttribute("aria-live", "polite");
+  const positions = new Map(graph.nodes.map(node => [node.id, node]));
+  if (!positions.has(options.selected)) options.focused = false;
+  const nodeElements = new Map(), edgeElements = [];
+  let scale = 1, tx = 0, ty = 0;
+  const transform = () => { surface.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
+  const neighborhood = () => {
+    const ids = new Set([options.selected]);
+    graph.edges.forEach(edge => { if (edge.from === options.selected) ids.add(edge.to); if (edge.to === options.selected) ids.add(edge.from); });
+    return ids;
+  };
+  const fit = () => {
+    const visible = graph.nodes.filter(node => !options.focused || neighborhood().has(node.id));
+    if (!visible.length) return;
+    const x = Math.min(...visible.map(node => node.x)) - 25, y = Math.min(...visible.map(node => node.y)) - 25;
+    const width = Math.max(...visible.map(node => node.x + 180)) - x + 25;
+    const height = Math.max(...visible.map(node => node.y + 36)) - y + 25;
+    scale = Math.max(0.15, Math.min(1.35, (viewport.clientWidth - 32) / width, (viewport.clientHeight - 32) / height));
+    tx = (viewport.clientWidth - width * scale) / 2 - x * scale;
+    ty = (viewport.clientHeight - height * scale) / 2 - y * scale;
+    transform();
+  };
+  const zoom = (factor, x = viewport.clientWidth / 2, y = viewport.clientHeight / 2) => {
+    const next = Math.max(0.15, Math.min(3, scale * factor)), ratio = next / scale;
+    tx = x - (x - tx) * ratio; ty = y - (y - ty) * ratio; scale = next; transform();
+  };
+  toolbar.append(button("−", () => zoom(0.8)), button("+", () => zoom(1.25)), button("Fit", fit));
+  toolbar.children[1].setAttribute("aria-label", "Zoom out");
+  toolbar.children[2].setAttribute("aria-label", "Zoom in");
+  const focus = button("Focus selected", () => { options.focused = !options.focused; updateSelection(); fit(); });
+  const clear = button("Clear selection", () => { options.selected = ""; options.focused = false; updateSelection(); fit(); });
+  toolbar.append(focus, clear);
+  const updateSelection = () => {
+    const neighbors = neighborhood(), selected = claims.find(claim => claim.id === options.selected);
+    focus.disabled = !selected || !positions.has(selected.id);
+    focus.textContent = options.focused ? "Show all" : "Focus selected";
+    focus.setAttribute("aria-pressed", String(options.focused)); clear.disabled = !selected;
+    nodeElements.forEach((node, id) => {
+      node.classList.toggle("is-selected", id === options.selected);
+      node.classList.toggle("is-dimmed", Boolean(selected) && !neighbors.has(id));
+      node.hidden = options.focused && !neighbors.has(id);
+      node.setAttribute("aria-pressed", String(id === options.selected));
     });
-    nodes.forEach((node) => {
-      const position = positions.get(node.id); const force = forces.get(node.id);
-      force.x += (500 - position.x) * 0.004;
-      force.y += (320 - position.y) * 0.004;
-      position.x = Math.max(105, Math.min(895, position.x + Math.max(-12, Math.min(12, force.x))));
-      position.y = Math.max(65, Math.min(575, position.y + Math.max(-10, Math.min(10, force.y))));
+    edgeElements.forEach(({element, edge}) => {
+      const active = edge.from === options.selected || edge.to === options.selected;
+      element.classList.toggle("is-dimmed", Boolean(selected) && !active);
+      element.style.display = options.focused && !active ? "none" : "";
     });
-  }
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  ["supports", "contradicts", "related"].forEach((type) => {
-    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-    marker.id = `wiki-arrow-${type}`; marker.setAttribute("viewBox", "0 0 10 10");
-    marker.setAttribute("refX", "9"); marker.setAttribute("refY", "5");
-    marker.setAttribute("markerWidth", "5"); marker.setAttribute("markerHeight", "5");
-    marker.setAttribute("orient", "auto-start-reverse");
-    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+    details.replaceChildren();
+    const heading = document.createElement("strong"); heading.textContent = selected ? "Selected Claim" : "Explore connections";
+    const text = document.createElement("p");
+    if (selected) renderEvidenceText(text, selected.statement);
+    else text.textContent = `Select a node to read its Claim and inspect its immediate connections. Click it again to deselect. Drag the canvas to pan. ${zoomHint}`;
+    details.append(heading, text);
+    if (selected) {
+      details.appendChild(button("Open in Claims →", () => openClaimFromWiki(selected.id)));
+      const list = document.createElement("div"); list.className = "wiki-graph-neighbors";
+      graph.edges.filter(edge => edge.from === selected.id || edge.to === selected.id).forEach(edge => {
+        const otherId = edge.from === selected.id ? edge.to : edge.from;
+        const other = claims.find(claim => claim.id === otherId);
+        const entry = button(`${edge.type} ${edge.type === "related" ? "↔" : edge.from === selected.id ? "→" : "←"} ${other.statement}`, () => select(other.id));
+        entry.title = edge.rationale || other.statement; entry.dataset.relation = edge.type; list.appendChild(entry);
+      });
+      if (!list.children.length) { const note = document.createElement("small"); note.textContent = "No visible relations under the current filters."; list.appendChild(note); }
+      details.appendChild(list);
+    }
+  };
+  const select = id => {
+    const wasFocused = options.focused;
+    if (options.selected === id) { options.selected = ""; options.focused = false; }
+    else options.selected = id;
+    tooltip.hidden = true; updateSelection();
+    if (wasFocused) fit();
+  };
+  const createNode = (claim, floating = false) => {
+    const node = button("", () => select(claim.id)); node.className = "wiki-graph-node";
+    node.dataset.nodeId = claim.id;
+    const dot = document.createElement("i"); dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span"); label.textContent = claim.statement;
+    node.append(dot, label); node.setAttribute("aria-label", claim.statement);
+    if (floating) node.title = claim.statement;
+    if (floating) node.classList.add("is-unconnected");
+    node.addEventListener("pointerenter", () => { renderEvidenceText(tooltip, claim.statement); tooltip.hidden = false; });
+    node.addEventListener("pointerleave", () => { tooltip.hidden = true; });
+    node.addEventListener("focus", () => { renderEvidenceText(tooltip, claim.statement); tooltip.hidden = false; });
+    node.addEventListener("blur", () => { tooltip.hidden = true; });
+    nodeElements.set(claim.id, node); return node;
+  };
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${graph.width} ${graph.height}`); svg.setAttribute("aria-hidden", "true");
+  const defs = document.createElementNS(svg.namespaceURI, "defs");
+  ["supports", "contradicts"].forEach(type => {
+    const marker = document.createElementNS(svg.namespaceURI, "marker");
+    marker.id = `wiki-arrow-${type}`;
+    Object.entries({viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto"}).forEach(([key,value]) => marker.setAttribute(key,value));
+    const arrow = document.createElementNS(svg.namespaceURI, "path"); arrow.setAttribute("d","M 0 0 L 10 5 L 0 10 z");
     marker.appendChild(arrow); defs.appendChild(marker);
   });
   svg.appendChild(defs);
-  edges.forEach((edge) => {
-    const from = positions.get(edge.subject_claim_id);
-    const to = positions.get(edge.object_claim_id);
-    if (!from || !to) return;
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", from.x); line.setAttribute("y1", from.y);
-    line.setAttribute("x2", to.x); line.setAttribute("y2", to.y);
-    line.dataset.relation = edge.relation_type;
-    line.dataset.subjectClaimId = edge.subject_claim_id;
-    line.dataset.objectClaimId = edge.object_claim_id;
-    line.setAttribute("marker-end", `url(#wiki-arrow-${edge.relation_type})`);
-    svg.appendChild(line);
+  graph.edges.forEach(edge => {
+    const a = positions.get(edge.from), b = positions.get(edge.to);
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx,dy) || 1;
+    const x1 = a.x + 10 + dx / length * 9, y1 = a.y + 18 + dy / length * 9;
+    const x2 = b.x + 10 - dx / length * 11, y2 = b.y + 18 - dy / length * 11;
+    const path = document.createElementNS(svg.namespaceURI, "path");
+    const bend = edge.type === "supports" ? 16 : edge.type === "contradicts" ? -16 : 0;
+    path.setAttribute("d", `M ${x1} ${y1} Q ${(x1+x2)/2-dy/length*bend} ${(y1+y2)/2+dx/length*bend} ${x2} ${y2}`);
+    path.classList.add("wiki-graph-edge"); path.dataset.relation = edge.type;
+    if (edge.type !== "related") path.setAttribute("marker-end", `url(#wiki-arrow-${edge.type})`);
+    svg.appendChild(path); edgeElements.push({element:path,edge});
   });
-  canvas.appendChild(svg);
-  nodes.forEach((node, index) => {
-    const position = positions.get(node.id);
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "wiki-graph-node";
-    card.style.left = `${position.x / 10}%`;
-    card.style.top = `${position.y / 6.4}%`;
-    const label = document.createElement("span");
-    label.textContent = `${index + 1}. ${node.statement}`;
-    card.appendChild(label);
-    card.title = node.statement;
-    card.dataset.claimId = node.id;
-    card.addEventListener("pointerenter", () => {
-      const relatedIds = new Set([node.id]);
-      edges.forEach((edge) => {
-        if (edge.subject_claim_id === node.id) relatedIds.add(edge.object_claim_id);
-        if (edge.object_claim_id === node.id) relatedIds.add(edge.subject_claim_id);
-      });
-      canvas.querySelectorAll(".wiki-graph-node").forEach((item) => {
-        item.classList.toggle("is-dimmed", !relatedIds.has(item.dataset.claimId));
-        item.classList.toggle("is-focused", item.dataset.claimId === node.id);
-      });
-      svg.querySelectorAll("line").forEach((line) => {
-        line.classList.toggle("is-dimmed", line.dataset.subjectClaimId !== node.id
-          && line.dataset.objectClaimId !== node.id);
-        line.classList.toggle("is-focused", line.dataset.subjectClaimId === node.id
-          || line.dataset.objectClaimId === node.id);
-      });
-    });
-    card.addEventListener("pointerleave", () => {
-      canvas.querySelectorAll(".is-dimmed, .is-focused").forEach((item) => item.classList.remove("is-dimmed", "is-focused"));
-    });
-    card.addEventListener("click", () => openClaimFromWiki(node.id));
-    canvas.appendChild(card);
+  surface.appendChild(svg);
+  graph.nodes.forEach(node => {
+    const element = createNode(node.item); element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; surface.appendChild(element);
   });
-  const legend = document.createElement("div");
-  legend.className = "wiki-graph-legend";
-  ["supports", "contradicts", "related"].forEach((type) => {
-    const item = document.createElement("span");
-    item.dataset.relation = type;
-    item.textContent = type;
-    legend.appendChild(item);
+  let drag = null;
+  viewport.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    drag = {x:event.clientX,y:event.clientY,tx,ty}; tooltip.hidden = true;
+    viewport.setPointerCapture(event.pointerId); viewport.classList.add("is-dragging");
   });
-  wikiGraphEl.append(canvas, legend);
+  viewport.addEventListener("pointermove", event => {
+    if (!drag) return; tx = drag.tx + event.clientX - drag.x; ty = drag.ty + event.clientY - drag.y; transform();
+  });
+  const release = () => { drag = null; viewport.classList.remove("is-dragging"); };
+  viewport.addEventListener("pointerup", release); viewport.addEventListener("pointercancel", release);
+  viewport.addEventListener("wheel", event => {
+    // Trackpad pinch is delivered as a Ctrl-wheel event by browsers.
+    if (!event.ctrlKey && !(isMac && event.metaKey)) return;
+    event.preventDefault(); const rect = viewport.getBoundingClientRect();
+    zoom(Math.exp(-event.deltaY * 0.002), event.clientX - rect.left, event.clientY - rect.top);
+  }, {passive:false});
+  const legend = document.createElement("div"); legend.className = "wiki-graph-legend";
+  ["supports","contradicts","related"].forEach(type => {
+    const label = document.createElement("label"); label.dataset.relation = type;
+    const input = document.createElement("input"); input.type = "checkbox"; input.checked = options.types.has(type);
+    input.addEventListener("change", () => { input.checked ? options.types.add(type) : options.types.delete(type); renderWikiGraph(); });
+    const line = document.createElement("span"); line.textContent = type; line.dataset.relation = type;
+    label.append(input,line); legend.appendChild(label);
+  });
+  wikiGraphEl.append(toolbar, info, legend);
+  if (graph.nodes.length) wikiGraphEl.appendChild(viewport);
+  else { const empty = document.createElement("p"); empty.className = "wiki-graph-description"; empty.textContent = claims.length ? "No relations under these filters. Claims are listed below." : "No Claims in this scope."; wikiGraphEl.appendChild(empty); }
+  wikiGraphEl.appendChild(details);
+  if (graph.isolated.length) {
+    const section = document.createElement("details"); section.className = "wiki-graph-unconnected"; section.open = !graph.nodes.length;
+    const heading = document.createElement("summary"); heading.textContent = `Unconnected · ${graph.isolated.length}`;
+    const grid = document.createElement("div"); grid.className = "wiki-graph-isolated";
+    graph.isolated.forEach(claim => grid.appendChild(createNode(claim,true)));
+    section.append(heading,grid); wikiGraphEl.appendChild(section);
+  }
+  updateSelection();
+  if (graph.nodes.length) {
+    wikiGraphResizeObserver = new ResizeObserver(fit); wikiGraphResizeObserver.observe(viewport);
+    requestAnimationFrame(fit);
+  }
 };
 
 const wikiPatchScopeClaims = (proposal) => {
   const scoped = Array.isArray(proposal.scope?.claim_ids)
-    ? new Set(proposal.scope.claim_ids) : null;
+    ? new Set([...proposal.scope.claim_ids, ...(proposal.payload.pages || []).flatMap(page => page.claim_ids || [])]) : null;
   return wikiState.claims.filter((claim) => claim.lifecycle === "active"
     && (!scoped || scoped.has(claim.id)));
 };
 
+// Bound local Wiki requests, including reading the response body. Model calls
+// use their separately configured timeout and must not use this helper.
+const fetchWikiLocal = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const body = await response.json();
+    return { ok: response.ok, json: async () => body };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Wiki request timed out: ${url}. Reload Wiki to check its current state before retrying changes.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const persistWikiProposal = async (proposal, rerender = true) => {
+  wikiRefreshVersion++;
   wikiStatusEl.textContent = "Saving Wiki Patch draft…";
-  const response = await fetch(`/api/wiki/proposals/${encodeURIComponent(proposal.id)}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(proposal.payload),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    wikiStatusEl.textContent = body.message || "Could not save the Wiki Patch draft.";
+  try {
+    const response = await fetchWikiLocal(`/api/wiki/proposals/${encodeURIComponent(proposal.id)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(proposal.payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      wikiStatusEl.textContent = body.message || "Could not save the Wiki Patch draft.";
+      return false;
+    }
+    const index = wikiProposals.findIndex((item) => item.id === proposal.id);
+    body._dirty = false;
+    wikiRefreshVersion++;
+    if (index >= 0) wikiProposals[index] = body;
+    wikiStatusEl.textContent = "Wiki Patch draft saved.";
+    if (rerender) renderWikiProposals();
+    return true;
+  } catch (error) {
+    wikiStatusEl.textContent = error.message || "Could not save the Wiki Patch draft.";
     return false;
   }
-  const index = wikiProposals.findIndex((item) => item.id === proposal.id);
-  body._dirty = false;
-  if (index >= 0) wikiProposals[index] = body;
-  wikiStatusEl.textContent = "Wiki Patch draft saved.";
-  if (rerender) renderWikiProposals();
-  return true;
+};
+
+const sendWikiPatchDecision = async (proposalId, accepted) => {
+  wikiRefreshVersion++;
+  const response = await fetchWikiLocal(`/api/wiki/proposals/${encodeURIComponent(proposalId)}${accepted ? "/accept" : ""}`, {method: accepted ? "POST" : "DELETE"});
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message || `Could not ${accepted ? "apply" : "discard"} the Wiki Patch.`);
+  wikiRefreshVersion++;
+  if (accepted) wikiState = body;
+  wikiProposals = wikiProposals.filter(item => item.id !== proposalId);
+  activeWikiProposalPageKeys.delete(proposalId);
+  reviewState("wiki").selected.delete(proposalId);
+  if (activeWikiProposalId === proposalId) activeWikiProposalId = "";
 };
 
 const renderWikiProposals = () => {
@@ -5636,9 +6634,20 @@ const renderWikiProposals = () => {
   if (!wikiProposals.some((proposal) => proposal.id === activeWikiProposalId)) {
     activeWikiProposalId = wikiProposals[0].id;
   }
+  const batch = createReviewBatchBar("wiki", wikiProposals, async (proposal, accepted) => {
+    if (accepted && !proposal.payload?.pages?.length) throw new Error("No Pages remain. Use Reset to start over.");
+    if (accepted && proposal._dirty && !(await persistWikiProposal(proposal, false))) throw new Error("Could not save edited Wiki draft");
+    await sendWikiPatchDecision(proposal.id, accepted);
+  }, async fetchData => {
+    if (!fetchData) { renderWikiProposals(); return; }
+    renderWiki();
+    if (currentReviewContext() === "views") renderReviewWorkspace();
+  }, wikiStatusEl, {singleAccept: true});
+  wikiProposalListEl.append(batch.bar);
   wikiProposals.forEach((proposal) => {
     const card = document.createElement("article");
     card.className = "wiki-proposal-card";
+    addReviewSelection(card, proposal, batch.state, batch.update);
     if (proposal.id !== activeWikiProposalId) {
       const compact = document.createElement("div"); compact.className = "wiki-patch-compact";
       const copy = document.createElement("div");
@@ -5875,11 +6884,15 @@ const renderWikiProposals = () => {
       const summaryInput = document.createElement("textarea"); summaryInput.rows = 3; summaryInput.maxLength = 12000; summaryInput.value = selectedPage.summary || "";
       summaryInput.addEventListener("input", () => { selectedPage.summary = summaryInput.value; markDirty(); dirty.textContent = "Unsaved changes"; });
       summaryField.appendChild(summaryInput); fields.append(titleField, parentField, summaryField); detail.appendChild(fields);
+      const summaryPreview = document.createElement("p");
+      const previewSummary = () => renderWikiSummary(summaryPreview, selectedPage.summary || "", pages, (home) => selectPage(home.key));
+      previewSummary(); summaryInput.addEventListener("input", previewSummary);
+      detail.appendChild(summaryPreview);
       const deletePage = document.createElement("button"); deletePage.type = "button";
       deletePage.className = "semantic-action is-destructive wiki-patch-delete-page"; deletePage.textContent = "× Delete Page";
       deletePage.title = "Its Claims will become Unorganized";
-      deletePage.addEventListener("click", () => {
-        if (!window.confirm(`Delete “${selectedPage.title}”? Its Claims will become Unorganized.`)) return;
+      deletePage.addEventListener("click", async () => {
+        if (!await confirmAction(`Delete “${selectedPage.title}”? Its Claims will become Unorganized.`)) return;
         pages.forEach((page) => { if (page.parent_key === selectedPage.key) page.parent_key = selectedPage.parent_key || ""; });
         proposal.payload.pages = pages.filter((page) => page.key !== selectedPage.key);
         activeWikiProposalPageKeys.set(proposal.id, proposal.payload.pages[0]?.key || "__unorganized__");
@@ -5945,28 +6958,59 @@ const renderWikiProposals = () => {
     detail.appendChild(claimList); editor.append(treePanel, detail);
 
     const actions = document.createElement("div"); actions.className = "proposal-actions wiki-patch-actions";
+    const actionStatus = document.createElement("small");
+    actionStatus.className = "knowledge-status wiki-patch-action-status";
+    actionStatus.setAttribute("role", "status");
+    actionStatus.textContent = proposal._actionStatus || "";
+    if (!pages.length) actionStatus.textContent = "No Pages remain. To start over, use Reset in the Wiki toolbar.";
     const discard = document.createElement("button"); discard.type = "button";
     discard.className = "semantic-action is-destructive"; discard.textContent = "× Discard";
-    discard.addEventListener("click", () => discardWikiProposal(proposal.id));
     const save = document.createElement("button"); save.type = "button";
     save.className = "semantic-action is-edit"; save.textContent = "Save draft"; save.disabled = !proposal._dirty;
     saveDraftButton = save;
-    save.addEventListener("click", () => persistWikiProposal(proposal));
     const accept = document.createElement("button"); accept.type = "button";
     accept.className = "semantic-action is-accept"; accept.textContent = "✓ Apply Wiki Patch";
-    accept.addEventListener("click", async () => {
+    accept.disabled = pages.length === 0;
+    save.disabled = !proposal._dirty || pages.length === 0;
+    const runAction = async (action, progress) => {
+      if (batch.state.busy) return;
+      batch.state.busy = true;
+      actionStatus.textContent = progress;
+      wikiStatusEl.textContent = progress;
+      const controls = [...wikiProposalListEl.querySelectorAll("button, input, select, textarea")];
+      const previous = controls.map(control => control.disabled);
+      controls.forEach(control => { control.disabled = true; });
+      try { await action(); }
+      catch (error) { wikiStatusEl.textContent = error.message || "Could not update Wiki Patch."; }
+      finally {
+        batch.state.busy = false;
+        const remaining = wikiProposals.find(item => item.id === proposal.id);
+        if (remaining) remaining._actionStatus = wikiStatusEl.textContent;
+        controls.forEach((control, index) => { control.disabled = previous[index]; });
+        batch.update();
+        if (!wikiProposalReviewEl.hidden) renderWikiProposals();
+      }
+    };
+    discard.addEventListener("click", () => runAction(() => discardWikiProposal(proposal.id), "Discarding Wiki Patch…"));
+    save.addEventListener("click", () => runAction(() => persistWikiProposal(proposal), "Saving Wiki Patch draft…"));
+    accept.addEventListener("click", () => runAction(async () => {
       if (proposal._dirty && !(await persistWikiProposal(proposal, false))) return;
       await acceptWikiProposal(proposal.id);
-    });
+    }, "Applying Wiki Patch…"));
     actions.append(discard, save, accept);
-    card.append(editorHead, editor, actions); wikiProposalListEl.appendChild(card);
+    card.append(editorHead, editor, actionStatus, actions); wikiProposalListEl.appendChild(card);
   });
 };
 
 const renderWikiImports = () => {
   wikiImportListEl.replaceChildren();
+  const batch = createReviewBatchBar("wiki-import", wikiImports,
+    (item, accepted) => sendReviewDecision(`/api/wiki/imports/${encodeURIComponent(item.id)}`, accepted),
+    async fetchData => fetchData ? Promise.all([fetchLibrary(), fetchEvidenceLibrary(), fetchClaims(), fetchWiki()]) : renderWikiImports(), wikiStatusEl);
+  if (wikiImports.length) wikiImportListEl.append(batch.bar);
   wikiImports.forEach((item) => {
     const card = document.createElement("article"); card.className = "wiki-proposal-card";
+    addReviewSelection(card, item, batch.state, batch.update);
     const title = document.createElement("strong"); title.textContent = item.filename || "Shared Wiki";
     const counts = item.summary?.counts || {};
     const summary = document.createElement("p");
@@ -6000,6 +7044,10 @@ const renderWikiImports = () => {
 };
 
 const renderWiki = () => {
+  if (!wikiProposals.length) {
+    activeWikiProposalId = "";
+    wikiProposalReviewEl.hidden = true;
+  }
   const activeSpecialPageExists = activeWikiPageId === "__unorganized__"
     ? Boolean(wikiState.unorganized_claim_ids?.length)
     : activeWikiPageId === "__stale__"
@@ -6040,34 +7088,69 @@ const renderWiki = () => {
     renderReviewWorkspace();
   });
   wikiHealthEl.appendChild(staleChip);
+  const eligible = wikiState.claims.filter((claim) => claim.lifecycle === "active" && !claim.needs_review);
+  const needsReferences = wikiState.pages.length > 0 && (eligible.length > wikiClaimLimit
+    || wikiState.pages.some((page) => page.claim_ids.some((id) => !eligible.some((claim) => claim.id === id))));
+  document.getElementById("wiki-call-estimate").textContent = `Estimated model calls: ${eligible.length ? (needsReferences ? 2 : 1) : 0}`;
+  document.getElementById("wiki-call-detail").textContent = !eligible.length
+    ? "Review at least one Claim before organizing the Wiki."
+    : needsReferences
+    ? "Select reference pages from the directory, then organize this batch. Read-only context: up to 5 pages × 10 Claims; other knowledge stays unchanged."
+    : "Organize this batch in one request; no reference-page selection needed.";
   wikiProposalsToggleBtn.textContent = `Awaiting review · ${wikiProposals.length}`;
   wikiProposalsToggleBtn.classList.toggle("has-pending", wikiProposals.length > 0);
+  wikiProposalsToggleBtn.disabled = wikiProposals.length === 0;
+  wikiProposalsToggleBtn.setAttribute("aria-expanded", String(!wikiProposalReviewEl.hidden));
   wikiImportsToggleBtn.textContent = `Awaiting imports · ${wikiImports.length}`;
   wikiImportsToggleBtn.classList.toggle("has-pending", wikiImports.length > 0);
   wikiImportsToggleBtn.disabled = wikiImports.length === 0;
   wikiExportBtn.disabled = !wikiState.claims.some((claim) => claim.lifecycle === "active");
   renderWikiIncoming();
-  renderWikiTree();
-  renderWikiPage();
-  renderWikiGraph();
-  renderWikiProposals();
-  renderWikiImports();
+  if (!wikiMainEl.hidden) {
+    renderWikiTree();
+    renderWikiPage();
+  }
+  if (!wikiGraphEl.hidden) renderWikiGraph();
+  if (!wikiProposalReviewEl.hidden) renderWikiProposals();
+  if (!wikiImportReviewEl.hidden) renderWikiImports();
 };
 
+let wikiRefreshVersion = 0;
 const fetchWiki = async () => {
-  const [wikiResponse, proposalsResponse, importsResponse] = await Promise.all([
-    fetch("/api/wiki"), fetch("/api/wiki/proposals"), fetch("/api/wiki/imports"),
-  ]);
-  if (!wikiResponse.ok || !proposalsResponse.ok || !importsResponse.ok) throw new Error("Could not load the global Wiki.");
-  wikiState = await wikiResponse.json();
-  wikiProposals = (await proposalsResponse.json()).proposals || [];
-  wikiImports = (await importsResponse.json()).imports || [];
-  renderWiki();
-  if (currentReviewContext() === "views") renderReviewWorkspace();
+  const version = ++wikiRefreshVersion;
+  wikiStatusEl.textContent = "Loading Wiki…";
+  const errors = [];
+  await Promise.all(["/api/wiki", "/api/wiki/proposals", "/api/wiki/imports"].map(async url => {
+    try {
+      const response = await fetchWikiLocal(url);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || `Could not load ${url}`);
+      if (version !== wikiRefreshVersion || reviewState("wiki").busy) return;
+      if (url === "/api/wiki") wikiState = body;
+      else if (url.endsWith("/proposals")) {
+        const drafts = new Map(wikiProposals.filter(item => item._dirty).map(item => [item.id, item]));
+        wikiProposals = (body.proposals || []).map(item => drafts.get(item.id) || item);
+      } else wikiImports = body.imports || [];
+      renderWiki();
+      if (currentReviewContext() === "views") renderReviewWorkspace();
+    } catch (error) {
+      errors.push(`${url}: ${error.message}`);
+    }
+  }));
+  if (version !== wikiRefreshVersion) return;
+  wikiStatusEl.textContent = errors.join(" · ");
+  if (errors.length) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "semantic-action";
+    retry.textContent = "Reload Wiki";
+    retry.addEventListener("click", () => fetchWiki());
+    wikiStatusEl.appendChild(retry);
+  }
 };
 
 const generateWikiProposal = async () => {
-  const activeClaims = wikiState.claims.filter((claim) => claim.lifecycle === "active");
+  const activeClaims = wikiState.claims.filter((claim) => claim.lifecycle === "active" && !claim.needs_review);
   if (!activeClaims.length) {
     wikiStatusEl.textContent = "Review at least one Claim before organizing the Wiki.";
     wikiOrganizeBtn.classList.remove("is-attention");
@@ -6075,7 +7158,7 @@ const generateWikiProposal = async () => {
     window.setTimeout(() => wikiOrganizeBtn.classList.remove("is-attention"), 1000);
     return;
   }
-  wikiStatusEl.textContent = "Organizing the global Wiki…";
+  wikiStatusEl.textContent = `Organizing ${Math.min(wikiClaimLimit, activeClaims.length)} of ${activeClaims.length} Claims · stale → unorganized → others…`;
   wikiProposalRunning = true;
   wikiOrganizeBtn.disabled = true;
   setTabActivity("views-panel", "processing");
@@ -6089,11 +7172,14 @@ const generateWikiProposal = async () => {
     const body = await response.json();
     if (!response.ok) throw new Error(body.message || "Could not propose a Wiki structure.");
     activeWikiProposalId = body.proposal?.id || "";
+    wikiRefreshVersion++;
     setTabActivity("views-panel", "idle");
     setTabActivity("views-panel", "result");
     wikiProposalReviewEl.hidden = false;
-    await fetchWiki();
-    wikiStatusEl.textContent = "Wiki Patch ready for review.";
+    wikiProposals = [body.proposal, ...wikiProposals.filter(item => item.id !== body.proposal.id)];
+    wikiImportReviewEl.hidden = true;
+    renderWiki();
+    wikiStatusEl.textContent = `Wiki Patch ready for review · ${body.proposal?.scope?.claim_ids?.length || 0} Claims processed. Unselected knowledge is preserved.`;
   } catch (error) {
     setTabActivity("views-panel", "idle");
     wikiStatusEl.textContent = error.message;
@@ -6103,7 +7189,52 @@ const generateWikiProposal = async () => {
   }
 };
 
+const resetWikiStructure = async () => {
+  if (wikiResetStructureBtn.disabled || reviewState("wiki").busy || wikiProposalRunning) return;
+  const pageCount = wikiState.pages.length;
+  const draftCount = wikiProposals.length;
+  if (!await confirmAction(
+    `Remove all ${pageCount} Wiki Pages and their Claim placements, and discard ${draftCount} awaiting Wiki structure draft(s)? All reviewed active Claims will become Unorganized. Claims, Evidence, Sources, Projects and saved Articles will be preserved.`,
+    {title: "Reset Wiki structure", confirmLabel: "Reset", destructive: true,
+      highlights: [
+        ...(pageCount > 0 ? [`${pageCount} Wiki Pages`] : []),
+        ...(draftCount > 0 ? [`${draftCount} awaiting Wiki structure draft(s)`] : []),
+      ]},
+  )) return;
+  const state = reviewState("wiki");
+  if (state.busy || wikiProposalRunning) return;
+  state.busy = true;
+  wikiRefreshVersion++;
+  wikiResetStructureBtn.disabled = true;
+  wikiStatusEl.textContent = "Resetting Wiki structure…";
+  try {
+    const response = await fetchWikiLocal("/api/wiki/reset", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({confirmed: true}),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.message || "Could not reset Wiki structure.");
+    wikiRefreshVersion++;
+    wikiState = body;
+    wikiProposals = [];
+    state.selected.clear();
+    activeWikiProposalId = "";
+    activeWikiProposalPageKeys.clear();
+    activeWikiPageId = "__unorganized__";
+    wikiMode = "wiki";
+    wikiProposalReviewEl.hidden = true;
+    wikiImportReviewEl.hidden = true;
+    wikiStatusEl.textContent = "Wiki structure reset. Knowledge and Projects are preserved; Claims are ready to organize again.";
+  } catch (error) {
+    wikiStatusEl.textContent = error.message;
+  } finally {
+    state.busy = false;
+    renderWiki();
+    if (currentReviewContext() === "views") renderReviewWorkspace();
+  }
+};
+
 const editWikiStructure = async () => {
+  if (reviewState("wiki").busy || wikiEditStructureBtn.disabled) return;
   if (wikiProposals.length) {
     activeWikiProposalId = activeWikiProposalId || wikiProposals[0].id;
     wikiImportReviewEl.hidden = true;
@@ -6115,12 +7246,15 @@ const editWikiStructure = async () => {
   wikiEditStructureBtn.disabled = true;
   wikiStatusEl.textContent = "Creating an editable Wiki Patch…";
   try {
-    const response = await fetch("/api/wiki/proposals/edit", { method: "POST" });
+    const response = await fetchWikiLocal("/api/wiki/proposals/edit", { method: "POST" });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.message || "Could not create an editable Wiki Patch.");
     activeWikiProposalId = body.proposal.id;
+    wikiRefreshVersion++;
+    wikiProposals = [body.proposal, ...wikiProposals.filter(item => item.id !== body.proposal.id)];
     wikiProposalReviewEl.hidden = false;
-    await fetchWiki();
+    wikiImportReviewEl.hidden = true;
+    renderWiki();
     wikiStatusEl.textContent = "Wiki structure draft ready to edit.";
   } catch (error) {
     wikiStatusEl.textContent = error.message;
@@ -6131,24 +7265,90 @@ const editWikiStructure = async () => {
 
 const acceptWikiProposal = async (proposalId) => {
   wikiStatusEl.textContent = "Applying the reviewed Wiki Patch…";
-  const response = await fetch(`/api/wiki/proposals/${encodeURIComponent(proposalId)}/accept`, { method: "POST" });
-  const body = await response.json();
-  if (!response.ok) { wikiStatusEl.textContent = body.message || "Could not apply the Wiki Patch."; return; }
+  await sendWikiPatchDecision(proposalId, true);
   wikiProposalReviewEl.hidden = true;
-  await fetchWiki();
+  renderWiki();
+  if (currentReviewContext() === "views") renderReviewWorkspace();
   wikiStatusEl.textContent = "Global Wiki updated.";
 };
 
 const discardWikiProposal = async (proposalId) => {
-  const response = await fetch(`/api/wiki/proposals/${encodeURIComponent(proposalId)}`, { method: "DELETE" });
-  if (!response.ok) { wikiStatusEl.textContent = "Could not discard the Wiki Patch."; return; }
-  await fetchWiki();
-  if (!wikiProposals.length) {
-    activeWikiProposalId = "";
-    wikiProposalReviewEl.hidden = true;
+  wikiStatusEl.textContent = "Discarding Wiki Patch…";
+  try {
+    await sendWikiPatchDecision(proposalId, false);
+    wikiProposalReviewEl.hidden = wikiProposals.length === 0;
     renderWiki();
+    if (currentReviewContext() === "views") renderReviewWorkspace();
+    wikiStatusEl.textContent = "Wiki Patch discarded.";
+  } catch (error) {
+    wikiStatusEl.textContent = error.message || "Could not discard the Wiki Patch.";
   }
-  wikiStatusEl.textContent = "Wiki Patch discarded.";
+};
+
+const editWikiReading = (reading, options) => {
+  const draft = JSON.parse(JSON.stringify(reading));
+  const projectClaims = projectDetails.get(activeArticleProjectId)?.claims || [];
+  wikiReadingEl.replaceChildren();
+  const form = document.createElement("form"); form.className = "article-editor";
+  const heading = document.createElement("h3"); heading.textContent = "Edit Article";
+  const hint = document.createElement("p"); hint.textContent = "Edit prose and check each paragraph's Claims. This does not change the Claims themselves.";
+  form.append(heading, hint);
+  const field = (parent, label, value, onInput, single = false) => {
+    const wrapper = document.createElement("label"); wrapper.textContent = label;
+    const input = document.createElement(single ? "input" : "textarea");
+    input.value = value || ""; if (!single) input.rows = 4;
+    input.addEventListener("input", () => onInput(input.value));
+    wrapper.appendChild(input); parent.appendChild(wrapper); return input;
+  };
+  field(form, "Title", draft.title, (value) => { draft.title = value; }, true).required = true;
+  field(form, "Introduction", draft.introduction, (value) => { draft.introduction = value; });
+  draft.sections.forEach((section) => {
+    const block = document.createElement("section");
+    field(block, "Section title", section.heading, (value) => { section.heading = value; }, true).required = true;
+    const paragraphs = document.createElement("div");
+    const renderParagraphs = () => {
+      paragraphs.replaceChildren();
+      section.paragraphs.forEach((paragraph, index) => {
+        const row = document.createElement("div"); row.className = "article-edit-paragraph";
+        field(row, `Paragraph ${index + 1}`, paragraph.text, (value) => { paragraph.text = value; }).required = true;
+        const citations = document.createElement("details");
+        const summary = document.createElement("summary");
+        const updateSummary = () => { summary.textContent = paragraph.claim_ids.length ? `Claim citations · ${paragraph.claim_ids.length}` : "Uncited · select Claims if this paragraph makes factual assertions"; };
+        updateSummary(); citations.appendChild(summary);
+        projectClaims.forEach((claim) => {
+          const label = document.createElement("label"); label.className = "article-citation-option";
+          const checkbox = document.createElement("input"); checkbox.type = "checkbox";
+          checkbox.checked = paragraph.claim_ids.includes(claim.id);
+          checkbox.addEventListener("change", () => {
+            paragraph.claim_ids = checkbox.checked ? [...paragraph.claim_ids, claim.id] : paragraph.claim_ids.filter((id) => id !== claim.id);
+            updateSummary();
+          });
+          const text = document.createElement("span"); text.textContent = claim.statement;
+          label.append(checkbox, text); citations.appendChild(label);
+        });
+        const remove = document.createElement("button"); remove.type = "button";
+        remove.className = "semantic-action is-destructive"; remove.textContent = "× Remove paragraph";
+        remove.addEventListener("click", () => { section.paragraphs.splice(index, 1); renderParagraphs(); });
+        row.append(citations, remove); paragraphs.appendChild(row);
+      });
+    };
+    renderParagraphs();
+    const add = document.createElement("button"); add.type = "button"; add.className = "reader-toolbar-btn";
+    add.textContent = "+ Paragraph";
+    add.addEventListener("click", () => { section.paragraphs.push({ text: "", claim_ids: [] }); renderParagraphs(); });
+    block.append(paragraphs, add); form.appendChild(block);
+  });
+  field(form, "Knowledge gaps (one per line)", (draft.gaps || []).join("\n"), (value) => { draft.gaps = value.split("\n").map((item) => item.trim()).filter(Boolean); });
+  const controls = document.createElement("div"); controls.className = "wiki-reading-toolbar";
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "reader-toolbar-btn"; cancel.textContent = "Cancel edits";
+  cancel.addEventListener("click", () => renderWikiReading(reading, options));
+  const preview = document.createElement("button"); preview.type = "submit"; preview.className = "semantic-action is-edit"; preview.textContent = "Preview edits";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    draft.selected_claim_ids = [...new Set(draft.sections.flatMap((section) => section.paragraphs.flatMap((paragraph) => paragraph.claim_ids)))];
+    renderWikiReading(draft, { ...options, saved: false, dirty: true });
+  });
+  controls.append(cancel, preview); form.appendChild(controls); wikiReadingEl.appendChild(form);
 };
 
 const renderWikiReading = (reading, options = {}) => {
@@ -6157,44 +7357,59 @@ const renderWikiReading = (reading, options = {}) => {
   const toolbar = document.createElement("div");
   toolbar.className = "wiki-reading-toolbar";
   const back = document.createElement("button"); back.type = "button"; back.className = "reader-toolbar-btn"; back.textContent = "← Project";
-  back.addEventListener("click", () => { wikiReadingEl.hidden = true; renderArtifacts(); });
+  back.addEventListener("click", async () => {
+    if (options.dirty && !await confirmAction("Leave without saving the Article edits?")) return;
+    wikiReadingEl.hidden = true; await fetchArtifacts();
+  });
   const readingActions = document.createElement("div");
   readingActions.className = "wiki-reading-save";
-  const notice = document.createElement("small"); notice.textContent = options.saved ? "Saved Article" : "Temporary Article · not saved";
-  const save = document.createElement("button"); save.type = "button"; save.className = "reader-toolbar-btn"; save.textContent = "＋ Save Article";
+  const notice = document.createElement("small"); notice.textContent = options.saved ? "Saved Article" : options.dirty ? "Unsaved edits" : "Temporary Article · not saved";
+  const save = document.createElement("button"); save.type = "button"; save.className = "reader-toolbar-btn"; save.textContent = options.documentId ? "Save changes" : "＋ Save Article";
   save.hidden = Boolean(options.saved);
   save.addEventListener("click", async () => {
     save.disabled = true;
+    try {
     const response = await fetch("/api/project-documents", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artifact_id: activeArticleProjectId, title: reading.title, goal: currentWikiReadingGoal, content: reading }),
+      body: JSON.stringify({ artifact_id: activeArticleProjectId, document_id: options.documentId || "", title: reading.title, goal: options.goal ?? currentWikiReadingGoal, content: reading }),
     });
     const body = await response.json().catch(() => ({}));
     if (response.ok) {
       notice.textContent = "Saved to Project";
+      save.hidden = true;
+      options.documentId = body.id; options.saved = true; options.dirty = false;
+      const refreshed = await fetch(`/api/projects/${encodeURIComponent(activeArticleProjectId)}`).then((entry) => entry.json());
+      projectDetails.set(activeArticleProjectId, refreshed);
       artifactStatusEl.textContent = "Article saved in the Project.";
     } else {
       save.disabled = false;
       artifactStatusEl.textContent = body.message || "Could not save the Article.";
     }
+    } catch (error) { artifactStatusEl.textContent = error.message; }
+    finally { save.disabled = false; }
   });
-  readingActions.append(notice, save);
+  const edit = document.createElement("button"); edit.type = "button"; edit.className = "reader-toolbar-btn"; edit.textContent = "✎ Edit Article";
+  edit.addEventListener("click", () => editWikiReading(reading, options));
+  readingActions.append(notice, edit, save);
   toolbar.append(back, readingActions);
-  const title = document.createElement("h2"); title.textContent = options.title || reading.title;
-  const intro = document.createElement("p"); intro.className = "wiki-reading-intro"; intro.textContent = reading.introduction;
+  const title = document.createElement("h2"); title.textContent = reading.title;
+  const intro = document.createElement("p"); intro.className = "wiki-reading-intro"; appendMarkdownInline(intro, reading.introduction);
   wikiReadingEl.append(toolbar, title, intro);
   reading.sections.forEach((section) => {
     const block = document.createElement("section");
     const heading = document.createElement("h3"); heading.textContent = section.heading; block.appendChild(heading);
     section.paragraphs.forEach((paragraph) => {
-      const text = document.createElement("p"); text.textContent = paragraph.text;
+      const text = document.createElement("p"); appendMarkdownInline(text, paragraph.text);
       const citations = document.createElement("div"); citations.className = "wiki-reading-citations";
+      if (!paragraph.claim_ids.length) {
+        const uncited = document.createElement("small"); uncited.textContent = "Uncited"; citations.appendChild(uncited);
+      }
       paragraph.claim_ids.forEach((claimId) => {
         const claim = wikiClaimById(claimId) || claims.find((item) => item.id === claimId); if (!claim) return;
         const chip = document.createElement("button"); chip.type = "button"; chip.textContent = claim.statement;
         chip.addEventListener("click", () => {
-          const page = wikiState.pages.find((item) => item.claim_ids.includes(claimId));
-          if (page) activeWikiPageId = page.id;
+          selectedClaimIds.clear(); selectedClaimIds.add(claimId);
+          renderClaims();
           wikiReadingEl.hidden = true;
           showPanel("claims-panel");
         });
@@ -6212,6 +7427,11 @@ const renderWikiReading = (reading, options = {}) => {
   }
   wikiReadingComposerEl.hidden = true;
   wikiReadingEl.hidden = false;
+  requestAnimationFrame(() => {
+    if (currentReviewContext() === "artifact" && !wikiReadingEl.hidden) {
+      wikiReadingEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
 };
 
 const generateWikiReading = async () => {
@@ -6219,6 +7439,7 @@ const generateWikiReading = async () => {
   if (!goal) { artifactStatusEl.textContent = "Describe the goal for this Article."; return; }
   if (!activeArticleProjectId) { artifactStatusEl.textContent = "Choose a Project first."; return; }
   wikiReadingRunBtn.disabled = true;
+  wikiReadingRunBtn.textContent = "Writing…";
   artifactStatusEl.textContent = "Writing from this Project's Claims…";
   try {
     currentWikiReadingGoal = goal;
@@ -6239,6 +7460,7 @@ const generateWikiReading = async () => {
     artifactStatusEl.textContent = error.message;
   } finally {
     wikiReadingRunBtn.disabled = false;
+    wikiReadingRunBtn.textContent = "Generate";
   }
 };
 
@@ -6714,21 +7936,86 @@ const fetchViews = async () => {
   renderChatContext();
 };
 
+const renderSourceDiscovery = () => {
+  sourceDiscoveryResultsEl.hidden = !sourceDiscoveryOpen;
+  if (!sourceDiscoveryOpen) return;
+  sourceDiscoveryListEl.replaceChildren();
+  const renderGroup = (label, items, className = "") => {
+    if (!items.length) return null;
+    const section = document.createElement("section");
+    section.className = `source-discovery-group ${className}`.trim();
+    const heading = document.createElement("h3");
+    heading.textContent = `${label} · ${items.length}`;
+    section.appendChild(heading);
+    items.forEach((paper) => section.appendChild(createRelevanceCard(
+      paper, selectedDiscoverySourceKeys, () => {
+        sourceDiscoveryAddBtn.disabled = selectedDiscoverySourceKeys.size === 0;
+        sourceDiscoveryAddBtn.textContent = selectedDiscoverySourceKeys.size
+          ? `Add selected Sources · ${selectedDiscoverySourceKeys.size}`
+          : "Add selected Sources";
+      },
+    )));
+    return section;
+  };
+  const strong = sourceDiscoveryResults.filter((item) => item.relevance_tier === "strong");
+  const possible = sourceDiscoveryResults.filter((item) => item.relevance_tier !== "strong");
+  [renderGroup("Strong match", strong), renderGroup("Possible match", possible)]
+    .filter(Boolean).forEach((section) => sourceDiscoveryListEl.appendChild(section));
+  if (sourceDiscoveryExcluded.length) {
+    const excluded = document.createElement("details");
+    excluded.className = "excluded-results source-discovery-excluded";
+    const summary = document.createElement("summary");
+    summary.textContent = `Excluded · ${sourceDiscoveryExcluded.length}`;
+    const list = renderGroup("Excluded", sourceDiscoveryExcluded, "is-excluded");
+    excluded.append(summary, list);
+    sourceDiscoveryListEl.appendChild(excluded);
+  }
+  if (!sourceDiscoveryResults.length && !sourceDiscoveryExcluded.length) {
+    const empty = document.createElement("div");
+    empty.className = "knowledge-empty";
+    empty.textContent = sourceDiscoveryEmptyMessage;
+    sourceDiscoveryListEl.appendChild(empty);
+  }
+  sourceDiscoveryAddBtn.disabled = selectedDiscoverySourceKeys.size === 0;
+  sourceDiscoveryAddBtn.textContent = selectedDiscoverySourceKeys.size
+    ? `Add selected Sources · ${selectedDiscoverySourceKeys.size}`
+    : "Add selected Sources";
+};
+
 const renderLibrary = () => {
+  updateEvidenceReadScope();
+  syncTagFilterOptions(libraryTagFilterInput, librarySources, selectedSourceTagFilters, selectedSourceAllTagFilters, "Evidence");
+  syncTagFilterOptions(libraryTagAllFilterInput, librarySources, selectedSourceAllTagFilters, selectedSourceTagFilters, "Evidence");
+  const filteredSources = visibleSources();
   updateSelectAllState(
     librarySelectAllInput,
-    selectedLibrarySourceKeys.size,
-    librarySources.length,
+    filteredSources.filter(item => selectedLibrarySourceKeys.has(resultKey(item))).length,
+    filteredSources.length,
   );
-  libraryListEl.hidden = Boolean(activeSourceWorkspace);
+  const focused = Boolean(activeSourceWorkspace) || sourceDiscoveryOpen;
+  if (!focused) libraryStatusEl.textContent = `${filteredSources.length} of ${librarySources.length} Sources`;
+  librarySelectAllInput.closest("label").hidden = focused;
+  document.querySelector("#library-tag-filters").hidden = focused;
+  libraryBatchTagBtn.hidden = focused; libraryBatchDeleteBtn.hidden = focused;
+  libraryBatchTagBtn.disabled = selectedLibrarySourceKeys.size === 0;
+  libraryBatchDeleteBtn.disabled = selectedLibrarySourceKeys.size === 0;
+  libraryListEl.hidden = focused;
   sourceReaderEl.hidden = !activeSourceWorkspace;
-  document.querySelector(".source-evidence-proposer").hidden = Boolean(activeSourceWorkspace);
+  sourceEvidenceProposerEl.hidden = focused;
+  sourceDiscoveryLauncherEl.hidden = focused;
+  sourceDiscoveryResultsEl.hidden = !sourceDiscoveryOpen || Boolean(activeSourceWorkspace);
   proposeEvidenceBtn.disabled = selectedLibrarySourceKeys.size === 0
     || !evidenceProposalFocusInput.value.trim();
   proposeEvidenceBtn.textContent = selectedLibrarySourceKeys.size
     ? `Propose Evidence via LLM · ${selectedLibrarySourceKeys.size}`
     : "Propose Evidence via LLM";
-  libraryAbstractToggleBtn.hidden = Boolean(activeSourceWorkspace);
+  sourceDiscoveryRunBtn.disabled = sourceDiscoveryBusy || selectedLibrarySourceKeys.size < 1
+    || selectedLibrarySourceKeys.size > 3
+    || !sourceDiscoveryModelSelect.value;
+  sourceDiscoveryRunBtn.textContent = sourceDiscoveryBusy ? "Exploring…" : selectedLibrarySourceKeys.size
+    ? `Explore related · ${selectedLibrarySourceKeys.size}`
+    : "Explore related";
+  libraryAbstractToggleBtn.hidden = focused;
   libraryPanelInnerEl.classList.toggle("is-reader-focused", Boolean(activeSourceWorkspace));
   libraryPanelInnerEl.classList.toggle(
     "is-reader-details-expanded",
@@ -6736,6 +8023,10 @@ const renderLibrary = () => {
   );
   if (activeSourceWorkspace) {
     renderSourceReader();
+    return;
+  }
+  if (sourceDiscoveryOpen) {
+    renderSourceDiscovery();
     return;
   }
   libraryListEl.replaceChildren();
@@ -6747,7 +8038,11 @@ const renderLibrary = () => {
     libraryListEl.appendChild(empty);
     return;
   }
-  librarySources.forEach((source) => {
+  if (!filteredSources.length) {
+    const empty = document.createElement("div"); empty.className = "knowledge-empty";
+    empty.textContent = "No Sources match these filters."; libraryListEl.appendChild(empty);
+  }
+  filteredSources.forEach((source) => {
     const card = document.createElement("article");
     card.className = "library-card";
     const key = resultKey(source);
@@ -6770,7 +8065,7 @@ const renderLibrary = () => {
       }
       card.classList.toggle("is-selected", checkbox.checked);
       updateSelectAllState(
-        librarySelectAllInput, selectedLibrarySourceKeys.size, librarySources.length,
+        librarySelectAllInput, filteredSources.filter(item => selectedLibrarySourceKeys.has(resultKey(item))).length, filteredSources.length,
       );
       renderReviewWorkspace();
       renderLibrary();
@@ -6935,8 +8230,10 @@ const renderSourceReader = () => {
   sourceDetailsToggleBtn.setAttribute(
     "aria-expanded", String(readerDetailsExpanded),
   );
-  sourceOpenOriginalEl.href = source.pdf_url || source.paper_url || source.url || "#";
-  sourceOpenOriginalEl.querySelector("span:last-child").textContent = (
+  sourceOpenOriginalEl.href = source.document_hash
+    ? `/api/library/sources/${source.id}/content`
+    : source.pdf_url || source.paper_url || source.url || "#";
+  sourceOpenOriginalEl.querySelector("span:last-child").textContent = source.document_hash ? "Original file" : (
     activeSourceWorkspace.capture?.media_type === "application/pdf"
       ? "Original PDF" : "Original web"
   );
@@ -7241,7 +8538,7 @@ const renderKnowledgeReview = () => {
       card.append(thumbnail, label);
     } else {
       const quote = document.createElement("p");
-      quote.textContent = `“${item.quote}”`;
+      renderEvidenceText(quote, item.quote);
       const meta = document.createElement("small");
       meta.textContent = item.locator;
       card.append(quote, meta);
@@ -7325,7 +8622,7 @@ const renderEvidenceDetail = () => {
     evidenceDetailDialog.close();
     return;
   }
-  evidenceDetailMetaEl.textContent = item.locator;
+  evidenceDetailMetaEl.textContent = `v${item.revision || 1} · ${item.locator || "No locator"}`;
   renderTagChips(evidenceDetailTagsEl, item.tags || []);
   evidenceDetailContentEl.replaceChildren();
   if (item.evidence_type === "snapshot") {
@@ -7333,10 +8630,25 @@ const renderEvidenceDetail = () => {
     image.src = `/api/evidence/${item.id}/snapshot`;
     image.alt = `Snapshot Evidence from ${item.locator}`;
     evidenceDetailContentEl.appendChild(image);
+    if (item.quote) {
+      const caption = document.createElement("p");
+      renderEvidenceText(caption, item.quote);
+      evidenceDetailContentEl.appendChild(caption);
+    }
   } else {
     const quote = document.createElement("blockquote");
-    quote.textContent = item.quote || "No captured text is available for this Evidence.";
+    renderEvidenceText(quote, item.quote || "No captured text is available for this Evidence.");
     evidenceDetailContentEl.appendChild(quote);
+  }
+  const history = item.history || libraryEvidence.find(entry => entry.id === item.id)?.history || [];
+  if (history.length) {
+    const versions = document.createElement("details"); versions.className = "evidence-version-history";
+    const heading = document.createElement("summary"); heading.textContent = `Previous versions · ${history.length}`; versions.append(heading);
+    for (const version of history) {
+      const label = document.createElement("small"); label.textContent = `v${version.revision} · ${version.locator || "No locator"}`;
+      const quote = document.createElement("blockquote"); renderEvidenceText(quote, version.quote); versions.append(label, quote);
+    }
+    evidenceDetailContentEl.append(versions);
   }
   const annotations = item.annotations || [];
   evidenceDetailAnnotationCountEl.textContent = (
@@ -7351,7 +8663,7 @@ const renderEvidenceDetail = () => {
     remove.type = "button";
     remove.textContent = "Delete";
     remove.addEventListener("click", async () => {
-      if (!window.confirm("Delete this Annotation?")) return;
+      if (!await confirmAction("Delete this Annotation?")) return;
       const response = await fetch(`/api/annotations/${annotation.id}`, {
         method: "DELETE",
       });
@@ -7383,10 +8695,84 @@ evidenceDetailEditTagsBtn.addEventListener("click", async () => {
     await refreshEvidenceDetailData();
   });
 });
+document.getElementById("evidence-detail-edit").addEventListener("click", () => {
+  const item = activeEvidenceDetail(); if (!item) return;
+  const quote = document.createElement("textarea"); quote.rows = 7; quote.value = item.quote || ""; quote.maxLength = 12000;
+  const quoteLabel = document.createElement("label"); quoteLabel.textContent = item.evidence_type === "snapshot" ? "Caption" : "Excerpt"; quoteLabel.append(quote);
+  const locator = document.createElement("input"); locator.value = item.locator || ""; locator.maxLength = 300;
+  const locatorLabel = document.createElement("label"); locatorLabel.textContent = "Location"; locatorLabel.append(locator);
+  const note = document.createElement("small"); note.textContent = "Saving retains the previous version and sends linked Claims to Evidence changed review. Original Source and image are not modified.";
+  const save = document.createElement("button"); save.type = "button"; save.textContent = "Save changes"; save.className = "semantic-action is-accept";
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel"; cancel.className = "semantic-action";
+  cancel.addEventListener("click", renderEvidenceDetail);
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      const response = await fetch(`/api/evidence/${item.id}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({quote: quote.value, locator: locator.value, revision: item.revision || 1})});
+      const data = await response.json(); if (!response.ok) throw new Error(data.message || "Could not edit Evidence");
+      await Promise.all([fetchEvidenceLibrary(), fetchClaims(), fetchClaimProposals(), fetchWiki()]);
+      await refreshEvidenceDetailData();
+      evidenceStatusEl.textContent = `Evidence saved. ${data.affected_claims} linked Claims awaiting recheck.`;
+      if (data.affected_claims) { claimReviewCategory = "changed"; setTabActivity("claims-panel", "result"); }
+    } catch (error) { note.textContent = error.message; save.disabled = false; }
+  });
+  const editor = document.createElement("div"); editor.className = "evidence-content-editor";
+  editor.append(quoteLabel, locatorLabel, note, cancel, save); evidenceDetailContentEl.replaceChildren(editor);
+});
+let knowledgeDeletionBusy = false;
+const deleteSelectedKnowledge = async (entityType, ids) => {
+  if (!ids.length || knowledgeDeletionBusy) return false;
+  knowledgeDeletionBusy = true;
+  const status = entityType === "source" ? libraryStatusEl : evidenceStatusEl;
+  const request = async (route, payload) => {
+    const response = await fetch(route, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Deletion failed");
+    return data;
+  };
+  try {
+    const payload = {entity_type:entityType, entity_ids:ids};
+    status.textContent = "Checking deletion impact…";
+    const plan = await request("/api/knowledge/delete-preview", payload);
+    const message = `Delete ${ids.length} selected ${entityType === "source" ? "Sources" : "Evidence items"}?\n\n`
+      + `${plan.sources} Sources, ${plan.evidence} Evidence items and ${plan.annotations} Annotations will be deleted. Their Tags and Project links will be removed.\n`
+      + `${plan.claims} linked Claims will be retained; ${plan.recheck_claims} active Claims will return to Evidence changed review.\n`
+      + `${plan.pending_proposals} dependent pending proposals will be removed.\n\nThis cannot be undone. Export your Wiki or Project first if you need a backup.`;
+    const highlights = [
+      plan.sources ? `${plan.sources} Sources` : "",
+      plan.evidence ? `${plan.evidence} Evidence items` : "",
+      plan.annotations ? `${plan.annotations} Annotations` : "",
+      plan.claims ? `${plan.claims} linked Claims will be retained` : "",
+      plan.recheck_claims ? `${plan.recheck_claims} active Claims will return to Evidence changed review` : "",
+      plan.pending_proposals ? `${plan.pending_proposals} dependent pending proposals will be removed` : "",
+      "This cannot be undone.",
+    ].filter(Boolean);
+    if (!await confirmAction(message, {title:"Delete selected items",confirmLabel:"Delete",destructive:true,highlights})) { status.textContent = "Deletion cancelled."; return false; }
+    status.textContent = "Deleting selected items…";
+    await request("/api/knowledge/delete", {...payload, token:plan.token});
+    if (entityType === "source") {
+      librarySources.filter(item => ids.includes(item.id)).forEach(item => { selectedLibrarySourceKeys.delete(resultKey(item)); chatContextSources.delete(resultKey(item)); });
+      if (ids.includes(activeSourceWorkspace?.source?.id)) {
+        activeSourceWorkspace = null; pdfRenderToken += 1;
+      }
+    }
+    const removedEvidence = libraryEvidence.filter(item => entityType === "source" ? ids.includes(item.source_id) : ids.includes(item.id));
+    if ((annotationTarget?.type === "source" && entityType === "source" && ids.includes(annotationTarget.id))
+        || (annotationTarget?.type === "evidence" && removedEvidence.some(item => item.id === annotationTarget.id))) annotationTarget = null;
+    removedEvidence.forEach(item => { selectedEvidenceIds.delete(item.id); chatContextEvidence.delete(item.id); });
+    if (removedEvidence.some(item => item.id === activeEvidenceDetailId)) { evidenceDetailDialog.close(); activeEvidenceDetailId = null; }
+    await Promise.all([fetchLibrary(), fetchEvidenceLibrary(), fetchClaims(), fetchClaimProposals(), fetchEvidenceProposals(), fetchWiki(), fetchArtifacts()]);
+    if (activeSourceWorkspace?.source?.id) await openSourceReader(activeSourceWorkspace.source.id, {preserveState:true});
+    if (plan.recheck_claims) { claimReviewCategory = "changed"; setTabActivity("claims-panel", "result"); }
+    renderReviewWorkspace(); renderChatContext();
+    status.textContent = `Deleted ${ids.length} items. ${plan.recheck_claims} Claims await recheck.`;
+    return true;
+  } catch (error) { status.textContent = error.message; return false; }
+  finally { knowledgeDeletionBusy = false; }
+};
+
 const deleteEvidenceItem = async (evidenceId, { closeDetail = false } = {}) => {
-  if (!window.confirm("Delete this Evidence and its Annotations?")) return false;
-  const response = await fetch(`/api/evidence/${evidenceId}`, { method: "DELETE" });
-  if (!response.ok) return;
+  if (!await deleteSelectedKnowledge("evidence", [evidenceId])) return false;
   if (closeDetail) evidenceDetailDialog.close();
   if (activeEvidenceDetailId === evidenceId) activeEvidenceDetailId = null;
   selectedEvidenceIds.delete(evidenceId);
@@ -7677,7 +9063,7 @@ const fetchLibrary = async () => {
     renderLibrary();
     renderArtifacts();
     renderContextPanel();
-    libraryStatusEl.textContent = `${librarySources.length} saved Source${librarySources.length === 1 ? "" : "s"}`;
+    libraryStatusEl.textContent = `${visibleSources().length} of ${librarySources.length} Sources`;
   } catch (error) {
     libraryStatusEl.textContent = error instanceof TypeError
       ? "Connection to Knowte was interrupted. Restart Knowte, then reload this page."
@@ -7687,14 +9073,14 @@ const fetchLibrary = async () => {
 
 libraryProposeClaimsBtn.addEventListener("click", async () => {
   if (!selectedEvidenceIds.size) return;
-  if (selectedEvidenceIds.size > 30) {
-    evidenceStatusEl.textContent = "Select at most 30 Evidence items for one Claim proposal run.";
+  if (selectedEvidenceIds.size > claimEvidenceLimit) {
+    evidenceStatusEl.textContent = `Select at most ${claimEvidenceLimit} Evidence items for one Claim proposal run.`;
     return;
   }
   libraryProposeClaimsBtn.disabled = true;
   libraryProposeClaimsBtn.textContent = "Proposing…";
   setTabActivity("evidence-panel", "processing");
-  copySelectedEvidenceToClaimDraft();
+  copySelectedEvidenceToClaimDraft(true);
   evidenceStatusEl.textContent = "The model is developing Claim proposals from selected Evidence…";
   try {
     const artifact = artifacts.find(
@@ -7713,6 +9099,7 @@ libraryProposeClaimsBtn.addEventListener("click", async () => {
     updateUsage(data.usage);
     if (!response.ok) throw new Error(data.message || "Could not propose Claims.");
     claimProposalQueueOpen = true;
+    claimReviewCategory = "proposals";
     const returned = Array.isArray(data.proposals) ? data.proposals : [];
     const byId = new Map(
       [...returned, ...claimProposals].map((proposal) => [proposal.id, proposal]),
@@ -7730,6 +9117,9 @@ libraryProposeClaimsBtn.addEventListener("click", async () => {
     claimsStatusEl.textContent = returned.length
       ? `${returned.length} Claim change${returned.length === 1 ? "" : "s"} awaiting review.`
       : `${latestClaimProposalReport.skipped.length} item${latestClaimProposalReport.skipped.length === 1 ? "" : "s"} examined; no durable Claim change proposed.`;
+    evidenceStatusEl.textContent = returned.length
+      ? `${returned.length} Claim proposal${returned.length === 1 ? "" : "s"} ready in Claims → Awaiting review.`
+      : "Review completed; no Claim change proposed. See Claims for details.";
     await fetchClaimProposals().catch(() => {
       claimsStatusEl.textContent += " The background queue refresh failed; the returned proposals remain visible.";
     });
@@ -7744,6 +9134,138 @@ libraryProposeClaimsBtn.addEventListener("click", async () => {
 });
 
 evidenceProposalFocusInput.addEventListener("input", renderLibrary);
+sourceDiscoveryModelSelect.addEventListener("change", renderLibrary);
+
+sourceDiscoveryRunBtn.addEventListener("click", async () => {
+  if (sourceDiscoveryBusy) return;
+  const seeds = selectedLibrarySources();
+  if (!seeds.length || seeds.length > 3) {
+    libraryStatusEl.textContent = "Select one to three Seed Sources.";
+    return;
+  }
+  if (!sourceDiscoveryModelSelect.value) {
+    libraryStatusEl.textContent = "Choose a model for related Source discovery.";
+    return;
+  }
+  sourceDiscoveryBusy = true;
+  sourceDiscoveryRunBtn.disabled = true;
+  sourceDiscoveryRunBtn.textContent = "Exploring…";
+  setTabActivity("sources-panel", "processing");
+  const startedAt = Date.now();
+  const progress = window.setInterval(() => {
+    libraryStatusEl.textContent = `Following the academic graph and verifying candidates…\n${Math.floor((Date.now() - startedAt) / 1000)} s elapsed`;
+  }, 1000);
+  libraryStatusEl.textContent = "Following the academic graph and verifying candidates…\n0 s elapsed";
+  libraryStatusEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  try {
+    const response = await fetch("/api/source-discovery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_ids: seeds.map((source) => source.id),
+        focus: sourceDiscoveryFocusInput.value.trim(),
+        model_profile_id: sourceDiscoveryModelSelect.value,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    updateUsage(data.usage);
+    if (!response.ok) throw new Error(data.message || "Could not explore related Sources.");
+    sourceDiscoveryResults = data.results || [];
+    sourceDiscoveryExcluded = data.excluded_results || [];
+    const retrievalFailures = data.retrieval_failures || [];
+    sourceDiscoveryEmptyMessage = data.empty_reason === "already_saved"
+      ? `All ${data.already_saved_count || 0} retrieved candidates are already in Library.`
+      : retrievalFailures.length
+        ? "No candidates were returned by the successful paths. Other retrieval paths failed; the result is incomplete."
+        : "Semantic Scholar returned no related candidates for these Seeds. This does not prove no related papers exist.";
+    selectedDiscoverySourceKeys.clear();
+    sourceDiscoveryOpen = true;
+    sourceDiscoverySummaryEl.textContent = `${seeds.length} Seed${seeds.length === 1 ? "" : "s"}`
+      + ` · ${data.retrieved_count ?? data.candidate_count ?? 0} retrieved`
+      + ` · ${data.already_saved_count || 0} already in Library`
+      + ` · ${data.assessed_count ?? 0} assessed`
+      + ` · ${sourceDiscoveryResults.filter((item) => item.relevance_tier === "strong").length} Strong`
+      + ` · ${sourceDiscoveryResults.filter((item) => item.relevance_tier !== "strong").length} Possible`
+      + ` · ${sourceDiscoveryExcluded.length} Excluded`;
+    const notices = [];
+    if (retrievalFailures.length) {
+      const labels = { provider_restricted: "reference data withheld by provider", rate_limited: "rate limited",
+        paper_not_found: "paper not found", timeout: "request timed out", network_error: "network connection failed",
+        invalid_response: "unexpected provider response", http_error: "provider request failed" };
+      notices.push(`Incomplete retrieval: ${data.successful_requests}/${data.path_count || data.requests} paths available. `
+        + retrievalFailures.map((item) => `${item.lane}: ${labels[item.code] || item.code}`
+          + (item.retry_after ? ` (retry in ${item.retry_after}s)` : "")).join("; ") + ".");
+    }
+    if (data.cache_hits) notices.push(`${data.cache_hits} path(s) reused from the 15-minute retrieval cache; no new retrieval request for those paths.`);
+    if ((data.truncated_paths || []).length) notices.push(`More ${data.truncated_paths.join(" / ")} papers exist upstream; Explore samples up to 40 per path per Seed.`);
+    if (data.undisplayed_count) notices.push(`${data.undisplayed_count} additional matches are outside the top 20 shown.`);
+    if (data.unassessed_count) notices.push(`${data.unassessed_count} candidates not assessed: the 20-match target was reached. This is not an exhaustive review.`);
+    if (data.unresolved_seed_count) notices.push(`${data.unresolved_seed_count} Seed(s) could not be resolved.`);
+    if ((data.warnings || []).length) {
+      notices.push("Some verification batches failed; affected candidates are marked Possible match.");
+    } else if (sourceDiscoveryResults.length) {
+      notices.push("Strong and Possible matches are ready to review. Excluded candidates remain inspectable.");
+    } else if (sourceDiscoveryExcluded.length) {
+      notices.push("All assessed candidates were excluded by the model. Expand Excluded to inspect them.");
+    }
+    sourceDiscoveryStatusEl.textContent = notices.join(" ");
+    libraryStatusEl.textContent = "";
+    renderLibrary();
+  } catch (error) {
+    libraryStatusEl.textContent = error instanceof TypeError
+      ? "Connection to Knowte was interrupted during related Source discovery."
+      : error.message;
+  } finally {
+    window.clearInterval(progress);
+    sourceDiscoveryBusy = false;
+    setTabActivity("sources-panel", "idle");
+    renderLibrary();
+  }
+});
+
+sourceDiscoveryCloseBtn.addEventListener("click", () => {
+  sourceDiscoveryOpen = false;
+  sourceDiscoveryResults = [];
+  sourceDiscoveryExcluded = [];
+  selectedDiscoverySourceKeys.clear();
+  sourceDiscoveryStatusEl.textContent = "";
+  renderLibrary();
+});
+
+sourceDiscoveryAddBtn.addEventListener("click", async () => {
+  const candidates = [...sourceDiscoveryResults, ...sourceDiscoveryExcluded]
+    .filter((item) => selectedDiscoverySourceKeys.has(resultKey(item)));
+  if (!candidates.length) return;
+  sourceDiscoveryAddBtn.disabled = true;
+  sourceDiscoveryAddBtn.textContent = "Adding…";
+  try {
+    const response = await fetch("/api/library/sources/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources: candidates }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || "Could not add the selected Sources.");
+    sourceDiscoveryResults = sourceDiscoveryResults.filter(
+      (item) => !selectedDiscoverySourceKeys.has(resultKey(item)),
+    );
+    sourceDiscoveryExcluded = sourceDiscoveryExcluded.filter(
+      (item) => !selectedDiscoverySourceKeys.has(resultKey(item)),
+    );
+    selectedDiscoverySourceKeys.clear();
+    await fetchLibrary();
+    if (!sourceDiscoveryResults.length && !sourceDiscoveryExcluded.length) {
+      sourceDiscoveryEmptyMessage = "All displayed candidates have been added to Library.";
+    }
+    sourceDiscoveryStatusEl.textContent = `${data.sources_created || 0} new Source${data.sources_created === 1 ? "" : "s"} added to the Library. `
+      + sourceDiscoveryStatusEl.textContent;
+    renderSourceDiscovery();
+  } catch (error) {
+    sourceDiscoveryStatusEl.textContent = error.message;
+  } finally {
+    renderSourceDiscovery();
+  }
+});
 
 proposeEvidenceBtn.addEventListener("click", async () => {
   const focus = evidenceProposalFocusInput.value.trim();
@@ -7751,8 +9273,8 @@ proposeEvidenceBtn.addEventListener("click", async () => {
     .filter((source) => selectedLibrarySourceKeys.has(resultKey(source)))
     .map((source) => source.id);
   if (!focus || !sourceIds.length) return;
-  if (sourceIds.length > 6) {
-    libraryStatusEl.textContent = "Select at most 6 Sources for one Evidence proposal run.";
+  if (sourceIds.length > evidenceSourceLimit) {
+    libraryStatusEl.textContent = `Select at most ${evidenceSourceLimit} Sources for one Evidence proposal run.`;
     return;
   }
   proposeEvidenceBtn.disabled = true;
@@ -7761,18 +9283,47 @@ proposeEvidenceBtn.addEventListener("click", async () => {
   const modelName = evidenceModelSelect?.selectedOptions?.[0]?.textContent
     || "selected model";
   const startedAt = Date.now();
+  let progressLabel = `Proposing Evidence with ${modelName}…`;
+  const related = evidenceReadScope.value === "related";
+  const modelProfileId = evidenceModelSelect?.value || "";
+  evidenceReadScope.disabled = evidenceRelatedLimit.disabled = true;
+  evidenceRelatedReport.hidden = true;
   const renderProposalProgress = () => {
     const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    libraryStatusEl.textContent = `Proposing Evidence with ${modelName}…\n${elapsed} s elapsed`;
+    libraryStatusEl.textContent = `${progressLabel}\n${elapsed} s elapsed`;
   };
   renderProposalProgress();
   const elapsedTimer = window.setInterval(renderProposalProgress, 1000);
   try {
+    let selection = null;
+    if (related) {
+      progressLabel = "Discovering related pages and selecting with AI (1 extra call)…";
+      renderProposalProgress();
+      const response = await fetch("/api/evidence-pages/select", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({source_ids: sourceIds, focus, max_pages: Number(evidenceRelatedLimit.value), model_profile_id: modelProfileId}),
+      });
+      selection = await response.json();
+      updateUsage(selection.usage);
+      if (!response.ok) throw new Error(selection.message || "Could not select related pages.");
+      const count = selection.pages.length;
+      evidenceRelatedReport.hidden = false;
+      evidenceRelatedReport.textContent = `${count} pages selected from ${selection.candidate_count} discovered URLs. ${selection.summary || ""}\n`
+        + selection.pages.map((page) => `${page.title}\n${page.url}`).join("\n")
+        + (selection.warnings?.length ? `\n${selection.warnings.join("\n")}` : "");
+      if (!count) {
+        libraryStatusEl.textContent = "No relevant pages selected. One selection call completed; no Evidence extraction was requested.";
+        return;
+      }
+      progressLabel = `Reading ${count} selected pages with ${modelName} (${selection.request_mode === "individual" ? count : 1} extraction call${selection.request_mode === "individual" && count > 1 ? "s" : ""}, after 1 selection call)…`;
+      renderProposalProgress();
+    }
     const response = await fetch("/api/evidence-proposals/generate", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source_ids: sourceIds, focus,
-        model_profile_id: evidenceModelSelect?.value || "",
+        model_profile_id: modelProfileId,
+        ...(selection ? {related_pages: selection.pages, related_request_mode: selection.request_mode} : {}),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -7788,6 +9339,18 @@ proposeEvidenceBtn.addEventListener("click", async () => {
     setTabActivity("sources-panel", "idle");
     setTabActivity("evidence-panel", "result");
     evidenceStatusEl.textContent = `${returned.length} Evidence proposal${returned.length === 1 ? "" : "s"} awaiting review.`;
+    libraryStatusEl.textContent = returned.length
+      ? `${returned.length} Evidence proposal${returned.length === 1 ? "" : "s"} ready in Evidence → Awaiting review.`
+      : "Review completed; no Evidence proposed for this Focus.";
+    if (data.summary) {
+      libraryStatusEl.textContent += `\n${data.summary}`;
+      evidenceStatusEl.textContent += `\n${data.summary}`;
+    }
+    if (data.warnings?.length) {
+      const warningText = "\n" + data.warnings.join("\n");
+      libraryStatusEl.textContent += warningText;
+      evidenceStatusEl.textContent += warningText;
+    }
     fetchEvidenceProposals().catch(() => {
       evidenceStatusEl.textContent += " The background queue refresh failed; the returned proposals remain visible.";
     });
@@ -7798,6 +9361,8 @@ proposeEvidenceBtn.addEventListener("click", async () => {
       : error.message;
   } finally {
     window.clearInterval(elapsedTimer);
+    setTabActivity("sources-panel", "idle");
+    evidenceReadScope.disabled = evidenceRelatedLimit.disabled = false;
     proposeEvidenceBtn.disabled = false;
     proposeEvidenceBtn.textContent = selectedLibrarySourceKeys.size
       ? `Propose Evidence via LLM · ${selectedLibrarySourceKeys.size}`
@@ -7845,6 +9410,9 @@ claimBasisInput.addEventListener("change", renderIncomingTrays);
 claimsProposalsToggleBtn.addEventListener("click", () => {
   if (!claimProposals.length) return;
   claimProposalQueueOpen = !claimProposalQueueOpen;
+  if (claimProposalQueueOpen && !reviewItems("claim").length) {
+    claimReviewCategory = claimProposals.some(isEvidenceChangeReview) ? "changed" : "proposals";
+  }
   renderClaimProposals();
   if (claimProposalQueueOpen) {
     scrollClaimProposalQueueToStart();
@@ -7895,7 +9463,7 @@ claimAuditPreviewBtn.addEventListener("click", async () => {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.message || "Could not preview audit.");
     claimAuditPreviewKey = JSON.stringify(claimAuditScope());
-    claimAuditEstimateEl.textContent = `${data.claim_count} Claims in scope · ${data.candidate_count} likely pairs · ${data.estimated_batches} model batch${data.estimated_batches === 1 ? "" : "es"}. Every scoped Claim is considered locally; unrelated pairs are not sent to the model.`;
+    claimAuditEstimateEl.textContent = `${data.claim_count} Claims in scope · ${data.candidate_count} candidate pairs · ${data.estimated_batches} estimated model calls. Candidates use text, tags, shared grounding and relation neighbors; existing links within scope are always checked. Not every possible pair is examined.`;
   } catch (error) {
     claimAuditEstimateEl.textContent = error.message;
   } finally {
@@ -7939,8 +9507,8 @@ claimAuditStartBtn.addEventListener("click", async () => {
 
 claimAuditPauseBtn.addEventListener("click", () => setClaimAuditStatus("pause"));
 claimAuditResumeBtn.addEventListener("click", () => setClaimAuditStatus("resume"));
-claimAuditCancelBtn.addEventListener("click", () => {
-  if (window.confirm("Cancel this Claim audit? Completed review proposals will be kept.")) {
+claimAuditCancelBtn.addEventListener("click", async () => {
+  if (await confirmAction("Cancel this Claim audit? Completed review proposals will be kept.")) {
     setClaimAuditStatus("cancel");
   }
 });
@@ -7975,8 +9543,8 @@ claimsRelateBtn.addEventListener("click", async () => {
   claimsStatusEl.textContent = `Created ${data.relation_type} relation.`;
 });
 
-viewDetailBackBtn.addEventListener("click", () => {
-  if (!viewDetailEditor.hidden && !window.confirm("Leave without saving View changes?")) return;
+viewDetailBackBtn.addEventListener("click", async () => {
+  if (!viewDetailEditor.hidden && !await confirmAction("Leave without saving View changes?")) return;
   setViewDetailMode(false);
   renderViews();
 });
@@ -8081,7 +9649,7 @@ viewDetailEditor.addEventListener("submit", async (event) => {
 
 viewDetailDeleteBtn.addEventListener("click", async () => {
   const view = activeView();
-  if (!view || !window.confirm(`Delete View “${view.title}”? Claims and Evidence will not be deleted.`)) return;
+  if (!view || !await confirmAction(`Delete View “${view.title}”? Claims and Evidence will not be deleted.`)) return;
   const response = await fetch(`/api/views/${view.id}`, { method: "DELETE" });
   if (!response.ok) {
     viewDetailStatusEl.textContent = "Could not delete View.";
@@ -8151,7 +9719,7 @@ artifactForm.addEventListener("submit", async (event) => {
     collectArtifactSelect.value = data.id;
     localStorage.setItem("knowte-active-artifact", data.id);
     renderArtifacts();
-    artifactStatusEl.textContent = `Created “${data.title}”. It is now active in Search.`;
+    artifactStatusEl.textContent = `Created “${data.title}”. Open Project to select Claims and organize its knowledge.`;
   } catch (error) {
     artifactStatusEl.textContent = error.message;
   } finally {
@@ -8383,7 +9951,10 @@ const appendReviewMessage = (
     message.appendChild(list);
   }
   if (role === "assistant" && proposedSearchActions.length) {
-    const actionKey = (action) => `${String(action.target || "both").toLowerCase()}::${String(action.query || "").trim().toLowerCase().replace(/\s+/g, " ")}`;
+    proposedSearchActions = proposedSearchActions.map((action) => ({
+      ...action, target: "academic",
+    }));
+    const actionKey = (action) => `academic::${String(action.query || "").trim().toLowerCase().replace(/\s+/g, " ")}`;
     const existingKeys = new Set(
       [...searchStrategyActions, ...searchStrategyWaitingActions].map(actionKey),
     );
@@ -8403,7 +9974,7 @@ const appendReviewMessage = (
       const row = document.createElement("div");
       row.className = "chat-strategy-proposal-row";
       const meta = document.createElement("span");
-      meta.textContent = String(action.target || "both").toUpperCase();
+      meta.textContent = "ACADEMIC";
       const content = document.createElement("div");
       const query = document.createElement("strong");
       query.textContent = action.query;
@@ -8639,8 +10210,7 @@ const currentPlanPayload = () => {
     year_from: yearFrom || null,
     year_to: yearTo || null,
     sources: activeBackends(),
-    search_actions: searchMode === "smart"
-      ? searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT) : [],
+    search_actions: searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT),
   };
 };
 
@@ -8684,7 +10254,7 @@ const renderPlans = () => {
     name.textContent = plan.name;
     const mode = document.createElement("span");
     mode.className = `plan-mode ${plan.mode === "intelligent" ? "is-intelligent" : ""}`;
-    mode.textContent = plan.mode === "intelligent" ? "Intelligent" : "Keyword";
+    mode.textContent = plan.mode === "intelligent" ? "Search · AI Review on" : "Search · AI Review off";
     heading.append(name, mode);
 
     const query = document.createElement("p");
@@ -8790,7 +10360,7 @@ const loadPlanIntoSearch = (plan) => {
   searchStrategyStaleAcknowledged = false;
   setSearchMode(plan.mode === "intelligent" ? "smart" : "keyword");
   renderSearchStrategy();
-  searchStrategyEl.hidden = searchMode !== "smart"
+  searchStrategyEl.hidden = searchMode === "import"
     || !(searchStrategyActions.length || searchStrategyWaitingActions.length);
   yearFromInput.value = plan.year_from || "";
   yearToInput.value = plan.year_to || "";
@@ -8830,9 +10400,9 @@ plansListEl.addEventListener("click", async (event) => {
     return;
   }
   if (action === "edit") {
-    const name = window.prompt("Plan name", plan.name);
+    const name = await promptText("Plan name", plan.name);
     if (name === null) return;
-    const query = window.prompt("Search intent or keywords", plan.query);
+    const query = await promptText("Search intent or keywords", plan.query);
     if (query === null) return;
     const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, {
       method: "PUT",
@@ -8844,7 +10414,7 @@ plansListEl.addEventListener("click", async (event) => {
     plansStatusEl.textContent = message;
     return;
   }
-  if (action === "delete" && window.confirm(`Delete “${plan.name}”?`)) {
+  if (action === "delete" && await confirmAction(`Delete “${plan.name}”?`)) {
     const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, { method: "DELETE" });
     const message = response.ok ? "Plan deleted." : "Could not delete the plan.";
     await fetchPlans();
@@ -8883,17 +10453,20 @@ navLinks.forEach((link) => {
 wikiModeWikiBtn.addEventListener("click", () => {
   wikiMode = "wiki";
   wikiProposalReviewEl.hidden = true;
+  wikiImportReviewEl.hidden = true;
   renderWiki();
 });
 
 wikiModeGraphBtn.addEventListener("click", () => {
   wikiMode = "graph";
   wikiProposalReviewEl.hidden = true;
+  wikiImportReviewEl.hidden = true;
   renderWiki();
 });
 
 wikiOrganizeBtn.addEventListener("click", generateWikiProposal);
 wikiEditStructureBtn.addEventListener("click", editWikiStructure);
+wikiResetStructureBtn.addEventListener("click", resetWikiStructure);
 wikiProposalsToggleBtn.addEventListener("click", () => {
   wikiImportReviewEl.hidden = true;
   wikiProposalReviewEl.hidden = false;
@@ -8964,6 +10537,12 @@ wikiReadingRunBtn.addEventListener("click", generateWikiReading);
   aiVerifyConcurrencyInput,
   aiSearchTimeoutInput,
   aiStageTimeoutInput,
+  ai_evidence_source_limitInput,
+  ai_claim_evidence_limitInput,
+  aiClaimComparisonLimitInput,
+  aiWikiClaimLimitInput,
+  ai_copilot_context_limitInput,
+  evidenceRequestModeInput,
   aiCopilotInstructionsInput,
   aiCopilotTemperatureInput,
   aiCopilotMaxTokensInput,
@@ -9075,7 +10654,6 @@ const initTheme = () => {
 
 fetchConfig();
 fetchUsage();
-fetchSearxngStatus();
 fetchArtifacts();
 fetchClaims();
 fetchClaimProposals();

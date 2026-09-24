@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "properties": {
+    "answer": {
+      "type": "string"
+    },
+    "search_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "academic"
+            ]
+          },
+          "purpose": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "target",
+          "purpose"
+        ]
+      },
+      "maxItems": 15
+    }
+  },
+  "required": [
+    "answer"
+  ]
+}

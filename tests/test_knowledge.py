@@ -36,6 +36,7 @@ from knowte.knowledge import (
     get_source_workspace,
     get_view,
     get_wiki,
+    reset_wiki_structure,
     list_artifacts,
     list_claim_proposals,
     list_claims,
@@ -58,6 +59,52 @@ from knowte.knowledge import (
 
 
 class KnowledgeStoreTests(unittest.TestCase):
+    def test_reset_wiki_preserves_knowledge_and_projects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "knowte.db"
+            claim = create_claim({"statement": "Retained knowledge", "basis": "background",
+                                  "intentionally_ungrounded": True}, database)
+            project = create_artifact({"title": "Retained Project", "purpose": "Research"}, database)
+            from knowte.knowledge import link_project_knowledge, get_project
+            link_project_knowledge(project["id"], "claim", claim["id"], database)
+            project_patch = create_wiki_proposal({"pages": [{"key": "project", "title": "Project page", "claim_ids": [claim["id"]]}]},
+                "test", scope={"project_id": project["id"]}, path=database, proposal_type="project_wiki_patch")
+            accept_project_wiki_proposal(project_patch["id"], database)
+            before_project = get_project(project["id"], database)
+            source, _, _ = save_source({"title": "Retained Source", "url": "https://example.test/retained"}, path=database)
+            workspace = store_capture(source["id"], {"url": source["url"], "media_type": "text/html",
+                "sha256": "reset-test", "raw_path": str(Path(directory) / "source.html"), "segments": ["Retained excerpt."]}, database)
+            create_evidence({"segment_id": workspace["segments"][0]["id"], "quote": "Retained excerpt.",
+                             "start_offset": 0, "end_offset": len("Retained excerpt.")}, database)
+            before_sources, before_evidence = list_sources(database), list_evidence(database)
+            patch = create_wiki_proposal({"pages": [
+                {"key": "root", "title": "Root", "claim_ids": []},
+                {"key": "child", "parent_key": "root", "title": "Child", "claim_ids": [claim["id"]]},
+            ]}, "test", path=database)
+            previous = accept_wiki_proposal(patch["id"], database)
+            create_manual_wiki_proposal(database)
+            other = create_claim_proposal({"statement": "Unreviewed Claim", "basis": "background",
+                                           "intentionally_ungrounded": True}, "test", path=database)
+            before_claims = list_claims(database)
+            before_projects = list_artifacts(database)
+            result = reset_wiki_structure(database)
+            self.assertEqual(result["pages"], [])
+            self.assertEqual(result["unorganized_claim_ids"], [claim["id"]])
+            self.assertEqual(result["stale_claim_ids"], [])
+            self.assertEqual(list_wiki_proposals(database), [])
+            self.assertEqual(list_claims(database), before_claims)
+            self.assertEqual(list_artifacts(database), before_projects)
+            self.assertEqual(get_project(project["id"], database), before_project)
+            self.assertEqual(list_sources(database), before_sources)
+            self.assertEqual(list_evidence(database), before_evidence)
+            self.assertIn(other["id"], [item["id"] for item in list_claim_proposals(database)])
+            self.assertNotEqual(result["revision"]["id"], previous["revision"]["id"])
+            with sqlite3.connect(database) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM wiki_page_claims").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM wiki_revisions").fetchone()[0], 2)
+            new_patch = create_wiki_proposal({"pages": [{"key": "new", "title": "New", "claim_ids": [claim["id"]]}]}, "test", path=database)
+            self.assertEqual(len(accept_wiki_proposal(new_patch["id"], database)["pages"]), 1)
+
     def test_manual_wiki_patch_is_editable_and_rejects_duplicate_claim_placement(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"
@@ -96,6 +143,7 @@ class KnowledgeStoreTests(unittest.TestCase):
             link_project_knowledge(project["id"], "claim", claim["id"], database)
             proposal = create_wiki_proposal({
                 "summary": "One-section structure.",
+                "gaps": ["Training details are not yet covered."],
                 "pages": [{
                     "key": "architecture", "title": "Architecture",
                     "parent_key": "", "summary": "Core model design.",
@@ -107,6 +155,7 @@ class KnowledgeStoreTests(unittest.TestCase):
             wiki = accept_project_wiki_proposal(proposal["id"], database)
             self.assertEqual(wiki["artifact_id"], project["id"])
             self.assertEqual(wiki["graph_state"]["pages"][0]["title"], "Architecture")
+            self.assertEqual(wiki["graph_state"]["gaps"], ["Training details are not yet covered."])
             self.assertEqual(get_project(project["id"], database)["wiki"]["id"], wiki["id"])
 
     def test_project_claim_recommendation_requires_review_before_linking(self):
@@ -211,6 +260,24 @@ class KnowledgeStoreTests(unittest.TestCase):
                     {"key": "b", "title": "B", "parent_key": "a"},
                 ]}, "wiki-maintainer-v1", path=database)
 
+    def test_wiki_claim_has_one_home_and_linked_mentions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            claim = create_claim({"statement": "A fact.", "basis": "background", "intentionally_ungrounded": True}, database)
+            pages = [{"key": "home", "title": "Home", "claim_ids": [claim["id"]]},
+                     {"key": "other", "title": "Other", "claim_ids": [],
+                      "summary": f"See [[claim:{claim['id']}|the fact]]."}]
+            proposal = create_wiki_proposal({"pages": pages}, "test", path=database)
+            wiki = accept_wiki_proposal(proposal["id"], database)
+            self.assertEqual(sum(len(page["claim_ids"]) for page in wiki["pages"]), 1)
+            pages[1]["claim_ids"] = [claim["id"]]
+            with self.assertRaisesRegex(ValueError, "only one Wiki Page"):
+                create_wiki_proposal({"pages": pages}, "test", path=database)
+            pages[1]["claim_ids"] = []
+            pages[1]["summary"] = "See [[claim:unknown|unknown]]."
+            with self.assertRaisesRegex(ValueError, "cross-reference"):
+                create_wiki_proposal({"pages": pages}, "test", path=database)
+
     def test_temporary_reading_can_be_saved_into_a_project(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Path(temp_dir) / "knowte.db"
@@ -227,6 +294,26 @@ class KnowledgeStoreTests(unittest.TestCase):
             loaded = list_project_documents(project["id"], database)
             self.assertEqual(loaded[0]["id"], document["id"])
             self.assertEqual(loaded[0]["content"]["sections"][0]["heading"], "Architecture")
+            edited = {"title": "Corrected", "sections": [{"heading": "Scope", "paragraphs": [
+                {"text": "This is an editorial note.", "claim_ids": []},
+            ]}]}
+            updated = save_project_document({
+                "document_id": document["id"], "artifact_id": project["id"],
+                "title": "Corrected", "content": edited,
+            }, database)
+            self.assertEqual(updated["id"], document["id"])
+            self.assertEqual(updated["created_at"], document["created_at"])
+            self.assertEqual(updated["goal"], document["goal"])
+            self.assertEqual(len(list_project_documents(project["id"], database)), 1)
+            other = create_artifact({"title": "Other", "purpose": "Other"}, database)
+            with self.assertRaisesRegex(ValueError, "not found"):
+                save_project_document({"document_id": document["id"], "artifact_id": other["id"],
+                                       "title": "Wrong Project", "content": edited}, database)
+            edited["sections"][0]["paragraphs"][0]["claim_ids"] = ["unknown"]
+            with self.assertRaisesRegex(ValueError, "citations must belong"):
+                save_project_document({"document_id": document["id"], "artifact_id": project["id"],
+                                       "title": "Invalid", "content": edited}, database)
+            self.assertEqual(list_project_documents(project["id"], database)[0]["title"], "Corrected")
 
     def test_evidence_proposal_persists_and_requires_verified_quote(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -261,6 +348,32 @@ class KnowledgeStoreTests(unittest.TestCase):
                     "source_id": source["id"], "segment_id": segment["id"],
                     "quote": "Invented quotation.",
                 }, "evidence-proposal-v1", path=database)
+
+    def test_external_evidence_can_be_reviewed_without_capture(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "knowte.db"
+            source, _, _ = save_source({"title": "External", "url": "https://example.org"}, path=database)
+            proposal = create_evidence_proposal({
+                "source_id": source["id"], "quote": "Exact external passage.",
+                "verification": "external_unverified", "locator": "Section 2",
+                "source_url": source["url"],
+            }, "v1", path=database)
+            accepted = accept_evidence_proposal(proposal["id"], {}, database)
+            self.assertEqual(accepted["quote"], "Exact external passage.")
+            workspace = get_source_workspace(source["id"], database)
+            self.assertIsNone(workspace["capture"])
+            self.assertEqual(workspace["evidence"][0]["anchor"]["verification"], "user_reviewed")
+            self.assertFalse(workspace["evidence"][0]["anchor"]["local_match"])
+            image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII="
+            snapshot = create_evidence_proposal({
+                "source_id": source["id"], "evidence_type": "snapshot",
+                "verification": "external_unverified", "image_data": image,
+                "image_url": "https://example.org/figure.png", "locator": "Figure 1",
+            }, "v1", path=database)
+            accepted = accept_evidence_proposal(snapshot["id"], {}, database)
+            self.assertEqual(accepted["evidence_type"], "snapshot")
+            workspace = get_source_workspace(source["id"], database)
+            self.assertTrue(any(item["has_snapshot"] for item in workspace["evidence"]))
 
     def test_legacy_claim_relations_are_removed_instead_of_reinterpreted(self):
         with tempfile.TemporaryDirectory() as temp_dir:

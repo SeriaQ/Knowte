@@ -1,0 +1,189 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "temp_id": {
+            "type": "string",
+            "description": "Unique local draft reference such as new:1, usable as a relation endpoint in this response."
+          },
+          "statement": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "reported",
+              "inference"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "stance": {
+                  "type": "string",
+                  "enum": [
+                    "supports",
+                    "contradicts",
+                    "limits"
+                  ]
+                },
+                "rationale": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "evidence_id",
+                "stance"
+              ]
+            },
+            "maxItems": 30
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "statement",
+          "basis",
+          "evidence"
+        ]
+      },
+      "maxItems": 20
+    },
+    "existing_claim_updates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "stance": {
+                  "type": "string",
+                  "enum": [
+                    "supports",
+                    "contradicts",
+                    "limits"
+                  ]
+                },
+                "rationale": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "evidence_id",
+                "stance"
+              ]
+            },
+            "maxItems": 30
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "claim_id",
+          "evidence"
+        ]
+      },
+      "maxItems": 20
+    },
+    "claim_relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "subject_claim_id": {
+            "type": "string"
+          },
+          "object_claim_id": {
+            "type": "string"
+          },
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "supports",
+              "contradicts",
+              "related"
+            ]
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject_claim_id",
+          "object_claim_id",
+          "relation_type",
+          "rationale"
+        ]
+      },
+      "maxItems": 20
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_ids",
+          "reason"
+        ]
+      },
+      "maxItems": 100
+    }
+  },
+  "required": []
+}

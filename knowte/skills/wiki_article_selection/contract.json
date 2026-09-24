@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "properties": {
+    "claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100
+    },
+    "outline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "heading": {
+            "type": "string"
+          },
+          "claim_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "heading",
+          "claim_ids"
+        ]
+      },
+      "maxItems": 100
+    },
+    "rationale": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "claim_ids"
+  ]
+}
