@@ -1,11 +1,14 @@
 import tempfile
 import unittest
+import io
+import json
 from pathlib import Path
 
 from knowte.knowledge import (save_source, create_evidence_proposal,
     accept_evidence_proposal, create_claim, list_claims, list_evidence,
     update_evidence, list_claim_proposals, accept_claim_proposal,
-    discard_claim_proposal, set_entity_tags, revise_claim, get_source_workspace, get_wiki)
+    discard_claim_proposal, set_entity_tags, revise_claim, get_source_workspace, get_wiki,
+    ignore_evidence_change_review, delete_evidence)
 from knowte.exports import build_knowledge_export
 
 
@@ -21,6 +24,72 @@ class EvidenceEditTests(unittest.TestCase):
 
     def edit(self, revision=1, quote="Corrected excerpt"):
         return update_evidence(self.evidence["id"], {"revision": revision, "quote": quote, "locator": "Section 2"}, self.path)
+
+    def test_non_logical_edit_records_history_without_rechecking_claim(self):
+        result = update_evidence(self.evidence["id"], {"revision": 1, "quote": "Original excerpt.", "ignore_logical_impact": True}, self.path)
+        self.assertTrue(result["logical_impact_ignored"])
+        self.assertEqual(result["affected_claims"], 0)
+        self.assertFalse(list_claim_proposals(self.path))
+        history = list_evidence(self.path)[0]["history"][0]
+        self.assertTrue(history["logical_impact_ignored"])
+        self.assertEqual(history["quote"], "Original excerpt")
+        self.assertEqual(list_claims(self.path)[0]["current_revision_id"], self.claim["current_revision_id"])
+        with self.assertRaisesRegex(ValueError, "true or false"):
+            update_evidence(self.evidence["id"], {"revision": 2, "ignore_logical_impact": "false"}, self.path)
+
+    def test_cosmetic_edit_keeps_earlier_logical_change_pending(self):
+        self.edit()
+        previous = list_claim_proposals(self.path)[0]
+        result = update_evidence(self.evidence["id"], {"revision": 2, "quote": "Corrected excerpt.", "ignore_logical_impact": True}, self.path)
+        current = list_claim_proposals(self.path)[0]
+        self.assertEqual(result["affected_claims"], 1)
+        self.assertEqual(current["id"], previous["id"])
+        self.assertEqual(current["payload"]["changes"][0]["before_quote"], "Original excerpt")
+        self.assertEqual(current["payload"]["changes"][0]["quote"], "Corrected excerpt.")
+        with self.assertRaisesRegex(ValueError, "changed again"):
+            ignore_evidence_change_review(previous["id"], previous["payload"]["change_token"], self.path)
+
+    def test_ignore_review_preserves_claim_revision_and_records_decision(self):
+        self.edit()
+        review = list_claim_proposals(self.path)[0]
+        claim = ignore_evidence_change_review(review["id"], review["payload"]["change_token"], self.path)
+        self.assertFalse(claim["needs_review"])
+        self.assertEqual(claim["current_revision_id"], self.claim["current_revision_id"])
+        self.assertEqual(claim["statement"], self.claim["statement"])
+        self.assertFalse(list_claim_proposals(self.path))
+        waiver = list_evidence(self.path)[0]["history"][0]["claim_impact_waivers"][0]
+        self.assertEqual(waiver["claim_id"], self.claim["id"])
+        self.assertEqual(waiver["to_revision"], 2)
+        self.edit(2, "Another logical change")
+        self.assertTrue(list_claims(self.path)[0]["needs_review"])
+
+    def test_ignore_http_dispatch_without_opening_a_port(self):
+        from knowte.server import KnowteHandler
+        self.edit()
+        review = list_claim_proposals(self.path)[0]
+        body = json.dumps({"change_token": review["payload"]["change_token"]}).encode()
+        handler = KnowteHandler.__new__(KnowteHandler)
+        handler.path = f"/api/claim-proposals/{review['id']}/ignore"
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        handler.knowledge_db_path = self.path
+        responses = []
+        handler._send_json = lambda payload, status=200: responses.append((status, payload))
+        handler.do_POST()
+        self.assertEqual(responses[0][0], 201)
+        self.assertFalse(responses[0][1]["needs_review"])
+        self.assertFalse(list_claim_proposals(self.path))
+
+    def test_ignore_rejects_deleted_evidence_or_separately_revised_claim(self):
+        self.edit()
+        review = list_claim_proposals(self.path)[0]
+        revise_claim(self.claim["id"], {"statement": "New Claim meaning"}, self.path)
+        with self.assertRaisesRegex(ValueError, "Claim changed"):
+            ignore_evidence_change_review(review["id"], review["payload"]["change_token"], self.path)
+        delete_evidence(self.evidence["id"], self.path)
+        review = list_claim_proposals(self.path)[0]
+        with self.assertRaisesRegex(ValueError, "Deleted Evidence"):
+            ignore_evidence_change_review(review["id"], review["payload"]["change_token"], self.path)
 
     def test_history_deduplication_and_stale_review(self):
         self.assertEqual(self.edit()["affected_claims"], 1)

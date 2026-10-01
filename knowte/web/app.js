@@ -85,7 +85,6 @@ const defaultSearchModeButtons = document.querySelectorAll(
   "[data-default-search-mode]",
 );
 const searchModeHint = document.querySelector("#search-mode-hint");
-const searchAIReviewInput = document.querySelector("#search-ai-review");
 let searchAIReview = false;
 let lastSearchQueries = [];
 const intelligentProgressEl = document.querySelector("#intelligent-progress");
@@ -207,9 +206,9 @@ const setTabActivity = (target, state = "idle") => {
   link.classList.toggle("is-processing", state === "processing");
   link.classList.toggle("has-result", state === "result" && !link.classList.contains("is-active"));
   link.title = state === "processing"
-    ? "Proposal in progress"
+    ? (target === "plans-panel" ? "Plan Run in progress" : "Proposal in progress")
     : state === "result" && !link.classList.contains("is-active")
-      ? "New proposals ready for review"
+      ? (target === "plans-panel" ? "Plan Run finished; check results" : "New proposals ready for review")
       : "";
 };
 const themeToggleBtn = document.querySelector("#theme-toggle");
@@ -217,7 +216,6 @@ const configTab = document.querySelector('[data-target="config-panel"]');
 const plansTab = document.querySelector('[data-target="plans-panel"]');
 const plansListEl = document.querySelector("#plans-list");
 const plansStatusEl = document.querySelector("#plans-status");
-const goToSearchBtn = document.querySelector("#go-to-search");
 const collectArtifactSelect = document.querySelector("#collect-artifact");
 const libraryListEl = document.querySelector("#library-list");
 const libraryStatusEl = document.querySelector("#library-status");
@@ -550,6 +548,7 @@ const AI_ROLE_DEFINITIONS = [
   ["embedding", "Embedding", "embeddings"],
   ["intelligent_search", "Search · AI Review / Discuss", "chat"],
   ["source_discovery", "Related Source discovery", "chat"],
+  ["subscription_verify", "Subscribe · AI Verify", "chat"],
   ["copilot", "Review Copilot", "chat"],
   ["evidence", "Evidence proposal", "chat"],
   ["claims", "Claim proposal", "chat"],
@@ -621,6 +620,24 @@ document.querySelectorAll("[data-skill-action]").forEach((button) => {
 aiCopilotPromptStageInput?.addEventListener("change", renderCopilotPromptPreview);
 let defaultSearchMode = "keyword";
 let savedPlans = [];
+let savedActions = [];
+const selectedPlanActionIds = new Set();
+let selectedDestinationPlanId = "";
+let planDetailTab = "overview";
+
+const openPlanDetail = (id) => {
+  selectedDestinationPlanId = id; plansView = "plans"; planDetailTab = "overview";
+  planRunHistoryId = null; planRunDetailId = null;
+  renderPlans(); renderReviewWorkspace();
+};
+let plansView = "plans";
+let planRunPollTimer = null;
+let planRunHistoryId = null;
+let planRunDetailId = null;
+let subscriptions = [];
+let editingSearchAction = null;
+let actionSearchOverrides = null;
+let actionAreaOverride = null;
 let intelligentRunToken = 0;
 let lastBackends = [];
 let planSourceOverride = null;
@@ -655,6 +672,12 @@ let draggedWikiPatchPageKey = "";
 let draggedWikiPatchClaimId = "";
 let activeWikiPageId = "";
 let wikiMode = "wiki";
+let wikiKnowledgeView = "reviewed";
+const wikiKnowledgeViewSelect = document.querySelector("#wiki-knowledge-view");
+wikiKnowledgeViewSelect.addEventListener("change", () => {
+  wikiKnowledgeView = wikiKnowledgeViewSelect.value;
+  fetchWiki();
+});
 let currentWikiReading = null;
 let currentWikiReadingGoal = "";
 let activeArticleProjectId = "";
@@ -1022,6 +1045,7 @@ const renderActionModelSelectors = (useAssignedModels = false) => {
   const definitions = [
     [searchModelSelect, "intelligent_search", "Select a Search model"],
     [sourceDiscoveryModelSelect, "source_discovery", "Select a discovery model"],
+    [document.querySelector("#subscription-model-select"), "subscription_verify", "Select a verification model"],
     [evidenceModelSelect, "evidence", "Select an Evidence model"],
     [claimsModelSelect, "claims", "Select a Claims model"],
     [claimAuditModelSelect, "claims", "Select a Claims model"],
@@ -1033,14 +1057,17 @@ const renderActionModelSelectors = (useAssignedModels = false) => {
   );
   definitions.forEach(([select, role, placeholder]) => {
     if (!select) return;
-    const current = (useAssignedModels ? "" : select.value) || aiRoleAssignments[role] || "";
-    select.replaceChildren(new Option(placeholder, ""));
+    const optional = ["intelligent_search", "subscription_verify"].includes(role);
+    const current = !useAssignedModels && select.options.length ? select.value : aiRoleAssignments[role] || "";
+    select.replaceChildren(new Option(optional ? "No model" : placeholder, ""));
     chatProfiles.forEach((profile) => select.appendChild(new Option(
       profile.name || profile.model || "Unnamed model", profile.id,
     )));
     select.value = [...select.options].some((option) => option.value === current)
       ? current : "";
   });
+  searchAIReview = Boolean(searchModelSelect.value);
+  if (["keyword", "smart"].includes(searchMode)) setSearchMode("search");
 };
 
 const renderAIProfiles = () => {
@@ -1251,8 +1278,30 @@ const serializedAIProfiles = () => aiModelProfiles.map((profile) => ({
   remove_api_key: Boolean(profile.remove_api_key),
 }));
 
+const connectorSecretKeys = ["github_token"];
+
+const connectorSettingsPayload = () => {
+  const values = {rsshub_base_url: document.querySelector("#rsshub-base-url").value.trim()};
+  for (const key of connectorSecretKeys) {
+    const id = key.replaceAll("_", "-");
+    values[key] = document.getElementById(id).value.trim();
+    values[`clear_${key}`] = document.getElementById(`clear-${id}`).checked;
+  }
+  return values;
+};
+const loadConnectorSettings = (data) => {
+  document.querySelector("#rsshub-edit-env").textContent = data.rsshub_managed_env_configured ? "Edit environment file" : "Create environment file";
+
+  document.querySelector("#rsshub-base-url").value = data.rsshub_base_url || "";
+  for (const key of connectorSecretKeys) {
+    const id = key.replaceAll("_", "-"); const field = document.getElementById(id);
+    field.value = ""; field.placeholder = data[`${key}_configured`] ? "Saved · leave blank to keep" : "Not configured";
+    document.getElementById(`clear-${id}`).checked = false;
+  }
+};
 const serializeProfileState = (overrides = {}) => JSON.stringify({
   email: overrides.email ?? emailInput.value.trim(),
+  ...connectorSettingsPayload(),
   max_papers: overrides.max_papers ?? parseMaxPapers(maxPapersInput.value || "100"),
   intelligent_max_results: overrides.intelligent_max_results
     ?? Number(intelligentMaxResultsInput.value || 20),
@@ -1763,14 +1812,12 @@ const updateImportPrompt = () => { importPromptPreviewEl.textContent = importPro
 const setSearchMode = (mode) => {
   // Keep legacy execution modes so old Config and Plans retain their behavior.
   const nextMode = mode === "search" ? (searchAIReview ? "smart" : "keyword")
-    : ["smart", "import"].includes(mode) ? mode : "keyword";
+    : ["smart", "import", "subscribe"].includes(mode) ? mode : "keyword";
   const modeChanged = nextMode !== searchMode;
   searchMode = nextMode;
-  if (searchMode !== "import") searchAIReview = searchMode === "smart";
-  searchAIReviewInput.checked = searchAIReview;
-  document.querySelector("#search-ai-review-control").hidden = searchMode === "import";
+  if (!["import", "subscribe"].includes(searchMode)) searchAIReview = searchMode === "smart";
   searchModeButtons.forEach((button) => {
-    const active = button.dataset.searchMode === (searchMode === "import" ? "import" : "search");
+    const active = button.dataset.searchMode === (["import", "subscribe"].includes(searchMode) ? searchMode : "search");
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
@@ -1779,6 +1826,7 @@ const setSearchMode = (mode) => {
   searchImportEl.hidden = searchMode !== "import";
   filtersEl.hidden = searchMode === "import";
   discussSearchBtn.hidden = searchMode === "import";
+  discussSearchBtn.disabled = !searchModelSelect.value;
   if (searchModelControl) searchModelControl.hidden = searchMode === "import";
   form.classList.toggle("has-model-control", searchMode !== "import");
   searchSubmitBtn.hidden = searchMode === "import";
@@ -1801,20 +1849,33 @@ const setSearchMode = (mode) => {
   if (modeChanged) {
     clearDisplayedSearchResults();
     statusEl.textContent = searchMode === "smart"
-      ? "AI Review on. Search directly or discuss academic queries first."
+      ? "Model selected. Search directly or discuss academic queries first."
       : searchMode === "import"
         ? "Import mode ready. Paste human-curated links or structured external results."
-        : "AI Review off. Search uses active candidates, or your original input if there are none.";
+        : "No model. Search uses active candidates, or your original input if there are none.";
+  }
+  const subscribing = searchMode === "subscribe";
+  document.querySelector("#paper-usage-group").hidden = subscribing;
+  document.querySelector("#subscription-usage-group").hidden = !subscribing;
+  document.querySelector("#subscribe-placeholder").hidden = !subscribing;
+  form.hidden = subscribing;
+  if (subscribing) {
+    [searchStrategyEl, filtersEl, intelligentProgressEl, searchModelControl].forEach((element) => { if (element) element.hidden = true; });
+    searchModeHint.textContent = "Follow known channels through reusable Subscribe Actions.";
+    statusEl.textContent = "";
+    fetchSubscriptions();
+    fetchUsage();
   }
 };
 
 const renderDefaultSearchMode = () => {
   defaultSearchModeButtons.forEach((button) => {
-    const isDefault = button.dataset.defaultSearchMode === (defaultSearchMode === "import" ? "import" : "search");
+    const isDefault = button.dataset.defaultSearchMode === (["import", "subscribe"].includes(defaultSearchMode) ? defaultSearchMode : "search");
     const label = isDefault ? "Default search mode" : "Set as default";
     const modeName = ({
       search: "Search",
       import: "Import",
+      subscribe: "Subscribe",
       keyword: "Keyword",
     })[button.dataset.defaultSearchMode] || "Search";
     button.classList.toggle("is-default", isDefault);
@@ -1831,6 +1892,7 @@ const renderDefaultSearchMode = () => {
 };
 
 const getEffectiveAreas = () => {
+  if (actionAreaOverride) return new Set(actionAreaOverride);
   const effective = new Set();
   activePresets.forEach((preset) => {
     (PRESETS[preset] || []).forEach((code) => effective.add(code));
@@ -1850,12 +1912,11 @@ const renderSelectedAreas = () => {
   }
   Array.from(effective).forEach((code) => {
     const area = AREA_CATALOG.find((item) => item.code === code);
-    if (!area) return;
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "selected-chip";
     chip.dataset.code = code;
-    chip.textContent = `${area.label} (${code})`;
+    chip.textContent = area ? `${area.label} (${code})` : code;
     selectedAreasEl.appendChild(chip);
   });
 };
@@ -1869,6 +1930,7 @@ const renderPresetState = () => {
 };
 
 const togglePreset = (preset) => {
+  actionAreaOverride = null;
   if (preset === "clear") {
     activePresets.clear();
     renderPresetState();
@@ -2425,6 +2487,7 @@ chatCollapseBtn.addEventListener("click", () => setChatExpanded(false));
 
 const renderReviewWorkspace = () => {
   const context = currentReviewContext();
+  renderPlanActionSelection(context);
   const selected = activeReviewSources();
   const evidenceSelection = selectedEvidence();
   const libraryEvidenceMode = context === "evidence";
@@ -2432,7 +2495,7 @@ const renderReviewWorkspace = () => {
   const currentView = activeView();
   const currentWikiPage = activeWikiPage();
   const contextNames = {
-    search: "Search",
+    search: "Discover",
     library: "Sources",
     evidence: "Evidence",
     claims: "Claims",
@@ -2457,6 +2520,7 @@ const renderReviewWorkspace = () => {
   }
   const selectionCount = libraryEvidenceMode
     ? evidenceSelection.length
+    : context === "plans" ? selectedPlanActionIds.size
     : context === "artifact"
     ? Number(activeArtifact?.claim_count || 0)
     : context === "claims" ? selectedClaims().length
@@ -2488,7 +2552,7 @@ const renderReviewWorkspace = () => {
     : context === "views"
       ? currentWikiPage ? "Current Page" : "Global Wiki"
     : context === "plans"
-      ? "Saved Plans"
+      ? plansView === "actions" ? "Selected Actions" : "Plan status"
       : context === "config"
         ? "Scope"
         : "Selection";
@@ -2503,7 +2567,7 @@ const renderReviewWorkspace = () => {
         ? `${currentWikiPage.claim_ids?.length || 0} Claims`
         : `${wikiState.claims.filter((claim) => claim.lifecycle === "active").length} Claims`
     : context === "plans"
-      ? `${savedPlans.length} saved`
+      ? plansView === "actions" ? `${selectedPlanActionIds.size} selected` : selectedDestinationPlanId ? "Current Plan" : "Overview"
       : context === "config"
         ? "Operational"
         : `${selected.length} selected`;
@@ -2652,12 +2716,7 @@ const renderReviewWorkspace = () => {
       contextSelectionListEl.appendChild(draft);
     }
   } else if (context === "plans") {
-    savedPlans.slice(0, 6).forEach((plan) => appendContextItem(plan.name));
-    if (!savedPlans.length) {
-      const empty = document.createElement("p");
-      empty.textContent = "No saved Plans.";
-      contextSelectionListEl.appendChild(empty);
-    }
+    // Action selection and destination are rendered in the dedicated section above.
   } else {
     const scope = document.createElement("p");
     scope.textContent = "Configuration controls infrastructure and is not part of the knowledge review context.";
@@ -2862,6 +2921,11 @@ const updateUsage = (usage) => {
     last_day_ai_embedding_tokens: usage.last_day_ai_embedding_tokens ?? 0,
   };
   usage5MinEl.textContent = currentUsage.last_5_min;
+  for (const [kind, label] of [["rss", "rss"], ["subscription_api", "api"]]) {
+    for (const [period, suffix] of [["last_5_min", "5min"], ["last_day", "day"]]) {
+      if (usage[`${period}_${kind}`] !== undefined) document.querySelector(`#usage-${label}-${suffix}`).textContent = usage[`${period}_${kind}`];
+    }
+  }
   usageDayEl.textContent = currentUsage.last_day;
   if (usage5MinWebEl) usage5MinWebEl.textContent = currentUsage.last_5_min_web;
   if (usageDayWebEl) usageDayWebEl.textContent = currentUsage.last_day_web;
@@ -3024,17 +3088,20 @@ const fetchConfig = async () => {
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
     }
+    loadConnectorSettings(data);
     if (searxngProxyInput) searxngProxyInput.value = data.searxng_proxy || "";
     if (webIgnoreYearFilterInput) {
       webIgnoreYearFilterInput.checked = Boolean(data.web_ignore_year_filter);
     }
     configuredMaxPapers = parseMaxPapers(data.max_papers);
     configuredIntelligentMaxResults = Number(data.intelligent_max_results || 20);
-    defaultSearchMode = ["intelligent", "import"].includes(data.default_search_mode)
+    defaultSearchMode = ["intelligent", "import", "subscribe"].includes(data.default_search_mode)
       ? data.default_search_mode : "keyword";
     searchAIReview = data.search_ai_review ?? (defaultSearchMode === "intelligent");
+    if (!searchAIReview) searchModelSelect.value = "";
+    searchAIReview = Boolean(searchModelSelect.value);
     renderDefaultSearchMode();
-    setSearchMode(defaultSearchMode === "import" ? "import" : "search");
+    setSearchMode(["import", "subscribe"].includes(defaultSearchMode) ? defaultSearchMode : "search");
     activeLimit = configuredMaxPapers;
     maxPapersInput.value = String(configuredMaxPapers);
     intelligentMaxResultsInput.value = String(configuredIntelligentMaxResults);
@@ -3093,6 +3160,7 @@ const saveConfig = async () => {
   try {
     const configPayload = {
       email,
+      ...connectorSettingsPayload(),
       ...(semanticscholar_api_key || clear_semanticscholar_api_key
         ? { semanticscholar_api_key }
         : {}),
@@ -3227,6 +3295,7 @@ const saveConfig = async () => {
     if (searxngInput) {
       searxngInput.value = data.searxng_url || DEFAULT_SEARXNG_URL;
     }
+    loadConnectorSettings(data);
     if (searxngProxyInput) searxngProxyInput.value = data.searxng_proxy || "";
     if (webIgnoreYearFilterInput) {
       webIgnoreYearFilterInput.checked = Boolean(data.web_ignore_year_filter);
@@ -3510,7 +3579,7 @@ const beginSearch = async (query, areas, yearFrom, yearTo, backends = activeBack
   lastSearchQueries = [...new Set(searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT)
     .map((action) => action.query.trim()).filter(Boolean))];
   if (!lastSearchQueries.length) lastSearchQueries = [query];
-  activeLimit = configuredMaxPapers;
+  activeLimit = actionSearchOverrides?.max_papers ?? configuredMaxPapers;
   activeWebPages = 1;
   lastSearchHasWeb = wantsWeb;
   lastSearchHasAcademic = backends.some((backend) => academicBackends.has(backend));
@@ -3645,12 +3714,13 @@ const runIntelligentSearch = async (query, areas, yearFrom, yearTo, backends) =>
     const params = new URLSearchParams({
       q: query,
       areas,
-      limit: String(configuredIntelligentMaxResults),
+      limit: String(actionSearchOverrides?.intelligent_max_results ?? configuredIntelligentMaxResults),
       web_pages: "1",
       backends: backends.join(","),
       run_id: runId,
       model_profile_id: searchModelSelect?.value || "",
     });
+    if (actionSearchOverrides) params.set("action_settings", JSON.stringify(actionSearchOverrides));
     if (searchStrategyActions.length) {
       params.set("strategy", JSON.stringify(searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT).map(
         ({ query: actionQuery, target }) => ({ query: actionQuery.trim(), target }),
@@ -3754,6 +3824,7 @@ searchStrategyAddBtn.addEventListener("click", () => {
 });
 
 discussSearchBtn.addEventListener("click", async () => {
+  if (!searchModelSelect.value) return;
   const intent = input.value.trim();
   if (!intent) {
     statusEl.textContent = "Enter a search intent before discussing it.";
@@ -3800,7 +3871,7 @@ discussSearchBtn.addEventListener("click", async () => {
     searchStrategyStatusEl.textContent = error.message;
     appendReviewMessage(error.message, "error");
   } finally {
-    discussSearchBtn.disabled = false;
+    discussSearchBtn.disabled = !searchModelSelect.value;
     discussSearchBtn.textContent = "Discuss";
   }
 });
@@ -3902,7 +3973,7 @@ searchModeButtons.forEach((button) => {
 defaultSearchModeButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const requestedMode = button.dataset.defaultSearchMode === "search"
-      ? (searchAIReview ? "intelligent" : "keyword") : "import";
+      ? (searchAIReview ? "intelligent" : "keyword") : button.dataset.defaultSearchMode;
     if (!requestedMode || requestedMode === defaultSearchMode) return;
     defaultSearchModeButtons.forEach((item) => {
       item.disabled = true;
@@ -3927,11 +3998,10 @@ defaultSearchModeButtons.forEach((button) => {
   });
 });
 
-searchAIReviewInput.addEventListener("change", async () => {
-  const previous = searchAIReview;
-  searchAIReview = searchAIReviewInput.checked;
+searchModelSelect.addEventListener("change", async () => {
+  searchAIReview = Boolean(searchModelSelect.value);
   setSearchMode("search");
-  searchAIReviewInput.disabled = true;
+  searchModelSelect.disabled = true;
   try {
     const response = await fetch("/api/config/default-search-mode", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -3941,8 +4011,8 @@ searchAIReviewInput.addEventListener("change", async () => {
     const data = await response.json(); defaultSearchMode = data.default_search_mode;
     renderDefaultSearchMode();
   } catch (error) {
-    searchAIReview = previous; setSearchMode("search"); statusEl.textContent = error.message;
-  } finally { searchAIReviewInput.disabled = false; }
+    statusEl.textContent = error.message + " Current model selection remains active for this session.";
+  } finally { searchModelSelect.disabled = false; }
 });
 
 selectedAreasEl.addEventListener("click", (event) => {
@@ -3950,6 +4020,7 @@ selectedAreasEl.addEventListener("click", (event) => {
   if (!target) return;
   const code = target.dataset.code;
   if (!code) return;
+  if (actionAreaOverride) actionAreaOverride = actionAreaOverride.filter((item) => item !== code);
   Array.from(activePresets).forEach((preset) => {
     if ((PRESETS[preset] || []).includes(code)) {
       activePresets.delete(preset);
@@ -5617,6 +5688,48 @@ const renderClaimProposals = () => {
     const card = document.createElement("article");
     card.className = `claim-proposal-card claim-operation-${operation.replaceAll("_", "-")}`;
     card.id = `claim-proposal-${proposal.id}`;
+    if (proposal.derivation?.status && proposal.derivation.status !== "current") {
+      const recompute = proposal.derivation.recomputation;
+      const note = document.createElement("small"); note.className = "knowledge-status";
+      note.textContent = recompute ? (recompute.replacement_ids.length ? "Recomputed drafts are ready; this older draft is retained until you discard it." : recompute.job_id ? `Recomputation ${recompute.status}; check the Plan Run for results. Replacement drafts may already be reviewed.` : "No usable upstream inputs remain; this draft is excluded from projected knowledge.") : proposal.scope?.plan_id ? "Pending impact · scheduled for the next enabled Plan Run." : "Upstream impact needs review.";
+      card.append(note);
+      (recompute?.replacement_ids || []).forEach(id => {
+        const open = document.createElement("button"); open.type = "button"; open.className = "semantic-action"; open.textContent = "Open recomputed draft";
+        open.addEventListener("click", () => openClaimFromWiki(`proposal:${id}`)); card.append(open);
+      });
+      if (proposal.scope?.plan_id) {
+        const now = document.createElement("button"); now.type = "button"; now.className = "semantic-action is-edit"; now.textContent = "Recompute";
+        now.addEventListener("click", async () => {
+          if (!await confirmAction("Run this Plan’s queued knowledge processing now using its configured models? Search and Source capture will not run. Other pending knowledge batches may also continue; model calls consume tokens.", {title: "Recompute knowledge", confirmLabel: "Recompute"})) return;
+          now.disabled = true;
+          try {
+            const response = await fetch("/api/plans", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({operation: "recompute_plan", id: proposal.scope.plan_id})});
+            const body = await response.json(); if (!response.ok) throw new Error(body.message || "Could not start recomputation");
+            await showPlanRuns(proposal.scope.plan_id, body.run_id);
+          } catch (error) { note.textContent = error.message; }
+          finally { now.disabled = false; }
+        }); card.append(now);
+      }
+      if (!recompute && ["create_claim", "create_relation"].includes(operation)) {
+        for (const scope of ["draft", "descendants"]) {
+          const ignore = document.createElement("button"); ignore.type = "button"; ignore.className = "semantic-action";
+          ignore.textContent = scope === "draft" ? "Ignore for this draft" : "Ignore for draft chain";
+          ignore.title = "Only new Claim and relation drafts. Does not accept items, ignore merge/revision conflicts, or refresh Wiki snapshots.";
+          ignore.addEventListener("click", async () => {
+            const message = scope === "draft"
+              ? "Keep this draft because the upstream edit does not change its meaning? Only this draft is rebased."
+              : "Keep this draft and all reachable pending Claim/relation drafts because the upstream edit does not change their meaning? The whole operation is cancelled if any affected draft cannot be safely rebased.";
+            if (!await confirmAction(`${message} Nothing is accepted. Deleted or rejected inputs cannot be ignored. Existing Wiki organization snapshots are not changed and may still need refreshing.`, {title: ignore.textContent, confirmLabel: "Ignore impact"})) return;
+            ignore.disabled = true;
+            try {
+              const response = await fetch("/api/claim-proposals/ignore-impact", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: proposal.id, confirmed: true, scope})});
+              const body = await response.json(); if (!response.ok) throw new Error(body.message || "Could not ignore impact");
+              await fetchClaimProposals();
+            } catch (error) { note.textContent = error.message; ignore.disabled = false; }
+          }); card.append(ignore);
+        }
+      }
+    }
     addReviewSelection(card, proposal, batch.state, batch.update);
     const operationLabel = document.createElement("div");
     operationLabel.className = "claim-proposal-operation";
@@ -5665,13 +5778,18 @@ const renderClaimProposals = () => {
       renderEvidenceText(targetStatement, payload.target_statement || payload.target_claim_id || "Existing Claim");
       target.append(targetLabel, targetStatement);
     } else if (["create_relation", "revise_relation"].includes(operation)) {
+      const endpointLabel = (id, supplied) => {
+        if (supplied) return supplied;
+        const draft = claimProposals.find(item => `proposal:${item.id}` === id)?.payload;
+        return draft?.statement || draft?.merged_statement || claims.find(item => item.id === id)?.statement || "Unavailable Claim";
+      };
       const subject = document.createElement("strong");
-      renderEvidenceText(subject, payload.subject_statement || payload.subject_claim_id || "Claim");
+      renderEvidenceText(subject, endpointLabel(payload.subject_claim_id, payload.subject_statement));
       const relation = document.createElement("span");
       relation.className = "claim-relation-preview";
       relation.textContent = `→ ${payload.relation_type || "related"} →`;
       const object = document.createElement("strong");
-      renderEvidenceText(object, payload.object_statement || payload.object_claim_id || "Claim");
+      renderEvidenceText(object, endpointLabel(payload.object_claim_id, payload.object_statement));
       target.append(subject, relation, object);
       if (payload.existing_relation) {
         const before = document.createElement("small");
@@ -5684,7 +5802,7 @@ const renderClaimProposals = () => {
         const notice = document.createElement("p"); notice.className = "claim-proposal-context";
         notice.textContent = payload.blocked_reason || `Awaiting acceptance of ${waiting.length} endpoint Claim(s). Review those Claims first.`;
         target.append(notice);
-        for (const key of payload.blocked_reason ? [] : waiting) {
+        for (const key of waiting) {
           const open = document.createElement("button"); open.type = "button"; open.className = "semantic-action is-navigate";
           open.textContent = "Review endpoint Claim";
           open.addEventListener("click", () => revealClaimProposal(payload[key].slice(9)));
@@ -5695,29 +5813,43 @@ const renderClaimProposals = () => {
       const targetLabel = document.createElement("small");
       targetLabel.textContent = "Keep and consolidate into";
       const targetStatement = document.createElement("strong");
-      renderEvidenceText(targetStatement, payload.target_statement || payload.target_claim_id);
+      renderEvidenceText(targetStatement, payload.target_statement || claims.find(item => item.id === payload.target_claim_id)?.statement || "Unavailable Claim");
       const sourceLabel = document.createElement("small");
       sourceLabel.textContent = "Merge redundant Claim";
       const sourceStatement = document.createElement("strong");
-      renderEvidenceText(sourceStatement, payload.source_statement || payload.source_claim_id);
+      renderEvidenceText(sourceStatement, payload.source_statement || claims.find(item => item.id === payload.source_claim_id)?.statement || "Unavailable Claim");
       target.append(targetLabel, targetStatement, sourceLabel, sourceStatement);
+    }
+    if (payload.blocked_reason && !["create_relation", "revise_relation"].includes(operation)) {
+      const notice = document.createElement("p"); notice.className = "claim-proposal-context";
+      notice.textContent = payload.blocked_reason; target.append(notice);
     }
     const evidence = document.createElement("div");
     evidence.className = "proposal-evidence-list";
     (payload.evidence || []).forEach((link) => {
       const sourceItem = libraryEvidence.find((item) => item.id === link.evidence_id);
-      const row = document.createElement(sourceItem ? "button" : "div");
+      const pendingId = String(link.evidence_id || "").startsWith("proposal:") ? link.evidence_id.slice(9) : null;
+      const pending = pendingId ? evidenceProposals.find(item => item.id === pendingId)?.payload : null;
+      const row = document.createElement(sourceItem || pendingId ? "button" : "div");
       row.className = "proposal-evidence-link";
-      if (sourceItem) row.type = "button";
+      if (sourceItem || pendingId) row.type = "button";
       const heading = document.createElement("span");
-      heading.textContent = `${link.stance || "supports"} · ${sourceItem?.source_title || "Evidence unavailable"}`;
+      heading.textContent = `${link.stance || "supports"} · ${sourceItem?.source_title || (pendingId ? "Evidence · Pending review" : "Evidence unavailable")}`;
       const detail = document.createElement("small");
       renderEvidenceText(detail, sourceItem
         ? [sourceItem.locator, sourceItem.evidence_type === "snapshot"
           ? "Snapshot" : sourceItem.quote].filter(Boolean).join(" · ")
-        : String(link.evidence_id || "Unknown Evidence"));
+        : pendingId ? pending?.quote || "Open upstream Evidence review" : String(link.evidence_id || "Unknown Evidence"));
       row.append(heading, detail);
       if (sourceItem) row.addEventListener("click", () => openEvidenceInWorkspace(sourceItem.id));
+      if (pendingId) row.addEventListener("click", async () => {
+        try {
+          await fetchEvidenceProposals();
+          const state = reviewState("evidence"); state.any.clear(); state.all.clear();
+          evidenceProposalQueueOpen = true; showPanel("evidence-panel"); renderEvidenceProposals();
+          document.getElementById(`evidence-proposal-${pendingId}`)?.scrollIntoView({behavior: "smooth", block: "center"});
+        } catch (error) { claimsStatusEl.textContent = error.message; }
+      });
       evidence.appendChild(row);
     });
     const rationale = document.createElement("section");
@@ -5783,6 +5915,7 @@ const renderClaimProposals = () => {
     if (["create_relation", "revise_relation"].includes(operation)) {
       accept.disabled = Boolean(payload.blocked_reason) || ["subject_claim_id", "object_claim_id"].some(key => String(payload[key] || "").startsWith("proposal:"));
     }
+    if (payload.blocked_reason) { accept.disabled = true; keepDisputed.disabled = true; }
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "proposal-discard";
@@ -5799,9 +5932,32 @@ const renderClaimProposals = () => {
       const response = await fetch(`/api/claim-proposals/${proposal.id}`, { method: "DELETE" });
       if (response.ok) await fetchClaimProposals();
     });
-    actions.append(discard, keepDisputed, accept);
+    actions.append(discard, keepDisputed);
+    if (operation === "review_evidence_change" && !(payload.changes || []).some(change => change.deleted)) {
+      const ignore = document.createElement("button"); ignore.type = "button"; ignore.className = "semantic-action is-edit";
+      ignore.textContent = "Ignore"; ignore.title = "These Evidence edits do not change the meaning or grounding of this Claim.";
+      ignore.addEventListener("click", async () => {
+        if (!await confirmAction("Mark these Evidence edits as having no logical impact on this Claim? The Claim stays unchanged; this decision is recorded in Evidence history. Other Claims awaiting review are not dismissed.")) return;
+        ignore.disabled = true;
+        try {
+          const response = await fetch(`/api/claim-proposals/${proposal.id}/ignore`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({change_token: payload.change_token})});
+          const data = await response.json(); if (!response.ok) throw new Error(data.message || "Could not ignore edit impact");
+          await Promise.all([fetchClaims(), fetchClaimProposals(), fetchEvidenceLibrary(), fetchWiki()]);
+          claimsStatusEl.textContent = "Edit impact ignored for this Claim. No model call was made.";
+        } catch (error) { claimsStatusEl.textContent = error.message; ignore.disabled = false; }
+      });
+      actions.append(ignore);
+    }
+    actions.append(accept);
     card.append(operationLabel);
     if (operation === "review_evidence_change") {
+      if (payload.ai_recheck) {
+        const previous = document.createElement("blockquote");
+        renderEvidenceText(previous, payload.ai_recheck.previous_statement);
+        const label = document.createElement("small");
+        label.textContent = "Previously reviewed Claim · AI revision below awaits your review";
+        card.append(label, previous);
+      }
       card.append(statementPreview, statementEditor);
       for (const change of payload.changes || []) {
         const section = document.createElement("section"); section.className = "evidence-change-comparison";
@@ -5919,7 +6075,16 @@ const fetchClaimProposals = async () => {
   const response = await fetch("/api/claim-proposals");
   if (!response.ok) throw new Error("Could not load Claim proposals.");
   const drafts = new Map(claimProposals.filter(item => item.payload?._draftEdited).map(item => [item.id, item.payload]));
-  claimProposals = ((await response.json()).proposals || []).map(item => drafts.has(item.id) && drafts.get(item.id).change_token === item.payload.change_token ? {...item, payload: drafts.get(item.id)} : item);
+  claimProposals = ((await response.json()).proposals || []).map(item => {
+    const draft = drafts.get(item.id);
+    if (!draft || draft.change_token !== item.payload.change_token) return item;
+    const edited = {};
+    for (const key of ["statement", "basis", "merged_statement"]) {
+      if (Object.hasOwn(draft, key)) edited[key] = draft[key];
+    }
+    // Keep local text edits, but never overwrite refreshed dependency IDs/guards.
+    return {...item, payload: {...item.payload, ...edited, _draftEdited: true}};
+  });
   renderClaimProposals();
 };
 
@@ -5984,6 +6149,7 @@ const renderEvidenceProposals = () => {
     const source = librarySources.find((item) => item.id === payload.source_id);
     const card = document.createElement("article");
     card.className = "claim-proposal-card evidence-proposal-card";
+    card.id = `evidence-proposal-${proposal.id}`;
     addReviewSelection(card, proposal, batch.state, batch.update);
     if (payload.evidence_type === "snapshot" && payload.image_data?.startsWith("data:image/png;base64,")) {
       const image = document.createElement("img");
@@ -6097,7 +6263,18 @@ const fetchEvidenceProposals = async () => {
 
 const wikiClaimById = (claimId) => wikiState.claims.find((claim) => claim.id === claimId);
 
-const openClaimFromWiki = (claimId) => {
+const openClaimFromWiki = async (claimId) => {
+  if (claimId.startsWith("proposal:")) {
+    try {
+      await fetchClaimProposals();
+      claimProposalQueueOpen = true;
+      claimReviewCategory = claimProposals.find(item => item.id === claimId.slice(9))?.payload?.operation === "review_evidence_change" ? "changed" : "proposals";
+      reviewState("claim").any.clear(); reviewState("claim").all.clear();
+      showPanel("claims-panel"); renderClaimProposals(); scrollClaimProposalQueueToStart();
+      document.getElementById(`claim-proposal-${claimId.slice(9)}`)?.scrollIntoView({behavior: "smooth", block: "center"});
+    } catch (error) { wikiStatusEl.textContent = error.message; }
+    return;
+  }
   if (claims.find(claim => claim.id === claimId)?.needs_review) {
     claimProposalQueueOpen = true; claimReviewCategory = "changed";
     showPanel("claims-panel"); renderClaimProposals(); scrollClaimProposalQueueToStart(); return;
@@ -6152,6 +6329,12 @@ const renderWikiIncoming = () => {
   wikiEditStructureBtn.title = canEditStructure
     ? "Edit the current or awaiting Wiki structure"
     : "Organize the Wiki before editing its structure";
+  if (wikiState.view === "projected") {
+    [wikiOrganizeBtn, wikiEditStructureBtn, wikiResetStructureBtn].forEach(button => {
+      button.disabled = true;
+      button.title = "Switch to Reviewed only to change the reviewed Wiki structure";
+    });
+  }
 };
 
 const renderWikiPage = () => {
@@ -6166,7 +6349,9 @@ const renderWikiPage = () => {
     : activeWikiPageId === "__unorganized__"
     ? {
         id: "__unorganized__", title: "Unorganized", parent_id: null,
-        summary: "Reviewed Claims already in the global Wiki but not yet assigned to a Page.",
+        summary: wikiState.view === "projected"
+          ? "Reviewed and valid pending Claims not yet assigned to a Page. Pending knowledge has not been accepted."
+          : "Reviewed Claims already in the global Wiki but not yet assigned to a Page.",
         claim_ids: wikiState.unorganized_claim_ids || [],
       }
     : wikiState.pages.find((item) => item.id === activeWikiPageId);
@@ -6185,11 +6370,11 @@ const renderWikiPage = () => {
   }
   const head = document.createElement("header");
   const eyebrow = document.createElement("small");
-  eyebrow.textContent = "Global Wiki";
+  eyebrow.textContent = wikiState.view === "projected" ? "Projected Wiki · organization not yet reviewed" : "Global Wiki";
   const title = document.createElement("h2");
   title.textContent = page.title;
   const summary = document.createElement("p");
-  renderWikiSummary(summary, page.summary || "No overview has been written for this Page.", wikiState.pages, (home, claimId) => {
+  renderWikiSummary(summary, page.summary || (page.projection_status === "stale" ? "Upstream Claims changed. The outdated summary is hidden until this Page is recomputed." : "No overview has been written for this Page."), wikiState.pages, (home, claimId) => {
     activeWikiPageId = home.id;
     renderWiki(); renderReviewWorkspace();
     focusWikiClaim(wikiPageEl, claimId);
@@ -6206,6 +6391,8 @@ const renderWikiPage = () => {
     const meta = document.createElement("small");
     meta.textContent = `${String(index + 1).padStart(2, "0")} · ${claim.basis}${claim.review_state === "disputed" ? " · disputed" : ""}`;
     if (claim.needs_review) meta.textContent += " · Evidence changed — awaiting recheck";
+    if (claim.projection) meta.textContent += " · Pending review";
+    if (claim.pending_evidence?.length) meta.textContent += ` · ${claim.pending_evidence.length} Evidence updates pending`;
     const statement = document.createElement("button");
     statement.type = "button";
     statement.className = "wiki-claim-statement";
@@ -6218,6 +6405,13 @@ const renderWikiPage = () => {
       const source = document.createElement("span");
       source.textContent = `${item.source_title || "Source"} · ${item.locator || "Evidence"}`;
       evidence.appendChild(source);
+    });
+    (claim.pending_evidence || []).forEach(update => {
+      const review = document.createElement("button");
+      review.type = "button"; review.className = "semantic-action";
+      review.textContent = "Review pending Evidence links";
+      review.addEventListener("click", () => openClaimFromWiki(`proposal:${update.proposal_id}`));
+      evidence.appendChild(review);
     });
     card.append(meta, statement, evidence);
     list.appendChild(card);
@@ -6448,7 +6642,7 @@ const renderWikiGraph = () => {
       element.style.display = options.focused && !active ? "none" : "";
     });
     details.replaceChildren();
-    const heading = document.createElement("strong"); heading.textContent = selected ? "Selected Claim" : "Explore connections";
+    const heading = document.createElement("strong"); heading.textContent = selected ? (selected.projection ? "Selected Claim · Pending review" : "Selected Claim") : "Explore connections";
     const text = document.createElement("p");
     if (selected) renderEvidenceText(text, selected.statement);
     else text.textContent = `Select a node to read its Claim and inspect its immediate connections. Click it again to deselect. Drag the canvas to pan. ${zoomHint}`;
@@ -6459,7 +6653,9 @@ const renderWikiGraph = () => {
       graph.edges.filter(edge => edge.from === selected.id || edge.to === selected.id).forEach(edge => {
         const otherId = edge.from === selected.id ? edge.to : edge.from;
         const other = claims.find(claim => claim.id === otherId);
-        const entry = button(`${edge.type} ${edge.type === "related" ? "↔" : edge.from === selected.id ? "→" : "←"} ${other.statement}`, () => select(other.id));
+        const pending = wikiState.graph.edges.some(item => item.projection
+          && item.subject_claim_id === edge.from && item.object_claim_id === edge.to && item.relation_type === edge.type);
+        const entry = button(`${edge.type}${pending ? " · Pending review" : ""} ${edge.type === "related" ? "↔" : edge.from === selected.id ? "→" : "←"} ${other.statement}`, () => select(other.id));
         entry.title = edge.rationale || other.statement; entry.dataset.relation = edge.type; list.appendChild(entry);
       });
       if (!list.children.length) { const note = document.createElement("small"); note.textContent = "No visible relations under the current filters."; list.appendChild(note); }
@@ -6479,6 +6675,8 @@ const renderWikiGraph = () => {
     const dot = document.createElement("i"); dot.setAttribute("aria-hidden", "true");
     const label = document.createElement("span"); label.textContent = claim.statement;
     node.append(dot, label); node.setAttribute("aria-label", claim.statement);
+    node.classList.toggle("is-provisional", Boolean(claim.projection));
+    if (claim.projection) node.setAttribute("aria-label", `Pending review: ${claim.statement}`);
     if (floating) node.title = claim.statement;
     if (floating) node.classList.add("is-unconnected");
     node.addEventListener("pointerenter", () => { renderEvidenceText(tooltip, claim.statement); tooltip.hidden = false; });
@@ -6615,7 +6813,10 @@ const sendWikiPatchDecision = async (proposalId, accepted) => {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.message || `Could not ${accepted ? "apply" : "discard"} the Wiki Patch.`);
   wikiRefreshVersion++;
-  if (accepted) wikiState = body;
+  if (accepted) {
+    wikiState = body;
+    wikiKnowledgeView = "reviewed"; wikiKnowledgeViewSelect.value = "reviewed";
+  }
   wikiProposals = wikiProposals.filter(item => item.id !== proposalId);
   activeWikiProposalPageKeys.delete(proposalId);
   reviewState("wiki").selected.delete(proposalId);
@@ -7048,6 +7249,27 @@ const renderWiki = () => {
     activeWikiProposalId = "";
     wikiProposalReviewEl.hidden = true;
   }
+  const projectionStatus = document.getElementById("wiki-projection-status");
+  projectionStatus.hidden = wikiState.view !== "projected";
+  document.getElementById("wiki-call-estimate").hidden = wikiState.view === "projected";
+  document.getElementById("wiki-call-detail").hidden = wikiState.view === "projected";
+  const projection = wikiState.projection;
+  if (projection) {
+    const organization = projection.organization || {};
+    projectionStatus.textContent = `${projection.pending_proposal_ids.length} pending changes shown · ${projection.excluded_proposal_ids.length} stale or unavailable changes excluded. Reviewed pages are unchanged. ${organization.id ? (organization.message || `Projected organization · ${organization.stale_pages || 0} Pages need refresh.`) : "Pending Claims appear under Unorganized until a Plan organizes them."}`;
+    if (organization.run_id) {
+      const run = document.createElement("button"); run.type = "button"; run.className = "semantic-action"; run.textContent = "View Run";
+      run.addEventListener("click", () => showPlanRuns(organization.plan_id, organization.run_id)); projectionStatus.append(" ", run);
+    }
+    if (organization.id && organization.status !== "reviewed") {
+      const review = document.createElement("button"); review.type = "button"; review.className = "semantic-action is-edit";
+      review.textContent = "Review structure"; review.disabled = !organization.reviewable || reviewState("wiki").busy;
+      review.title = organization.review_blocked_reason || "Create or resume an editable structure draft; this does not accept Claims";
+      review.addEventListener("click", () => reviewProjectedWiki(organization.id)); projectionStatus.append(" ", review);
+      if (organization.review_blocked_reason) projectionStatus.append(` ${organization.review_blocked_reason}`);
+    }
+    if (projection.deferred_proposal_ids.length) projectionStatus.append(` ${projection.deferred_proposal_ids.length} conflicting or unsupported proposals are deferred; review them in Claims. Overlapping merges require your decision first.`);
+  }
   const activeSpecialPageExists = activeWikiPageId === "__unorganized__"
     ? Boolean(wikiState.unorganized_claim_ids?.length)
     : activeWikiPageId === "__stale__"
@@ -7088,7 +7310,7 @@ const renderWiki = () => {
     renderReviewWorkspace();
   });
   wikiHealthEl.appendChild(staleChip);
-  const eligible = wikiState.claims.filter((claim) => claim.lifecycle === "active" && !claim.needs_review);
+  const eligible = wikiState.claims.filter((claim) => claim.lifecycle === "active" && !claim.needs_review && !claim.projection);
   const needsReferences = wikiState.pages.length > 0 && (eligible.length > wikiClaimLimit
     || wikiState.pages.some((page) => page.claim_ids.some((id) => !eligible.some((claim) => claim.id === id))));
   document.getElementById("wiki-call-estimate").textContent = `Estimated model calls: ${eligible.length ? (needsReferences ? 2 : 1) : 0}`;
@@ -7122,7 +7344,7 @@ const fetchWiki = async () => {
   const errors = [];
   await Promise.all(["/api/wiki", "/api/wiki/proposals", "/api/wiki/imports"].map(async url => {
     try {
-      const response = await fetchWikiLocal(url);
+      const response = await fetchWikiLocal(url === "/api/wiki" && wikiKnowledgeView === "projected" ? `${url}?view=projected` : url);
       const body = await response.json();
       if (!response.ok) throw new Error(body.message || `Could not load ${url}`);
       if (version !== wikiRefreshVersion || reviewState("wiki").busy) return;
@@ -7215,6 +7437,7 @@ const resetWikiStructure = async () => {
     if (!response.ok) throw new Error(body.message || "Could not reset Wiki structure.");
     wikiRefreshVersion++;
     wikiState = body;
+    wikiKnowledgeView = "reviewed"; wikiKnowledgeViewSelect.value = "reviewed";
     wikiProposals = [];
     state.selected.clear();
     activeWikiProposalId = "";
@@ -7231,6 +7454,26 @@ const resetWikiStructure = async () => {
     renderWiki();
     if (currentReviewContext() === "views") renderReviewWorkspace();
   }
+};
+
+const reviewProjectedWiki = async (projectionId) => {
+  const state = reviewState("wiki");
+  if (state.busy) return;
+  state.busy = true; wikiRefreshVersion++; renderWiki();
+  wikiStatusEl.textContent = "Preparing the projected structure for review…";
+  try {
+    const response = await fetchWikiLocal("/api/wiki/projection/review", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({projection_id: projectionId})});
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.message || "Could not prepare structure review");
+    state.busy = false;
+    wikiKnowledgeView = "reviewed"; wikiKnowledgeViewSelect.value = "reviewed";
+    await fetchWiki();
+    activeWikiProposalId = body.proposal.id;
+    wikiProposalReviewEl.hidden = false; wikiImportReviewEl.hidden = true;
+    renderWiki();
+    wikiStatusEl.textContent = "Review or edit this structure, then Apply. No Claims were accepted automatically.";
+  } catch (error) { wikiStatusEl.textContent = error.message; }
+  finally { state.busy = false; renderWiki(); }
 };
 
 const editWikiStructure = async () => {
@@ -8004,8 +8247,7 @@ const renderLibrary = () => {
   sourceEvidenceProposerEl.hidden = focused;
   sourceDiscoveryLauncherEl.hidden = focused;
   sourceDiscoveryResultsEl.hidden = !sourceDiscoveryOpen || Boolean(activeSourceWorkspace);
-  proposeEvidenceBtn.disabled = selectedLibrarySourceKeys.size === 0
-    || !evidenceProposalFocusInput.value.trim();
+  proposeEvidenceBtn.disabled = selectedLibrarySourceKeys.size === 0;
   proposeEvidenceBtn.textContent = selectedLibrarySourceKeys.size
     ? `Propose Evidence via LLM · ${selectedLibrarySourceKeys.size}`
     : "Propose Evidence via LLM";
@@ -8217,6 +8459,18 @@ const renderSourceReader = () => {
   if (!activeSourceWorkspace) return;
   const source = activeSourceWorkspace.source;
   sourceReaderTitleEl.textContent = source.title;
+  const discoveries = document.querySelector("#source-discoveries");
+  discoveries.replaceChildren(); discoveries.hidden = !(source.discoveries || []).length;
+  if (!discoveries.hidden) {
+    const summary = document.createElement("summary"); summary.textContent = `Discovered by · ${source.discoveries.length} paths`; discoveries.append(summary);
+    source.discoveries.forEach((item) => {
+      const row = document.createElement("p");
+      row.textContent = `${item.plan_name} · ${new Date(item.started_at).toLocaleString()} · ${item.kind === "subscribe" ? "Subscribe" : "Search"}: ${item.action_name} (v${item.action_version}) · ${item.channel || item.provider} `;
+      const open = document.createElement("button"); open.type = "button"; open.className = "reader-toolbar-btn"; open.textContent = "View Run";
+      open.addEventListener("click", () => { showPanel("plans-panel"); showPlanRuns(item.plan_id, item.run_id); });
+      row.append(open); discoveries.append(row);
+    });
+  }
   sourceReaderMetaEl.textContent = [
     source.source || "Source",
     source.year || "Undated",
@@ -8646,6 +8900,8 @@ const renderEvidenceDetail = () => {
     const heading = document.createElement("summary"); heading.textContent = `Previous versions · ${history.length}`; versions.append(heading);
     for (const version of history) {
       const label = document.createElement("small"); label.textContent = `v${version.revision} · ${version.locator || "No locator"}`;
+      if (version.logical_impact_ignored) label.textContent += ` · Edit to v${version.edit_to_revision} marked as no logical change`;
+      if (version.claim_impact_waivers?.length) label.textContent += ` · Impact ignored for ${version.claim_impact_waivers.length} Claim review(s)`;
       const quote = document.createElement("blockquote"); renderEvidenceText(quote, version.quote); versions.append(label, quote);
     }
     evidenceDetailContentEl.append(versions);
@@ -8702,22 +8958,35 @@ document.getElementById("evidence-detail-edit").addEventListener("click", () => 
   const locator = document.createElement("input"); locator.value = item.locator || ""; locator.maxLength = 300;
   const locatorLabel = document.createElement("label"); locatorLabel.textContent = "Location"; locatorLabel.append(locator);
   const note = document.createElement("small"); note.textContent = "Saving retains the previous version and sends linked Claims to Evidence changed review. Original Source and image are not modified.";
+  const ignoreImpact = document.createElement("input"); ignoreImpact.type = "checkbox";
+  const ignoreLabel = document.createElement("label"); ignoreLabel.className = "evidence-ignore-impact";
+  ignoreLabel.append(ignoreImpact, document.createTextNode("No logical change"));
+  ignoreLabel.title = "Ignore the downstream impact of this edit only. Previous unresolved changes still require review.";
+  ignoreImpact.addEventListener("change", () => {
+    note.textContent = ignoreImpact.checked
+      ? "This edit will be recorded as non-logical; it will not trigger a new Claim recheck. Previous unresolved changes remain pending. Original Source and image are unchanged."
+      : "Saving retains the previous version and sends linked Claims to Evidence changed review. Original Source and image are not modified.";
+  });
   const save = document.createElement("button"); save.type = "button"; save.textContent = "Save changes"; save.className = "semantic-action is-accept";
   const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel"; cancel.className = "semantic-action";
   cancel.addEventListener("click", renderEvidenceDetail);
   save.addEventListener("click", async () => {
     save.disabled = true;
     try {
-      const response = await fetch(`/api/evidence/${item.id}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({quote: quote.value, locator: locator.value, revision: item.revision || 1})});
+      const response = await fetch(`/api/evidence/${item.id}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({quote: quote.value, locator: locator.value, revision: item.revision || 1, ignore_logical_impact: ignoreImpact.checked})});
       const data = await response.json(); if (!response.ok) throw new Error(data.message || "Could not edit Evidence");
       await Promise.all([fetchEvidenceLibrary(), fetchClaims(), fetchClaimProposals(), fetchWiki()]);
       await refreshEvidenceDetailData();
-      evidenceStatusEl.textContent = `Evidence saved. ${data.affected_claims} linked Claims awaiting recheck.`;
+      evidenceStatusEl.textContent = data.logical_impact_ignored
+        ? `Evidence saved as a non-logical edit.${data.affected_claims ? ` ${data.affected_claims} previous Claim rechecks remain pending.` : ""}`
+        : `Evidence saved. ${data.affected_claims} linked Claims awaiting recheck.`;
       if (data.affected_claims) { claimReviewCategory = "changed"; setTabActivity("claims-panel", "result"); }
     } catch (error) { note.textContent = error.message; save.disabled = false; }
   });
   const editor = document.createElement("div"); editor.className = "evidence-content-editor";
-  editor.append(quoteLabel, locatorLabel, note, cancel, save); evidenceDetailContentEl.replaceChildren(editor);
+  const actions = document.createElement("div"); actions.className = "evidence-edit-actions";
+  actions.append(cancel, ignoreLabel, save);
+  editor.append(quoteLabel, locatorLabel, note, actions); evidenceDetailContentEl.replaceChildren(editor);
 });
 let knowledgeDeletionBusy = false;
 const deleteSelectedKnowledge = async (entityType, ids) => {
@@ -9272,7 +9541,7 @@ proposeEvidenceBtn.addEventListener("click", async () => {
   const sourceIds = librarySources
     .filter((source) => selectedLibrarySourceKeys.has(resultKey(source)))
     .map((source) => source.id);
-  if (!focus || !sourceIds.length) return;
+  if (!sourceIds.length) return;
   if (sourceIds.length > evidenceSourceLimit) {
     libraryStatusEl.textContent = `Select at most ${evidenceSourceLimit} Sources for one Evidence proposal run.`;
     return;
@@ -10201,7 +10470,7 @@ const showPanel = (target) => {
 
 const currentPlanPayload = () => {
   const query = input.value.trim();
-  if (!query) throw new Error("Enter a query before saving a plan.");
+  if (!query) throw new Error("Enter a query before saving an Action.");
   const { yearFrom, yearTo } = normalizeSearchYears();
   return {
     query,
@@ -10211,6 +10480,12 @@ const currentPlanPayload = () => {
     year_to: yearTo || null,
     sources: activeBackends(),
     search_actions: searchStrategyActions.slice(0, SEARCH_STRATEGY_TOP_LIMIT),
+    max_papers: actionSearchOverrides?.max_papers ?? configuredMaxPapers,
+    intelligent_max_results: actionSearchOverrides?.intelligent_max_results ?? configuredIntelligentMaxResults,
+    model_profile_id: searchModelSelect?.value || "",
+    ai_verify_batch_size: actionSearchOverrides?.ai_verify_batch_size ?? Number(aiVerifyBatchSizeInput.value || 5),
+    ai_verify_concurrency: actionSearchOverrides?.ai_verify_concurrency ?? Number(aiVerifyConcurrencyInput.value || 1),
+    ai_search_timeout_seconds: actionSearchOverrides?.ai_search_timeout_seconds ?? Number(aiSearchTimeoutInput.value || 45),
   };
 };
 
@@ -10234,18 +10509,144 @@ const planSummary = (plan) => {
   return `${year} · ${areas} · ${sources || "Default academic sources"}`;
 };
 
+const planScheduleText = (plan) => {
+  const s = plan.schedule || {type: "manual"};
+  return s.type === "manual" ? "Manual" : `${s.type === "interval" ? `Every ${s.hours}h` : `${s.type === "weekly" ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][s.weekday] : "Daily"} · ${s.time}`} · ${s.timezone}${plan.enabled ? "" : " · Paused"}`;
+};
+const planButton = (action, text, plan) => {
+  const button = document.createElement("button"); button.type = "button";
+  button.dataset.planAction = action; button.textContent = text;
+  button.className = `semantic-action ${action === "delete" ? "is-destructive" : action === "run-plan" ? "is-accept" : "is-edit"}`;
+  button.disabled = ["queued", "running"].includes(plan.last_run?.status) && ["run-plan", "edit", "delete"].includes(action);
+  if (["run-plan", "toggle-schedule"].includes(action) && !plan.actions.length) { button.disabled = true; button.title = "Add an Action first"; }
+  return button;
+};
+const renderPlanListRow = (plan) => {
+  const row = document.createElement("article"); row.className = "plan-list-row"; row.dataset.planId = plan.id;
+  const info = document.createElement("div");
+  const name = planButton("select-plan", plan.name, plan); name.className = "plan-name-link";
+  const meta = document.createElement("small"); meta.textContent = `${planScheduleText(plan)} · ${plan.actions.length} Actions`;
+  info.append(name, meta);
+  const timing = document.createElement("div"); timing.className = "plan-list-timing";
+  const last = document.createElement("span"); last.textContent = `Last run · ${plan.last_run?.status || "Not run"}`;
+  last.dataset.state = plan.last_run?.status || "";
+  if (["queued", "running"].includes(plan.last_run?.status)) last.className = "plan-running-label";
+  const next = document.createElement("small"); next.textContent = plan.next_run ? `Next · ${new Date(plan.next_run).toLocaleString()}` : "No scheduled run";
+  timing.append(last, next);
+  const toggle = planButton("toggle-schedule", plan.enabled ? "Scheduled" : "Paused", plan);
+  toggle.className = "plan-schedule-switch"; toggle.setAttribute("role", "switch");
+  toggle.setAttribute("aria-checked", String(Boolean(plan.enabled && plan.schedule?.type !== "manual")));
+  toggle.setAttribute("aria-label", `Schedule for ${plan.name}`);
+  if (!plan.schedule || plan.schedule.type === "manual") { toggle.disabled = true; toggle.textContent = "Manual"; toggle.title = "Set a schedule in Edit settings first"; }
+  row.append(info, timing, toggle, planButton("run-plan", "Run Now", plan), planButton("delete", "Delete", plan)); plansListEl.append(row);
+};
+const savePlanActionOrder = async (plan, ids) => {
+  try { await writeAutomation({operation: "save_plan", id: plan.id, action_ids: ids, ...(!ids.length ? {enabled: false} : {})}); }
+  catch (error) { plansStatusEl.textContent = error.message; }
+};
+const renderPlanDetail = (plan) => {
+  const detail = document.createElement("section"); detail.className = "plan-detail"; detail.dataset.planId = plan.id;
+  const backTools = document.createElement("div"); backTools.className = "source-viewer-tools";
+  const back = document.createElement("button"); back.type = "button";
+  const backIcon = document.createElement("span"); backIcon.className = "tool-icon"; backIcon.setAttribute("aria-hidden", "true"); backIcon.textContent = "←";
+  const backLabel = document.createElement("span"); backLabel.textContent = "Plans"; back.append(backIcon, backLabel); backTools.append(back);
+  back.addEventListener("click", () => openPlanDetail(""));
+  const head = document.createElement("div"); head.className = "plan-detail-head";
+  const title = document.createElement("h2"); title.textContent = plan.name;
+  head.append(title, planButton("edit", "Edit settings", plan));
+  if (plan.schedule?.type !== "manual") head.append(planButton("toggle-schedule", plan.enabled ? "Pause schedule" : "Enable schedule", plan));
+  head.append(planButton("run-plan", "Run Now", plan));
+  const meta = document.createElement("p"); meta.textContent = planScheduleText(plan);
+  const tabs = document.createElement("div"); tabs.className = "search-mode-switch";
+  for (const value of ["overview", "runs"]) {
+    const button = document.createElement("button"); button.type = "button"; button.className = `search-mode-option${planDetailTab === value ? " is-active" : ""}`;
+    button.textContent = value === "overview" ? "Overview" : "Runs"; button.setAttribute("aria-pressed", String(planDetailTab === value));
+    button.addEventListener("click", () => { planDetailTab = value; if (value === "overview") planRunHistoryId = null; renderPlans(); if (value === "runs") showPlanRuns(plan.id); }); tabs.append(button);
+  }
+  detail.append(backTools, head, meta, tabs); plansListEl.append(detail);
+  if (planDetailTab === "runs") return;
+  const section = document.createElement("div"); section.className = "plan-detail-head";
+  const label = document.createElement("h3"); label.textContent = `Actions · ${plan.actions.length}`;
+  const add = document.createElement("button"); add.type = "button"; add.className = "semantic-action is-edit"; add.textContent = "Add Actions";
+  const busy = ["queued", "running"].includes(plan.last_run?.status);
+  add.disabled = busy; add.addEventListener("click", () => { plansView = "actions"; selectedPlanActionIds.clear(); renderPlans(); renderReviewWorkspace(); document.querySelector("#action-library-search").focus(); }); section.append(label, add); detail.append(section);
+  if (!plan.actions.length) { const note = document.createElement("p"); note.textContent = "Add an Action to run this Plan or enable its schedule."; detail.append(note); }
+  let dragging = null;
+  plan.actions.forEach((entry, index) => {
+    const action = savedActions.find(a => a.id === entry.action_id);
+    const row = document.createElement("div"); row.className = "plan-detail-action"; row.draggable = !busy;
+    const name = document.createElement("span"); name.textContent = `⠿ ${index + 1}. ${action?.name || "Unavailable Action"}`;
+    row.append(name);
+    row.addEventListener("dragstart", e => { dragging = entry.action_id; e.dataTransfer.setData("text/plain", entry.action_id); });
+    row.addEventListener("dragover", e => { if (dragging && !busy) e.preventDefault(); });
+    row.addEventListener("drop", async e => { e.preventDefault(); if (!dragging || busy) return; const ids = plan.actions.map(a => a.action_id).filter(id => id !== dragging); ids.splice(index, 0, dragging); dragging = null; await savePlanActionOrder(plan, ids); });
+    row.addEventListener("dragend", () => { dragging = null; });
+    for (const [text, offset] of [["↑", -1], ["↓", 1]]) {
+      const move = document.createElement("button"); move.type = "button"; move.className = "semantic-action is-edit"; move.textContent = text; move.setAttribute("aria-label", `${offset < 0 ? "Move up" : "Move down"}: ${action?.name}`);
+      move.disabled = busy || index + offset < 0 || index + offset >= plan.actions.length;
+      move.addEventListener("click", () => { const ids = plan.actions.map(a => a.action_id); [ids[index], ids[index + offset]] = [ids[index + offset], ids[index]]; savePlanActionOrder(plan, ids); }); row.append(move);
+    }
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "semantic-action is-destructive"; remove.textContent = "Remove"; remove.disabled = busy;
+    remove.addEventListener("click", async () => { if (await confirmAction("Remove this Action from this Plan? Its consumption history in this Plan is removed. The library Action and other Plans are unchanged. Removing the last Action pauses the schedule.")) await savePlanActionOrder(plan, plan.actions.filter(a => a.action_id !== entry.action_id).map(a => a.action_id)); });
+    row.append(remove); detail.append(row);
+  });
+  const policy = document.createElement("p"); policy.className = "plan-policy-summary";
+  const stages = ["evidence", "claims", "relations", "wiki"].filter(key => plan.processing?.[key]?.enabled);
+  policy.textContent = `Processing · ${plan.processing?.save_sources ? `Sources (up to ${plan.processing.max_new_sources} new per Run)` : "Discovery only"}${stages.length ? " → " + stages.join(" → ") : ""}. Proposals remain awaiting review.`; detail.append(policy);
+};
+const choosePlanForActions = async () => {
+  if (!await fetchAutomationCatalog()) return;
+  const chosen = savedActions.filter(a => selectedPlanActionIds.has(a.id));
+  if (!chosen.length) return;
+  const dialog = automationDialog("Add Actions to Plan");
+  const target = automationField(dialog.form, "Destination Plan", "select"); target.required = true; target.add(new Option("Choose a Plan", ""));
+  savedPlans.filter(p => !["queued", "running"].includes(p.last_run?.status)).forEach(p => target.add(new Option(p.name, p.id)));
+  target.value = selectedDestinationPlanId || "";
+  const note = document.createElement("small"); note.textContent = `${chosen.length} Actions selected. Already-added Actions are skipped. Running Plans cannot be changed.`; dialog.form.append(note);
+  dialog.save(async () => {
+    if (!await fetchAutomationCatalog()) throw new Error("Could not refresh Plans");
+    const plan = savedPlans.find(p => p.id === target.value); if (!plan) throw new Error("Choose a Plan first");
+    await writeAutomation({operation: "save_plan", id: plan.id, action_ids: [...new Set([...plan.actions.map(a => a.action_id), ...chosen.map(a => a.id)])]});
+    selectedPlanActionIds.clear(); openPlanDetail(plan.id);
+  });
+};
+
 const renderPlans = () => {
   plansListEl.innerHTML = "";
-  if (!savedPlans.length) {
+  document.querySelectorAll("[data-plan-view]").forEach((button) => {
+    const active = button.dataset.planView === plansView;
+    button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelector("#action-library-filters").hidden = plansView !== "actions";
+  const query = document.querySelector("#action-library-search").value || "";
+  const kind = document.querySelector("#action-library-kind").value || "";
+  const items = plansView === "actions" ? savedActions.filter(a => a.name.toLowerCase().includes(query.toLowerCase()) && (!kind || a.kind === kind)) : savedPlans;
+  const current = plansView === "plans" && savedPlans.find(item => item.id === selectedDestinationPlanId);
+  document.querySelector("#plan-run-history").hidden = !current || planDetailTab !== "runs";
+  if (current) { renderPlanDetail(current); return; }
+  if (plansView === "actions") {
+    const controls = document.createElement("div"); controls.className = "action-library-selection";
+    const count = items.filter(item => selectedPlanActionIds.has(item.id)).length;
+    const selectAll = automationCheckbox(controls, "Select all", items.length > 0 && count === items.length);
+    selectAll.indeterminate = count > 0 && count < items.length;
+    selectAll.disabled = !items.length;
+    selectAll.addEventListener("change", () => {
+      items.forEach(item => selectAll.checked ? selectedPlanActionIds.add(item.id) : selectedPlanActionIds.delete(item.id));
+      renderPlans(); renderReviewWorkspace();
+    });
+    plansListEl.append(controls);
+  }
+  if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "plans-empty";
-    empty.textContent = "No saved plans yet. Save the current search to reuse its intent, filters, mode, and sources.";
+    empty.textContent = plansView === "actions" ? "No Actions yet. Save a Search Action or Channel from Discover." : "No Plans yet. Create a Plan and choose Actions from the library.";
     plansListEl.appendChild(empty);
     return;
   }
-  savedPlans.forEach((plan) => {
+  items.forEach((plan) => {
+    if (plansView === "plans") { renderPlanListRow(plan); return; }
     const card = document.createElement("article");
-    card.className = "plan-card";
+    card.className = "plan-card action-library-card";
     card.dataset.planId = plan.id;
 
     const heading = document.createElement("div");
@@ -10253,29 +10654,35 @@ const renderPlans = () => {
     const name = document.createElement("strong");
     name.textContent = plan.name;
     const mode = document.createElement("span");
-    mode.className = `plan-mode ${plan.mode === "intelligent" ? "is-intelligent" : ""}`;
-    mode.textContent = plan.mode === "intelligent" ? "Search · AI Review on" : "Search · AI Review off";
+    mode.className = "plan-mode";
+    const schedule = plan.schedule || {type: "manual"};
+    const scheduleLabel = schedule.type === "interval" ? `Every ${schedule.hours}h` : schedule.type === "manual" ? "Manual" : `${schedule.type === "weekly" ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][schedule.weekday] : "Daily"} · ${schedule.time} ${schedule.timezone}`;
+    mode.textContent = plansView === "actions" ? `${plan.kind === "subscribe" ? "Subscribe" : "Search"} · v${plan.version}` : `${scheduleLabel}${plan.last_run ? ` · ${plan.last_run.status}` : ""}`;
     heading.append(name, mode);
+    if (plansView === "actions") {
+      const select = automationCheckbox(heading, "Select", selectedPlanActionIds.has(plan.id));
+      select.addEventListener("change", () => { select.checked ? selectedPlanActionIds.add(plan.id) : selectedPlanActionIds.delete(plan.id); renderPlans(); renderReviewWorkspace(); });
+    }
 
     const query = document.createElement("p");
     query.className = "plan-query";
-    query.textContent = plan.query;
+    query.textContent = plansView === "actions" ? (plan.kind === "subscribe" ? `${plan.config.subscription_ids.length} channels` : plan.config.query) : `${plan.actions.length} Actions · ${plan.enabled ? "Enabled" : "Disabled"}`;
     const summary = document.createElement("small");
     summary.className = "plan-summary";
-    summary.textContent = planSummary(plan);
+    summary.textContent = plansView === "actions"
+      ? `${plan.kind === "subscribe" ? "Shared feed cache · independent Plan consumption" : `${planSummary(plan.config)} · ${plan.config.mode === "intelligent" ? "AI Review on" : "AI Review off"}`} · Used by ${plan.used_by.length} Plans${plan.used_by.length ? `: ${plan.used_by.map((item) => item.name).join(", ")}` : ""}`
+      : `${plan.next_run ? `Next: ${new Date(plan.next_run).toLocaleString()} (your local time)` : "No scheduled run"}${plan.run_pending ? " · One coalesced run pending" : ""}. ${plan.processing?.save_sources ? `Save to Sources · up to ${plan.processing.max_new_sources} new per Run` : "Discovery only · automatic Source saving off"}. Actions are shared; consumption is independent.`;
 
     const actions = document.createElement("div");
     actions.className = "plan-actions";
-    [
-      ["run", "Run"],
-      ["load", "Load"],
-      ["edit", "Edit"],
-      ["delete", "Delete"],
-    ].forEach(([action, label]) => {
+    [["run", plan.kind === "subscribe" ? "Test Fetch" : "Test Run"], ["load", "Edit in Discover"], ["delete", "Delete"]].forEach(([action, label]) => {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.planAction = action;
       button.textContent = label;
+      if (plansView === "plans" && ["run-plan", "edit", "delete"].includes(action)
+        && ["queued", "running"].includes(plan.last_run?.status)) button.disabled = true;
+      if (action === "run-plan" && !plan.actions.length) { button.disabled = true; button.title = "Add an Action first"; }
       if (action === "delete") button.classList.add("plan-delete");
       actions.appendChild(button);
     });
@@ -10288,12 +10695,42 @@ const fetchPlans = async () => {
   plansStatusEl.textContent = "Loading plans…";
   try {
     const response = await fetch("/api/plans");
-    if (!response.ok) throw new Error("Could not load plans.");
     const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not load Plans.");
+    const previousRuns = new Map(savedPlans.map(plan => [plan.id, plan.last_run]));
     savedPlans = data.plans || [];
+    savedActions = data.actions || [];
+    const finished = savedPlans.some(plan => {
+      const before = previousRuns.get(plan.id), after = plan.last_run;
+      return previousRuns.has(plan.id) && after && !["queued", "running"].includes(after.status)
+        && (!before || before.id !== after.id || before.status !== after.status);
+    });
+    if (finished) {
+      const signature = item => JSON.stringify([item.id, item.updated_at, item.derivation]);
+      const evidenceBefore = new Set(evidenceProposals.map(signature));
+      const claimsBefore = new Set(claimProposals.map(signature));
+      await Promise.all([fetchEvidenceProposals(), fetchClaimProposals(), fetchLibrary(), fetchClaims(), fetchWiki()]);
+      if (evidenceProposals.some(item => !evidenceBefore.has(signature(item)))) setTabActivity("evidence-panel", "result");
+      if (claimProposals.some(item => !claimsBefore.has(signature(item)))) setTabActivity("claims-panel", "result");
+    }
+    const running = savedPlans.some((plan) => ["queued", "running"].includes(plan.last_run?.status));
+    setTabActivity("plans-panel", running ? "processing" : "idle");
+    if (running && !planRunPollTimer) {
+      let polling = false;
+      planRunPollTimer = window.setInterval(async () => {
+        if (polling) return;
+        polling = true;
+        try { await fetchPlans(); if (planRunHistoryId) await showPlanRuns(planRunHistoryId, planRunDetailId, true); }
+        finally { polling = false; }
+      }, 2500);
+    }
+    if (!running && planRunPollTimer) {
+      window.clearInterval(planRunPollTimer); planRunPollTimer = null;
+      setTabActivity("plans-panel", "result");
+    }
     renderPlans();
     renderReviewWorkspace();
-    plansStatusEl.textContent = "";
+    plansStatusEl.textContent = data.migration?.count ? `${data.migration.count} legacy Plans migrated to Actions and manual Plans. Original plans.json retained.` : "";
   } catch (error) {
     plansStatusEl.textContent = error.message;
   }
@@ -10309,27 +10746,638 @@ const saveCurrentPlan = async () => {
     input.focus();
     return;
   }
-  savePlanBtn.disabled = true;
-  try {
-    const response = await fetch("/api/plans", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error("Could not save this plan.");
-    const plan = await response.json();
-    statusEl.textContent = `Plan saved: ${plan.name}`;
-    await fetchPlans();
-    plansStatusEl.textContent = `Plan saved: ${plan.name}`;
-  } catch (error) {
-    statusEl.textContent = error.message;
-    plansStatusEl.textContent = error.message;
-  } finally {
-    savePlanBtn.disabled = false;
+  if (!await fetchAutomationCatalog()) return;
+  editingSearchAction = savedActions.find((action) => action.id === editingSearchAction?.id) || null;
+  const existing = editingSearchAction;
+  const dialog = automationDialog(existing ? "Save Search Action changes" : "Save Search Action");
+  const name = automationField(dialog.form, "Name", "input", existing?.name || payload.query.slice(0, 72));
+  name.required = true; name.maxLength = 120;
+  const limits = automationField(dialog.form, "Academic retrieval limit", "input", String(payload.max_papers)); limits.type = "number"; limits.min = "1"; limits.max = "1000"; limits.required = true;
+  const reviewed = automationField(dialog.form, "AI Review result limit", "input", String(payload.intelligent_max_results)); reviewed.type = "number"; reviewed.min = "1"; reviewed.max = "100"; reviewed.required = true;
+  const copy = automationCheckbox(dialog.form, "Save as a new Action", !existing);
+  copy.closest("label").hidden = !existing;
+  if (existing) {
+    const note = document.createElement("small"); note.textContent = `Updating this Action changes future searches in ${existing.used_by.length} Plans. Past run snapshots will remain unchanged.`; dialog.form.append(note);
   }
+  const attach = automationCheckbox(dialog.form, "Add to an existing Plan", false);
+  const select = automationField(dialog.form, "Plan", "select");
+  savedPlans.forEach((plan) => select.add(new Option(plan.name, plan.id)));
+  attach.disabled = !savedPlans.length; select.disabled = true;
+  attach.addEventListener("change", () => { select.disabled = !attach.checked; });
+  dialog.save(async () => {
+    const config = {...payload, max_papers: Number(limits.value), intelligent_max_results: Number(reviewed.value)};
+    const data = await writeAutomation({operation: "save_action", name: name.value, config,
+      ...(existing && !copy.checked ? {id: existing.id, version: existing.version} : {}),
+      ...(attach.checked ? {plan_id: select.value} : {})});
+    editingSearchAction = data.actions.find((action) => action.id === data.saved_id);
+    actionSearchOverrides = editingSearchAction.config;
+    statusEl.textContent = `Action saved: ${editingSearchAction.name}`;
+  });
+};
+
+const writeAutomation = async (payload) => {
+  const response = await fetch("/api/plans", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || "Could not save changes.");
+  savedPlans = data.plans; savedActions = data.actions; renderPlans(); renderReviewWorkspace();
+  editingSearchAction = savedActions.find((action) => action.id === editingSearchAction?.id) || null;
+  return data;
+};
+
+const planRunProgress = (run) => {
+  if (!["queued", "running"].includes(run.status)) return null;
+  if (run.status === "queued") return "Queued · waiting to start";
+  const actions = run.actions || [];
+  const action = actions.find(item => item.status === "running");
+  if (action) return `Action ${actions.indexOf(action) + 1}/${actions.length} · ${action.action_name} · ${action.report?.progress || "Processing"}`;
+  const jobs = run.knowledge_jobs || [];
+  const job = jobs.find(item => item.status === "running");
+  if (job) {
+    const labels = {evidence: "Proposing Evidence", claims: "Proposing Claims", relations: "Finding Relations", wiki: "Organizing Projected Wiki"};
+    const stageJobs = jobs.filter(item => item.stage === job.stage);
+    const finished = stageJobs.filter(item => !["queued", "running"].includes(item.status)).length;
+    return `${labels[job.stage] || job.stage} · ${finished} batches finished · current batch in progress`;
+  }
+  return run.ingestion ? "Preparing next knowledge stage / finalizing Run" : "Preparing Actions / saving Sources";
+};
+
+const showPlanRuns = async (planId, runId = null, polling = false) => {
+  planRunHistoryId = planId; planRunDetailId = runId;
+  const panel = document.querySelector("#plan-run-history"); panel.hidden = false;
+  try {
+    const params = new URLSearchParams(runId ? {run_id: runId} : {plan_id: planId});
+    const response = await fetch(`/api/plan-runs?${params}`); const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not load run history.");
+    if (planRunHistoryId !== planId || planRunDetailId !== runId) return;
+    const expanded = new Set([...panel.querySelectorAll("details[open]")].map((item) => item.dataset.key));
+    panel.replaceChildren();
+    const header = document.createElement("div"); header.className = "automation-toolbar";
+    const title = document.createElement("strong"); title.textContent = runId ? "Run details" : "Run history · latest 50";
+    const close = document.createElement("button"); close.type = "button"; close.className = "reader-toolbar-btn"; close.textContent = runId ? "← Runs" : "Close";
+    close.addEventListener("click", () => { if (runId) showPlanRuns(planId); else { planRunHistoryId = null; planRunDetailId = null; planDetailTab = "overview"; renderPlans(); } });
+    header.append(title, close); panel.append(header);
+    if (!data.runs.length) panel.append(document.createTextNode("No Runs yet."));
+    data.runs.forEach((run) => {
+      const card = document.createElement("article"); card.className = "plan-card";
+      const heading = document.createElement("strong"); heading.textContent = `${run.plan_name} · ${run.status} · ${run.trigger} · ${new Date(run.started_at).toLocaleString()}`;
+      const counts = document.createElement("p"); const c = run.counts;
+      counts.textContent = `${c.new_count} new · ${c.duplicate_count} previously seen / retained · ${c.selected_count} selected · ${c.excluded_count} excluded (Action-level counts)`;
+      card.append(heading, counts);
+      const progressText = planRunProgress(run);
+      if (progressText) {
+        const progress = document.createElement("div"); progress.className = "plan-run-progress"; progress.setAttribute("role", "status");
+        const spinner = document.createElement("span"); spinner.className = "plan-run-spinner"; spinner.setAttribute("aria-hidden", "true");
+        const label = document.createElement("span");
+        const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(run.started_at)) / 1000));
+        label.textContent = `${progressText} · ${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`;
+        progress.append(spinner, label); card.append(progress);
+      }
+      const ingestion = document.createElement("p");
+      ingestion.textContent = run.processing?.knowledge_only ? "Knowledge recomputation only · no discovery or Source capture" : run.ingestion ? (run.ingestion.enabled
+        ? `${run.ingestion.sources_created} Sources created · ${run.ingestion.sources_reused} reused · ${run.ingestion.deferred} deferred to next Run`
+        : "Discovery only · automatic Source saving disabled") : (run.processing?.save_sources ? "Source processing pending" : "Discovery only");
+      card.append(ingestion);
+      const jobs = run.knowledge_jobs || [];
+      if (jobs.length) {
+        const outcome = document.createElement("p");
+        const calls = jobs.reduce((sum, job) => sum + (job.report.model_usage?.chat_requests || 0), 0);
+        const tokens = jobs.reduce((sum, job) => sum + (job.report.model_usage?.chat_tokens || 0), 0);
+        const proposals = jobs.reduce((sum, job) => sum + (job.report.proposal_ids || []).length, 0);
+        outcome.textContent = `Knowledge: ${proposals} proposals · ${calls} model calls · ${tokens.toLocaleString()} tokens · ${jobs.filter(job => job.status === "failed").length} failed batches · ${jobs.filter(job => job.status === "queued").length} queued. Failed/queued batches resume on the next Run; saved proposals are retained.`;
+        card.append(outcome);
+      }
+      (run.knowledge_jobs || []).forEach(job => {
+        const details = document.createElement("details"); details.dataset.key = job.id; details.open = expanded.has(job.id);
+        const isWiki = job.stage === "wiki";
+        const isRelations = job.stage === "relations";
+        const isClaims = job.stage === "claims" || isRelations;
+        const title = document.createElement("summary"); title.textContent = isWiki
+          ? `Projected Wiki · ${job.status} · ${(job.report.claim_ids || []).length} Claims · ${job.report.pages || 0} Pages · estimated calls: ${job.report.estimated_model_calls || 0}`
+          : `${isRelations ? "Relations" : isClaims ? "Claims" : "Evidence"} · ${job.status} · ${isRelations ? `${job.input_refs.length} Claim pairs` : isClaims ? `${job.input_refs.length} Evidence inputs` : `${job.source_ids.length} Sources`} · ${(job.report.proposal_ids || []).length} proposals`;
+        const report = document.createElement("p"); report.textContent = [job.report.summary, ...(job.report.warnings || [])].filter(Boolean).join("\n");
+        const open = document.createElement("button"); open.type = "button"; open.className = "secondary-action"; open.textContent = isWiki ? "Open Projected Wiki" : isClaims ? "Review Claims" : "Review Evidence";
+        open.addEventListener("click", async () => {
+          if (isWiki) { wikiKnowledgeView = "projected"; wikiKnowledgeViewSelect.value = "projected"; await fetchWiki(); showPanel("views-panel"); }
+          else if (isClaims) { await fetchClaimProposals(); claimProposalQueueOpen = true; claimReviewCategory = job.report.recheck_proposal_id ? "changed" : "proposals"; showPanel("claims-panel"); renderClaimProposals(); }
+          else { await fetchEvidenceProposals(); evidenceProposalQueueOpen = true; showPanel("evidence-panel"); renderEvidenceProposals(); }
+        });
+        details.append(title, report, open); card.append(details);
+        if (job.report.raw_response) {
+          const raw = document.createElement("pre"); raw.textContent = typeof job.report.raw_response === "string" ? job.report.raw_response : JSON.stringify(job.report.raw_response, null, 2);
+          details.append(raw);
+        }
+        if (job.report.skipped?.length) {
+          const skipped = document.createElement("p"); skipped.textContent = `${job.report.skipped.length} pairs produced no confirmed relation. Duplicate/revision judgments are left to Claim Audit.`;
+          details.append(skipped);
+          const reasons = document.createElement("ul");
+          job.report.skipped.forEach(item => { const reason = document.createElement("li"); reason.textContent = `${item.judgment || "Skipped"}: ${item.rationale || ""}`; reasons.append(reason); });
+          details.append(reasons);
+        }
+      });
+      if (run.error) { const error = document.createElement("p"); error.textContent = run.error; card.append(error); }
+      if (!runId) {
+        const open = document.createElement("button"); open.type = "button"; open.className = "secondary-action"; open.textContent = "Details";
+        open.addEventListener("click", () => showPlanRuns(planId, run.id)); card.append(open);
+      } else {
+        if (run.sources?.length) {
+          const sources = document.createElement("details"); sources.dataset.key = "sources"; sources.open = expanded.has("sources");
+          const summary = document.createElement("summary"); summary.textContent = `Sources · ${run.sources.length}`; sources.append(summary);
+          run.sources.forEach((source) => {
+            const row = document.createElement("p"); row.textContent = `${source.was_created ? "Created" : "Reused"} · ${source.title || "Source deleted"} `;
+            if (source.title) {
+              const open = document.createElement("button"); open.type = "button"; open.className = "reader-toolbar-btn"; open.textContent = "Inspect";
+              open.addEventListener("click", () => { showPanel("sources-panel"); openSourceReader(source.source_id); }); row.append(open);
+            }
+            sources.append(row);
+          });
+          card.append(sources);
+        }
+        run.actions.forEach((action) => {
+          const details = document.createElement("details"); details.dataset.key = action.id; details.open = expanded.has(action.id);
+          const summary = document.createElement("summary"); summary.textContent = `${action.action_name} · v${action.action_version} · ${action.status} · ${action.report.pending_count || 0} pending`;
+          const report = document.createElement("pre"); report.textContent = JSON.stringify({providers: action.report.providers, warnings: action.report.warnings, usage: action.report.usage, config: action.config_snapshot, checkpoint_before: action.checkpoint_before, checkpoint_after: action.checkpoint_after}, null, 2);
+          details.append(summary, report); card.append(details);
+        });
+        const results = document.createElement("details"); results.dataset.key = "results"; results.open = expanded.has("results");
+        const summary = document.createElement("summary"); summary.textContent = `Discovery results · ${(run.items || []).length}`; results.append(summary);
+        (run.items || []).forEach((item) => {
+          const row = document.createElement("p"); row.textContent = `${item.disposition} · ${item.metadata.title || "Untitled"}`;
+          const url = item.metadata.paper_url || item.metadata.url;
+          if (/^https?:\/\//i.test(url || "")) { const link = document.createElement("a"); link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = " Open source ↗"; row.append(link); }
+          results.append(row);
+        });
+        card.append(results);
+      }
+      panel.append(card);
+    });
+    if (!polling) panel.scrollIntoView({behavior: "smooth", block: "start"});
+  } catch (error) { plansStatusEl.textContent = error.message; }
+};
+
+const fetchAutomationCatalog = async () => {
+  try {
+    const response = await fetch("/api/plans"); const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not load Actions.");
+    savedPlans = data.plans; savedActions = data.actions; return true;
+  } catch (error) { statusEl.textContent = error.message; plansStatusEl.textContent = error.message; return false; }
+};
+
+const automationField = (form, text, tag, value = "") => {
+  const label = document.createElement("label"); label.className = "automation-field";
+  const caption = document.createElement("span"); caption.textContent = text;
+  const field = document.createElement(tag); field.value = value;
+  label.append(caption, field); form.append(label); return field;
+};
+const automationCheckbox = (form, text, checked) => {
+  const label = document.createElement("label"); label.className = "automation-checkbox";
+  const field = document.createElement("input"); field.type = "checkbox"; field.checked = checked;
+  label.append(field, document.createTextNode(text)); form.append(label); return field;
+};
+const automationDialog = (title) => {
+  const dialog = document.createElement("dialog"); dialog.className = "app-dialog automation-dialog";
+  const heading = document.createElement("h2"); heading.textContent = title;
+  const form = document.createElement("form"); const error = document.createElement("p"); error.setAttribute("role", "alert");
+  dialog.append(heading, form, error); document.body.append(dialog);
+  dialog.addEventListener("close", () => dialog.remove(), {once: true});
+  return {form, save: (callback) => {
+    const actions = document.createElement("div"); actions.className = "app-dialog-actions";
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary-action"; cancel.textContent = "Cancel";
+    const save = document.createElement("button"); save.type = "submit"; save.className = "semantic-action is-accept"; save.textContent = "Save";
+    cancel.addEventListener("click", () => dialog.close());
+    actions.append(cancel, save); form.append(actions);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault(); save.disabled = true; cancel.disabled = true; error.textContent = "Saving…";
+      try { await callback(); dialog.close(); } catch (problem) { error.textContent = problem.message; }
+      finally { save.disabled = false; cancel.disabled = false; }
+    });
+    dialog.showModal(); form.querySelector("input, select")?.focus();
+  }};
+};
+
+const editAutomationPlan = async (plan = null) => {
+  if (!await fetchAutomationCatalog()) return;
+  const dialog = automationDialog(plan ? "Edit Plan" : "New Plan");
+  const name = automationField(dialog.form, "Name", "input", plan?.name || ""); name.required = true; name.maxLength = 120;
+  const scheduleType = automationField(dialog.form, "Schedule", "select");
+  [["manual", "Manual"], ["interval", "Every N hours"], ["daily", "Daily"], ["weekly", "Weekly"]].forEach(([value, label]) => scheduleType.add(new Option(label, value)));
+  scheduleType.value = plan?.schedule.type || "manual";
+  const zone = automationField(dialog.form, "Timezone (IANA)", "input", plan?.schedule.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const hours = automationField(dialog.form, "Every N hours", "input", String(plan?.schedule.hours || 24)); hours.type = "number"; hours.min = "1"; hours.max = "8760";
+  const time = automationField(dialog.form, "Local time", "input", plan?.schedule.time || "08:00"); time.type = "time";
+  const weekday = automationField(dialog.form, "Weekday", "select");
+  ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].forEach((day, index) => weekday.add(new Option(day, String(index)))); weekday.value = String(plan?.schedule.weekday ?? 0);
+  const updateScheduleFields = () => {
+    [[zone, scheduleType.value !== "manual"], [hours, scheduleType.value === "interval"], [time, ["daily", "weekly"].includes(scheduleType.value)], [weekday, scheduleType.value === "weekly"]].forEach(([field, visible]) => {
+      field.closest("label").hidden = !visible; field.disabled = !visible; field.required = visible;
+    });
+  };
+  scheduleType.addEventListener("change", updateScheduleFields); updateScheduleFields();
+  const scheduleNote = document.createElement("small"); scheduleNote.textContent = "Runs only while Knowte is running. Missed periods catch up once; overlapping triggers coalesce. Enabling/rescheduling starts with the next future occurrence. At DST changes, missing times shift forward; repeated times run once."; dialog.form.append(scheduleNote);
+  const processingHeading = document.createElement("strong"); processingHeading.textContent = "Processing · Global Sources"; dialog.form.append(processingHeading);
+  const saveSources = automationCheckbox(dialog.form, "Automatically save selected results to Sources", plan ? Boolean(plan.processing?.save_sources) : true);
+  const sourceLimit = automationField(dialog.form, "Maximum new Sources per Run", "input", String(plan?.processing?.max_new_sources || 20));
+  sourceLimit.type = "number"; sourceLimit.min = "1"; sourceLimit.max = "1000"; sourceLimit.required = true; sourceLimit.disabled = !saveSources.checked;
+  saveSources.addEventListener("change", () => { sourceLimit.disabled = !saveSources.checked; });
+  const evidenceStage = automationCheckbox(dialog.form, "Generate Evidence proposals · awaiting review", Boolean(plan?.processing?.evidence?.enabled));
+  const focus = automationField(dialog.form, "Evidence Focus · optional", "textarea", plan?.processing?.evidence?.focus || ""); focus.maxLength = 2000;
+  const evidenceModel = automationField(dialog.form, "Evidence model", "select"); evidenceModel.add(new Option("Select a model", ""));
+  aiModelProfiles.filter(profile => profile.capabilities?.includes("chat")).forEach(profile => evidenceModel.add(new Option(profile.name || profile.model, profile.id)));
+  evidenceModel.value = plan?.processing?.evidence?.model_profile_id || aiRoleAssignments.evidence || "";
+  const updateEvidenceFields = () => {
+    [focus, evidenceModel].forEach(field => { field.disabled = !evidenceStage.checked; field.required = field === evidenceModel && evidenceStage.checked; field.closest("label").hidden = !evidenceStage.checked; });
+  };
+  evidenceStage.addEventListener("change", updateEvidenceFields); updateEvidenceFields();
+  const claimsStage = automationCheckbox(dialog.form, "Generate Claim proposals · assume pending Evidence accepted", Boolean(plan?.processing?.claims?.enabled));
+  const claimFocus = automationField(dialog.form, "Claim Focus · optional", "textarea", plan?.processing?.claims?.focus || ""); claimFocus.maxLength = 2000;
+  const claimModel = automationField(dialog.form, "Claim model", "select"); claimModel.add(new Option("Select a model", ""));
+  aiModelProfiles.filter(profile => profile.capabilities?.includes("chat")).forEach(profile => claimModel.add(new Option(profile.name || profile.model, profile.id)));
+  claimModel.value = plan?.processing?.claims?.model_profile_id || aiRoleAssignments.claims || "";
+  const updateClaimFields = () => [claimFocus, claimModel].forEach(field => { field.disabled = !claimsStage.checked; field.required = field === claimModel && claimsStage.checked; field.closest("label").hidden = !claimsStage.checked; });
+  claimsStage.addEventListener("change", updateClaimFields); updateClaimFields();
+  const relationsStage = automationCheckbox(dialog.form, "Discover relation proposals · awaiting review", Boolean(plan?.processing?.relations?.enabled));
+  const relationModel = automationField(dialog.form, "Relation model", "select"); relationModel.add(new Option("Select a model", ""));
+  aiModelProfiles.filter(profile => profile.capabilities?.includes("chat")).forEach(profile => relationModel.add(new Option(profile.name || profile.model, profile.id)));
+  relationModel.value = plan?.processing?.relations?.model_profile_id || aiRoleAssignments.claims || "";
+  const updateRelationFields = () => { relationModel.disabled = !relationsStage.checked; relationModel.required = relationsStage.checked; relationModel.closest("label").hidden = !relationsStage.checked; };
+  relationsStage.addEventListener("change", updateRelationFields); updateRelationFields();
+  const wikiStage = automationCheckbox(dialog.form, "Organize Projected Wiki · reviewed Wiki stays unchanged", Boolean(plan?.processing?.wiki?.enabled));
+  const wikiModel = automationField(dialog.form, "Projected Wiki model", "select"); wikiModel.add(new Option("Select a model", ""));
+  aiModelProfiles.filter(profile => profile.capabilities?.includes("chat")).forEach(profile => wikiModel.add(new Option(profile.name || profile.model, profile.id)));
+  wikiModel.value = plan?.processing?.wiki?.model_profile_id || aiRoleAssignments.wiki || "";
+  const updateWikiFields = () => { wikiModel.disabled = !wikiStage.checked; wikiModel.required = wikiStage.checked; wikiModel.closest("label").hidden = !wikiStage.checked; };
+  wikiStage.addEventListener("change", updateWikiFields); updateWikiFields();
+  const wikiNote = document.createElement("small"); wikiNote.textContent = "Projected Wiki: 1 call per Run with new or changed Claims; 2 when an existing directory needs reference-page selection. Uses Config’s Wiki limit, prioritizing stale then unorganized Claims. No changes means no call."; dialog.form.append(wikiNote);
+  const relationNote = document.createElement("small"); relationNote.textContent = "Relations: up to 8 nearby Claims per new Claim; 1 extra model call per 8 candidate pairs. Existing links are skipped. This is bounded discovery, not an exhaustive global audit."; dialog.form.append(relationNote);
+  const processingNote = document.createElement("small"); processingNote.textContent = "Evidence uses Config’s Combined / One by one and Source limit. Claims add one model call per Evidence batch. Changed Evidence also adds one recheck call per affected reviewed Plan Claim, using its original model and Focus. Suggestions stay pending; failed jobs retry next Run."; dialog.form.append(processingNote);
+  dialog.save(async () => {
+    const ids = (plan?.actions || []).map(row => row.action_id);
+    const schedule = scheduleType.value === "manual" ? {type: "manual"} : {type: scheduleType.value, timezone: zone.value.trim(), ...(scheduleType.value === "interval" ? {hours: Number(hours.value)} : {time: time.value}), ...(scheduleType.value === "weekly" ? {weekday: Number(weekday.value)} : {})};
+    const result = await writeAutomation({operation: "save_plan", ...(plan ? {id: plan.id} : {}), name: name.value, enabled: Boolean(plan?.enabled && ids.length), action_ids: ids, schedule,
+      processing: {save_sources: saveSources.checked, max_new_sources: Number(sourceLimit.value), evidence: {enabled: evidenceStage.checked, focus: focus.value.trim(), model_profile_id: evidenceModel.value}, claims: {enabled: claimsStage.checked, focus: claimFocus.value.trim(), model_profile_id: claimModel.value}, relations: {enabled: relationsStage.checked, model_profile_id: relationModel.value}, wiki: {enabled: wikiStage.checked, model_profile_id: wikiModel.value}}});
+    openPlanDetail(plan?.id || result.saved_id);
+  });
+};
+
+function renderPlanActionSelection(context) {
+  const panel = document.querySelector("#plan-action-selection");
+  panel.hidden = context !== "plans"; panel.replaceChildren();
+  if (context !== "plans") return;
+  const note = document.createElement("p"); note.className = "plan-selection-empty";
+  if (plansView === "actions") {
+    note.textContent = "Select reusable Actions, then choose a destination Plan.";
+    panel.append(note);
+    const add = document.createElement("button"); add.type = "button"; add.className = "context-primary-action";
+    add.textContent = "Add to Plan…"; add.disabled = !selectedPlanActionIds.size;
+    add.addEventListener("click", choosePlanForActions); panel.append(add);
+    const clear = document.createElement("button"); clear.type = "button"; clear.className = "secondary-action plan-selection-clear"; clear.textContent = "Clear"; clear.disabled = !selectedPlanActionIds.size;
+    clear.addEventListener("click", () => { selectedPlanActionIds.clear(); renderPlans(); renderReviewWorkspace(); }); panel.append(clear);
+  } else {
+    const plan = savedPlans.find(p => p.id === selectedDestinationPlanId);
+    note.textContent = plan
+      ? plan.name + " · " + (plan.last_run?.status || "Not run") + "\n" + (plan.next_run ? "Next: " + new Date(plan.next_run).toLocaleString() : "No scheduled run")
+      : savedPlans.filter(p => ["queued", "running"].includes(p.last_run?.status)).length + " running · " + savedPlans.filter(p => p.last_run?.status === "failed").length + " failed · " + savedPlans.length + " Plans";
+    panel.append(note);
+  }
+}
+
+const editChannel = (item) => {
+  const dialog = automationDialog("Edit Channel");
+  dialog.form.classList.add("subscription-editor");
+  const name = automationField(dialog.form, "Name", "input", item.name); name.required = true;
+  const spec = {...item.spec};
+  if (spec.kind === "github_releases") { spec.kind = "github_repo"; spec.scopes = ["releases"]; spec.branch = ""; }
+  const inputs = [];
+  if (["github_repo", "github"].includes(spec.kind)) {
+    const key = spec.kind === "github_repo" ? "scopes" : "event_types";
+    const options = key === "scopes" ? ["releases", "commits", "issues", "pulls"] : ["CreateEvent", "ReleaseEvent", "IssuesEvent", "PullRequestEvent", "PushEvent", "WatchEvent", "ForkEvent"];
+    options.forEach((value) => inputs.push([key, value, automationCheckbox(dialog.form, value === "pulls" ? "Pull Requests" : value.replace("Event", ""), (spec[key] || []).includes(value))]));
+  }
+  const branch = spec.kind === "github_repo" ? automationField(dialog.form, "Commit branch (blank = default)", "input", spec.branch || "") : null;
+  const query = spec.kind === "hn_keyword" ? automationField(dialog.form, "Keywords", "input", spec.query) : null;
+  const account = spec.kind === "hn_user" ? automationField(dialog.form, "HN username", "input", spec.account) : null;
+  const address = spec.kind === "feed" ? automationField(dialog.form, "Feed URL", "input", spec.source_url) : null;
+  const focus = automationField(dialog.form, "Focus", "textarea", item.processing?.query || ""); focus.maxLength = 2000;
+  const model = automationField(dialog.form, "Verification model", "select");
+  model.add(new Option("No model", ""));
+  aiModelProfiles.filter((p) => p.capabilities?.includes("chat")).forEach((p) => model.add(new Option(p.name || p.model, p.id)));
+  model.value = item.processing?.mode === "intelligent" ? item.processing.model_profile_id || aiRoleAssignments.subscription_verify || "" : "";
+  const note = document.createElement("small"); note.textContent = `Used by ${item.used_by} Plans. Changes apply to all of them. Previously consumed items are not reverified; Run history is kept. Verification uses titles and supplied excerpts / comments, not full articles.`; dialog.form.append(note);
+  dialog.save(async () => {
+    for (const key of new Set(inputs.map(([key]) => key))) spec[key] = inputs.filter(([k,, field]) => k === key && field.checked).map(([, value]) => value);
+    if (branch) spec.branch = branch.value;
+    if (query) spec.query = query.value;
+    if (account) spec.account = account.value;
+    if (address) spec.source_url = address.value;
+    await subscriptionRequest({id: item.id, version: item.version, name: name.value, spec,
+      processing: {query: focus.value, mode: model.value ? "intelligent" : "keyword", model_profile_id: model.value}});
+    await fetchPlans();
+  });
+};
+
+const subscriptionRequest = async (payload) => {
+  const response = await fetch("/api/subscriptions", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+  const data = await response.json();
+  await fetchUsage();
+  if (!response.ok) throw new Error(data.message || "Could not update channel.");
+  if (data.subscriptions) { subscriptions = data.subscriptions; renderSubscriptions(); }
+  return data;
+};
+const fetchSubscriptions = async () => {
+  try {
+    const response = await fetch("/api/subscriptions"); const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not load channels.");
+    subscriptions = data.subscriptions; renderSubscriptions();
+  } catch (error) { document.querySelector("#subscription-status").textContent = error.message; }
+};
+const renderSubscriptions = () => {
+  const list = document.querySelector("#subscription-list"); list.replaceChildren();
+  if (!subscriptions.length) list.textContent = "No channels yet. Paste an account, website or Feed URL above.";
+  subscriptions.forEach((item) => {
+    const card = document.createElement("article"); card.className = "plan-card";
+    const title = document.createElement("strong"); title.textContent = item.name; card.append(title);
+    const summary = document.createElement("small"); summary.className = "plan-summary";
+    summary.textContent = `${({github: "GitHub · Public activity", github_repo: "GitHub · Repository", github_releases: "GitHub · Releases", hn_keyword: "Hacker News · Keywords", hn_user: "Hacker News · User", hackernews: "Unsupported listing · replace Channel", x: "Unsupported · replace with RSS", wechat: "Unsupported · replace with RSS"})[item.connector] || "RSS / Atom"} · ${item.cached_count} cached · Used by ${item.used_by} Plans · ${item.last_fetched_at ? `Fetched ${new Date(item.last_fetched_at).toLocaleString()}` : "Not fetched yet"}`;
+    const address = document.createElement("details"); const caption = document.createElement("summary"); caption.textContent = "Channel address";
+    const url = document.createElement("p"); url.textContent = item.url; address.append(caption, url);
+    const actions = document.createElement("div"); actions.className = "plan-actions";
+    const edit = document.createElement("button"); edit.type = "button"; edit.className = "semantic-action is-edit"; edit.textContent = "Edit";
+    edit.addEventListener("click", () => editChannel(item)); actions.append(edit);
+    for (const [operation, label] of [["test", "Test fetch"], ["delete", "Delete"]]) {
+      const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+      button.className = operation === "delete" ? "semantic-action is-destructive" : "save-plan-btn stage-save-action";
+      button.addEventListener("click", async () => {
+        if (operation === "delete" && !await confirmAction(`Delete “${item.name}” and its shared feed cache? Saved Sources and Run history are kept.`)) return;
+        button.disabled = true; const status = document.querySelector("#subscription-status"); status.textContent = operation === "test" ? "Fetching…" : "Deleting…";
+        try { const data = await subscriptionRequest({operation, id: item.id}); status.textContent = operation === "test" ? `${data.items.length} cached items. No Plan consumption state changed.${data.items.length ? "" : " Empty results do not confirm working authentication; check the connector."}` : "Channel deleted. Saved Sources and Run history are kept."; if (operation === "test") renderChannelPreview(data.items, item.connector); }
+        catch (error) { status.textContent = error.message; button.disabled = false; }
+      });
+      actions.append(button);
+    }
+    const scopeNote = document.createElement("p"); scopeNote.textContent = item.fetch_scope || ""; address.append(scopeNote);
+    caption.textContent = "Address & fetch scope";
+    const focus = document.createElement("small"); focus.className = "plan-summary";
+    focus.textContent = item.processing?.mode === "intelligent" ? `AI Verify · ${item.processing.query}` : "AI Verify off";
+    card.append(summary, focus, address, actions); list.append(card);
+  });
+};
+let detectedChannels = [];
+let channelDetectionVersion = 0;
+const resetChannelDetection = () => {
+  channelDetectionVersion += 1;
+  detectedChannels = [];
+  document.querySelector("#subscription-detected").hidden = true;
+  document.querySelector("#subscription-preview-list").hidden = true;
+  document.querySelector("#subscription-preview").disabled = true;
+  document.querySelector("#subscription-save").disabled = true;
+};
+const currentChannelSpec = () => {
+  const spec = detectedChannels[Number(document.querySelector("#subscription-choice").value)];
+  if (!spec) throw new Error("Enter channel details and wait for identification before saving.");
+  const result = {...spec};
+  const scope = document.querySelector("#subscription-scope");
+
+  if (spec.kind === "github") result.event_types = [...scope.querySelectorAll("input:checked")].map((field) => field.dataset.key);
+  if (spec.kind === "github_repo") {
+    result.scopes = [...scope.querySelectorAll("input:checked")].map((field) => field.dataset.key);
+    result.branch = scope.querySelector("input[type=text]")?.value.trim() || "";
+  }
+  if ((spec.kind === "github" && !result.event_types.length) || (spec.kind === "github_repo" && !result.scopes.length)) throw new Error("Choose at least one GitHub scope.");
+  return result;
+};
+const updateChannelScopeControls = () => {
+  const scope = document.querySelector("#subscription-scope");
+  const branch = scope.querySelector("input[type=text]");
+  if (branch) branch.disabled = ![...scope.querySelectorAll("input:checked")].some((field) => field.dataset.key === "commits");
+  let valid = false;
+  try { currentChannelSpec(); valid = true; } catch {}
+  document.querySelector("#subscription-preview").disabled = !valid;
+  document.querySelector("#subscription-save").disabled = !valid;
+};
+const renderChannelChoice = () => {
+  channelDetectionVersion += 1;
+  const spec = detectedChannels[Number(document.querySelector("#subscription-choice").value)];
+  const scope = document.querySelector("#subscription-scope"); scope.replaceChildren();
+  if (!spec) return;
+  document.querySelector("#subscription-name").value = spec.name || "";
+  const options = spec.kind === "github" ? [["CreateEvent", "New repositories / branches / tags"], ["ReleaseEvent", "Releases"], ["IssuesEvent", "Issues"], ["PullRequestEvent", "Pull requests"], ["PushEvent", "Pushes"], ["WatchEvent", "Stars"], ["ForkEvent", "Forks"]] : spec.kind === "github_repo" ? [["releases", "Releases"], ["commits", "Commits"], ["issues", "Issues"], ["pulls", "Pull Requests"]] : [];
+  for (const [key, title] of options) {
+    const label = document.createElement("label"); const input = document.createElement("input"); input.type = "checkbox"; input.dataset.key = key;
+    input.checked = (spec.event_types || spec.scopes || []).includes(key);
+    input.addEventListener("change", () => { channelDetectionVersion += 1; document.querySelector("#subscription-preview-list").hidden = true; updateChannelScopeControls(); });
+    label.append(input, document.createTextNode(title)); scope.append(label);
+  }
+  if (spec.kind === "github_repo") {
+    const label = document.createElement("label"); label.className = "automation-field subscription-address";
+    const title = document.createElement("span"); title.textContent = "Commit branch (optional; blank uses repository default)";
+    const branch = document.createElement("input"); branch.type = "text"; branch.value = spec.branch || ""; branch.maxLength = 200;
+    branch.addEventListener("input", () => { channelDetectionVersion += 1; document.querySelector("#subscription-preview-list").hidden = true; });
+    label.append(title, branch); scope.append(label);
+  }
+  document.querySelector("#subscription-preview-list").hidden = true;
+  updateChannelScopeControls();
+};
+document.querySelector("#subscription-choice").addEventListener("change", renderChannelChoice);
+const detectChannel = async () => {
+  const version = channelDetectionVersion;
+  const status = document.querySelector("#subscription-status"); status.textContent = "Detecting channel…";
+  try {
+    const data = await subscriptionRequest({operation: "detect", url: document.querySelector("#subscription-address").value.trim(), category: document.querySelector("#subscription-connector").value, hn_mode: document.querySelector("#subscription-hn-mode").value});
+    if (version !== channelDetectionVersion) return;
+    detectedChannels = data.choices || [];
+    const choices = document.querySelector("#subscription-choice"); choices.replaceChildren();
+    detectedChannels.forEach((item, index) => choices.add(new Option(`${item.name} · ${item.kind === "feed" ? item.source_url : ({github: "Public activity", github_repo: "Choose scope", hn_keyword: "Posts + comments", hn_user: "Posts + comments"})[item.kind]}`, String(index))));
+    document.querySelector("#subscription-detected").hidden = !detectedChannels.length;
+    document.querySelector("#subscription-detection-note").textContent = data.message;
+    document.querySelector("#subscription-preview").disabled = !detectedChannels.length;
+    document.querySelector("#subscription-save").disabled = !detectedChannels.length;
+    renderChannelChoice(); status.textContent = detectedChannels.length ? "Channel identified. Review its scope and test before saving." : data.message;
+  } catch (error) { if (version === channelDetectionVersion) status.textContent = error.message; }
+};
+let channelDetectionTimer;
+const scheduleChannelDetection = () => {
+  clearTimeout(channelDetectionTimer);
+  resetChannelDetection();
+  const status = document.querySelector("#subscription-status");
+  status.textContent = "";
+  const address = document.querySelector("#subscription-address").value.trim();
+  if (!address) return;
+  channelDetectionTimer = setTimeout(() => {
+    try {
+      if (document.querySelector("#subscription-connector").value !== "hackernews") {
+        const url = new URL(address);
+        if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+      }
+    } catch {
+      status.textContent = "Enter a complete http:// or https:// URL.";
+      return;
+    }
+    detectChannel();
+  }, 700);
+};
+document.querySelector("#subscription-address").addEventListener("input", scheduleChannelDetection);
+const updateChannelInput = () => {
+  const hn = document.querySelector("#subscription-connector").value === "hackernews";
+  document.querySelector("#subscription-hn-mode-field").hidden = !hn;
+  document.querySelector("#subscription-address-label").textContent = hn ? (document.querySelector("#subscription-hn-mode").value === "user" ? "Username or HN profile URL" : "Keywords") : "Website, account or Feed URL";
+};
+for (const id of ["#subscription-connector", "#subscription-hn-mode"]) document.querySelector(id).addEventListener("change", () => { updateChannelInput(); scheduleChannelDetection(); });
+const renderChannelPreview = (items, kind, groups) => {
+  const preview = document.querySelector("#subscription-preview-list"); preview.replaceChildren(); preview.hidden = false;
+  const sections = groups?.length ? groups : ["hn_keyword", "hn_user"].includes(kind) ? ["story", "comment"].map((type) => ({type, items: items.filter((item) => item.channel_item_type === type)})) : [{items}];
+  for (const group of sections) {
+    if (group.type) {
+      const heading = document.createElement("strong"); heading.textContent = `${group.type === "story" ? "Posts" : "Comments"} · ${group.count ?? group.items.length}`; preview.append(heading);
+    }
+    if (!group.items.length) { const note = document.createElement("p"); note.textContent = "No matching items returned."; preview.append(note); }
+    for (const item of group.items.slice(0, 5)) {
+      const row = document.createElement("p"); const link = document.createElement("a"); link.textContent = item.title;
+      if (/^https?:\/\//i.test(item.url)) { link.href = item.url; link.target = "_blank"; link.rel = "noopener noreferrer"; }
+      row.append(link); preview.append(row);
+    }
+  }
+};
+document.querySelector("#subscription-preview").addEventListener("click", async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  const status = document.querySelector("#subscription-status"); status.textContent = "Fetching preview…";
+  const version = channelDetectionVersion;
+  try {
+    const spec = currentChannelSpec();
+    const data = await subscriptionRequest({operation: "preview", spec, name: document.querySelector("#subscription-name").value});
+    if (version !== channelDetectionVersion) return;
+    status.textContent = `${data.count} entries in the current response. ${data.message}`;
+    renderChannelPreview(data.items, spec.kind, data.groups);
+  } catch (error) { if (version === channelDetectionVersion) status.textContent = error.message; }
+  finally { updateChannelScopeControls(); }
+});
+document.querySelector("#subscription-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = document.querySelector("#subscription-save");
+  const status = document.querySelector("#subscription-status");
+  button.disabled = true; status.textContent = "Saving…";
+  try {
+    const spec = currentChannelSpec();
+    const version = channelDetectionVersion;
+    const payload = {name: document.querySelector("#subscription-name").value,
+      url: document.querySelector("#subscription-address").value,
+      connector: document.querySelector("#subscription-connector").value,
+      spec, processing: {query: document.querySelector("#subscription-focus").value.trim(), mode: document.querySelector("#subscription-model-select").value ? "intelligent" : "keyword", model_profile_id: document.querySelector("#subscription-model-select").value}};
+
+    await subscriptionRequest(payload);
+    if (version === channelDetectionVersion) {
+      event.target.reset();
+      updateChannelInput();
+      renderActionModelSelectors(true);
+      resetChannelDetection();
+    }
+    status.textContent = "Channel saved. Select it in Plans → Edit / Add Actions.";
+    await fetchAutomationCatalog();
+  } catch (error) { status.textContent = error.message; }
+  finally { updateChannelScopeControls(); }
+});
+for (const key of ["rsshub_base_url", ...connectorSecretKeys]) {
+  document.getElementById(key.replaceAll("_", "-")).addEventListener("input", updateProfileDirtyState);
+  if (connectorSecretKeys.includes(key)) document.getElementById(`clear-${key.replaceAll("_", "-")}`).addEventListener("change", updateProfileDirtyState);
+}
+document.querySelector("#rsshub-use-local").addEventListener("click", () => {
+  document.querySelector("#rsshub-base-url").value = "http://127.0.0.1:1200"; updateProfileDirtyState();
+  document.querySelector("#rsshub-status-detail").textContent = "Local address selected. Save Config to use it.";
+});
+const rsshubRequest = async (operation, values = {}) => {
+  const response = await fetch("/api/rsshub", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({operation, ...values})});
+  const data = await response.json(); if (!response.ok) throw new Error(data.message || "RSSHub operation failed."); return data;
+};
+const renderRsshubStatus = (data = {}, detail = "") => {
+  const state = data.state || "unknown";
+  const busy = Boolean(data.running);
+  const stopped = ["exited", "created"].includes(state);
+  const installed = ["running", "exited", "created", "paused", "restarting", "dead"].includes(state);
+  const allowed = {status: true, setup: state === "not installed", start: stopped,
+    stop: state === "running", reboot: state === "running" || stopped, remove: installed};
+  document.querySelectorAll("[data-rsshub]").forEach((button) => {
+    button.disabled = busy || !allowed[button.dataset.rsshub];
+    button.title = button.disabled ? (busy ? "An operation is in progress." : `Unavailable while service status is ${state}. Check status to refresh.`) : "";
+  });
+  const box = document.querySelector("#rsshub-status");
+  box.dataset.state = busy ? "busy" : data.error ? "error" : state;
+  document.querySelector("#rsshub-state").textContent = busy ? "Operation in progress" : `RSSHub · ${state === "unknown" ? "Status unknown" : state === "exited" || state === "created" ? "Stopped" : state[0].toUpperCase() + state.slice(1)}`;
+  document.querySelector("#rsshub-status-detail").textContent = detail || (busy ? data.message : "Check status to refresh. Container status does not verify feed access.");
+};
+document.querySelector("#rsshub-edit-env").addEventListener("click", async () => {
+  try {
+    const data = await rsshubRequest("env_read");
+    const dialog = automationDialog("RSSHub environment file");
+    const warning = document.createElement("small"); warning.className = "rsshub-credential-warning";
+    warning.textContent = "⚠ This file may contain sensitive credentials. Keep it private; do not share its contents or screenshots. Local and Docker administrators can read it.";
+    dialog.form.append(warning);
+    const content = automationField(dialog.form, "KEY=value · one per line", "textarea", data.content || "");
+    content.rows = 10; content.spellcheck = false; content.autocomplete = "off";
+    dialog.save(async () => {
+      if (!content.value.trim()) throw new Error("Enter environment variables. To delete an existing file, use Delete file.");
+      const result = await rsshubRequest("env_save", {content: content.value});
+      content.value = "";
+      document.querySelector("#rsshub-edit-env").textContent = result.rsshub_managed_env_configured ? "Edit environment file" : "Create environment file";
+      document.querySelector("#rsshub-status-detail").textContent = "Environment file saved. Reinstall to apply; use Setup if not installed. Existing container settings are unchanged until then.";
+    });
+    if (data.rsshub_managed_env_configured) {
+      const remove = document.createElement("button"); remove.type = "button";
+      remove.className = "semantic-action is-destructive"; remove.textContent = "Delete file";
+      dialog.form.querySelector(".app-dialog-actions").prepend(remove);
+      remove.addEventListener("click", async () => {
+        if (!await confirmAction("Delete the environment file created by Knowte? Existing container settings remain until Reinstall. Reinstall will then remove these custom variables.", {title: "Delete environment file", confirmLabel: "Delete file"})) return;
+        const controls = [...dialog.form.querySelectorAll("button, textarea")];
+        controls.forEach(control => { control.disabled = true; });
+        try {
+          await rsshubRequest("env_clear");
+          content.value = "";
+          document.querySelector("#rsshub-edit-env").textContent = "Create environment file";
+          document.querySelector("#rsshub-status-detail").textContent = "Environment file deleted. Reinstall to remove its custom variables from the container.";
+          dialog.form.closest("dialog").close();
+        } catch (error) {
+          dialog.form.closest("dialog").querySelector('[role="alert"]').textContent = error.message;
+        } finally { controls.forEach(control => { control.disabled = false; }); }
+      });
+    }
+  } catch (error) { document.querySelector("#rsshub-status-detail").textContent = error.message; }
+});
+renderRsshubStatus({}, "Check status to enable service controls. No Docker operation runs automatically.");
+document.querySelectorAll("[data-rsshub]").forEach((button) => button.addEventListener("click", async () => {
+  const operation = button.dataset.rsshub;
+  if (operation === "reboot" && !await confirmAction("Rebuild RSSHub with saved settings and the installed image? A running service briefly stops; a stopped service stays stopped. Temporary cache clears. Channels, Sources and Plans are kept.", {title: "Reinstall RSSHub", confirmLabel: "Reinstall"})) return;
+  if (operation === "setup" && !await confirmAction("Download and start RSSHub using Docker on localhost:1200? This does not install Docker or manage platform logins.")) return;
+  if (operation === "remove" && !await confirmAction("Remove only this library’s managed RSSHub container? Its in-memory feed cache will be lost. Saved Channels, Sources, config and the downloaded image are kept.")) return;
+  renderRsshubStatus({running: true, message: "Contacting Docker…"});
+  try {
+    let data = await rsshubRequest(operation);
+    let trackedOperation = operation !== "status" || data.running;
+    while (data.running) {
+      renderRsshubStatus(data);
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      data = await rsshubRequest("status");
+    }
+    renderRsshubStatus({...data, error: trackedOperation && data.error}, trackedOperation ? data.message : "Current container status. Use Channel Preview to verify feed access.");
+  } catch (error) { renderRsshubStatus({error: true}, error.message); }
+}));
+
+
+const loadSearchAction = async (action) => {
+  if (action.kind === "subscribe") {
+    showPanel("search-panel"); setSearchMode("subscribe");
+    await fetchSubscriptions();
+    if (action.id.startsWith("channel-")) {
+      const channel = subscriptions.find((item) => item.id === action.id.slice(8));
+      if (channel) editChannel(channel);
+      return;
+    }
+    document.querySelector("#subscription-status").textContent = `“${action.name}” · ${action.used_by.length} Plans. Manage channel selection in the Plan editor.`;
+    return;
+  }
+  editingSearchAction = action;
+  actionSearchOverrides = action.config;
+  loadPlanIntoSearch({...action.config, name: action.name});
 };
 
 const restorePlanAreas = (areas) => {
+  actionAreaOverride = null;
   const target = new Set(areas || []);
   activePresets.clear();
   const entries = Object.entries(PRESETS);
@@ -10346,6 +11394,8 @@ const restorePlanAreas = (areas) => {
       break;
     }
   }
+  const matched = getEffectiveAreas();
+  if (matched.size !== target.size || [...target].some((code) => !matched.has(code))) actionAreaOverride = [...target];
   renderPresetState();
   renderSelectedAreas();
 };
@@ -10358,7 +11408,9 @@ const loadPlanIntoSearch = (plan) => {
   searchStrategyWaitingActions = [];
   searchStrategyIntent = normalizedSearchIntent();
   searchStrategyStaleAcknowledged = false;
-  setSearchMode(plan.mode === "intelligent" ? "smart" : "keyword");
+  searchModelSelect.value = plan.mode === "intelligent" ? plan.model_profile_id || aiRoleAssignments.intelligent_search || "" : "";
+  searchAIReview = Boolean(searchModelSelect.value);
+  setSearchMode("search");
   renderSearchStrategy();
   searchStrategyEl.hidden = searchMode === "import"
     || !(searchStrategyActions.length || searchStrategyWaitingActions.length);
@@ -10367,58 +11419,78 @@ const loadPlanIntoSearch = (plan) => {
   restorePlanAreas(plan.areas);
   planSourceOverride = [...(plan.sources || [])];
   const sourceNames = planSourceOverride.map(sourceDisplayName).join(", ");
-  searchModeHint.textContent += sourceNames ? ` Plan sources: ${sourceNames}.` : "";
+  searchModeHint.textContent += sourceNames ? ` Action sources: ${sourceNames}.` : "";
   showPanel("search-panel");
-  statusEl.textContent = `Loaded plan “${plan.name}”. It will use current Config credentials and endpoints.`;
+  statusEl.textContent = `Loaded Action “${plan.name}”. Uses current Config credentials and endpoints. Save Action to keep edits.`;
 };
 
 savePlanBtn.addEventListener("click", saveCurrentPlan);
-goToSearchBtn.addEventListener("click", () => {
-  showPanel("search-panel");
-  input.focus();
-});
+document.querySelector("#new-automation-plan").addEventListener("click", () => editAutomationPlan());
+document.querySelectorAll("[data-plan-view]").forEach((button) => button.addEventListener("click", () => {
+  plansView = button.dataset.planView; selectedDestinationPlanId = ""; planRunHistoryId = null; renderPlans(); renderReviewWorkspace();
+}));
+document.querySelector("#action-library-search").addEventListener("input", renderPlans);
+document.querySelector("#action-library-kind").addEventListener("change", renderPlans);
 
 plansListEl.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-plan-action]");
   const card = event.target.closest("[data-plan-id]");
-  if (!button || !card) return;
-  const plan = savedPlans.find((item) => item.id === card.dataset.planId);
+  if (!card) return;
+  if (!button) {
+    if (plansView === "plans" && card.classList.contains("plan-list-row") && !event.target.closest("button, a, input, select, textarea")) openPlanDetail(card.dataset.planId);
+    return;
+  }
+  const plan = (plansView === "actions" ? savedActions : savedPlans).find((item) => item.id === card.dataset.planId);
   if (!plan) return;
   const action = button.dataset.planAction;
+  if (action === "select-plan") { openPlanDetail(plan.id); return; }
+  if (action === "toggle-schedule") {
+    button.disabled = true;
+    try { await writeAutomation({operation: "save_plan", id: plan.id, enabled: !plan.enabled}); plansStatusEl.textContent = plan.enabled ? "Schedule paused. Any active Run finishes normally; the pending scheduled trigger is cleared." : "Schedule resumed from its next future occurrence."; }
+    catch (error) { plansStatusEl.textContent = error.message; button.disabled = false; }
+    return;
+  }
+  if (action === "history") { openPlanDetail(plan.id); planDetailTab = "runs"; renderPlans(); await showPlanRuns(plan.id); return; }
+  if (action === "run-plan") {
+    const processing = plan.processing?.save_sources ? `Selected results will enter Sources (up to ${plan.processing.max_new_sources} new Sources; existing Sources are reused). Overflow waits for the next Run.` : "Discovery results only; automatic Source saving is disabled.";
+    const knowledge = plan.processing?.evidence?.enabled ? `Evidence proposals will be generated using this Plan’s model and Focus.${plan.processing?.claims?.enabled ? " Claim generation continues from pending Evidence without accepting it." : ""}${plan.processing?.relations?.enabled ? " Relation discovery adds one model call per 8 nearby Claim pairs." : ""}${plan.processing?.wiki?.enabled ? " Projected Wiki organization adds 1–2 calls when changes need organization; reviewed Wiki stays unchanged." : ""} Failed batches also retry. Proposals stay awaiting review.` : "Evidence generation is off.";
+    if (!await confirmAction(`Run this Plan now? It uses provider quotas and any AI Review configured in its Actions. ${processing} ${knowledge}`, {title: "Run Plan", confirmLabel: "Run Now"})) return;
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/plans", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({operation: "run_plan", id: plan.id})});
+      const data = await response.json(); if (!response.ok) throw new Error(data.message || "Could not start Run.");
+      openPlanDetail(plan.id); planDetailTab = "runs"; await fetchPlans(); await showPlanRuns(plan.id, data.run_id);
+    } catch (error) { plansStatusEl.textContent = error.message; button.disabled = false; }
+    return;
+  }
   if (action === "load") {
-    loadPlanIntoSearch(plan);
+    loadSearchAction(plan);
     return;
   }
   if (action === "run") {
-    loadPlanIntoSearch(plan);
-    await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ last_run_at: new Date().toISOString() }),
-    });
+    if (plan.kind === "subscribe") {
+      button.disabled = true;
+      try {
+        let count = 0;
+        for (const id of plan.config.subscription_ids) { const data = await subscriptionRequest({operation: "test", id}); count += data.items.length; }
+        plansStatusEl.textContent = `Test complete: ${count} cached items across channels. No Plan checkpoints advanced.`;
+      } catch (error) { plansStatusEl.textContent = error.message; }
+      finally { button.disabled = false; }
+      return;
+    }
+    if (plan.config.mode === "intelligent" && !await confirmAction("Test Run uses academic provider quotas and the selected model API. It does not advance Plan checkpoints or save Sources. Continue?")) return;
+    loadSearchAction(plan);
+    if (plan.config.mode === "intelligent" && plan.config.model_profile_id && searchModelSelect.value !== plan.config.model_profile_id) return;
     form.requestSubmit();
     return;
   }
   if (action === "edit") {
-    const name = await promptText("Plan name", plan.name);
-    if (name === null) return;
-    const query = await promptText("Search intent or keywords", plan.query);
-    if (query === null) return;
-    const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, query }),
-    });
-    const message = response.ok ? "Plan updated." : "Could not update the plan.";
-    await fetchPlans();
-    plansStatusEl.textContent = message;
+    await editAutomationPlan(plan);
     return;
   }
-  if (action === "delete" && await confirmAction(`Delete “${plan.name}”?`)) {
-    const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}`, { method: "DELETE" });
-    const message = response.ok ? "Plan deleted." : "Could not delete the plan.";
-    await fetchPlans();
-    plansStatusEl.textContent = message;
+  if (action === "delete" && await confirmAction(`Delete “${plan.name}”? ${plansView === "plans" ? "Its Actions remain in the library. This Plan’s consumption state is removed." : "Actions used by Plans must be removed from those Plans first."}`)) {
+    try { if (plansView === "actions" && plan.id.startsWith("channel-")) { await subscriptionRequest({operation: "delete", id: plan.id.slice(8)}); await fetchPlans(); } else await writeAutomation({operation: plansView === "plans" ? "delete_plan" : "delete_action", id: plan.id}); selectedPlanActionIds.delete(plan.id); renderReviewWorkspace(); plansStatusEl.textContent = "Deleted."; }
+    catch (error) { plansStatusEl.textContent = error.message; }
   }
 });
 
@@ -10439,7 +11511,7 @@ navLinks.forEach((link) => {
     }
     if (target === "plans-panel") fetchPlans();
     if (target === "sources-panel") fetchLibrary();
-    if (target === "evidence-panel") fetchEvidenceLibrary();
+    if (target === "evidence-panel") Promise.all([fetchEvidenceLibrary(), fetchEvidenceProposals()]);
     if (target === "claims-panel") {
       Promise.all([
         fetchClaims(), fetchClaimProposals(), fetchEvidenceLibrary(), fetchClaimAudits(),
@@ -10653,6 +11725,7 @@ const initTheme = () => {
 };
 
 fetchConfig();
+fetchPlans();
 fetchUsage();
 fetchArtifacts();
 fetchClaims();

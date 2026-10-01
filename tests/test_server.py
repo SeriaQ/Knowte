@@ -26,6 +26,22 @@ from knowte.server import KnowteTCPServer, _import_candidates, create_server
 
 
 class SearchApiTests(unittest.TestCase):
+    def test_new_server_establishes_wal_before_scheduler_starts(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = create_server("127.0.0.1", 0, root / "config.yml")
+            try:
+                connection = sqlite3.connect(root / "knowte.db")
+                try:
+                    self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+                    self.assertIsNotNone(connection.execute(
+                        "SELECT name FROM sqlite_master WHERE name = 'sources'").fetchone())
+                finally:
+                    connection.close()
+            finally:
+                server.server_close()
+
     def test_new_claim_relations_resolve_from_one_model_call(self):
         from knowte.knowledge import accept_claim_proposal, list_claim_proposals
         with tempfile.TemporaryDirectory() as directory:
@@ -1213,6 +1229,22 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(get_status, 200)
         self.assertEqual(fetched["default_search_mode"], "intelligent")
         self.assertIn("default_search_mode: intelligent", config_text)
+
+    def test_subscribe_default_survives_reload_and_ai_review_changes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yml"
+            for review in (True, False):
+                server = create_server("127.0.0.1", 0, config_path)
+                status, saved = self._request(
+                    server, "POST", "/api/config/default-search-mode",
+                    json.dumps({"mode": "subscribe", "ai_review": review}),
+                )
+                server = create_server("127.0.0.1", 0, config_path)
+                _, fetched = self._request(server, "GET", "/api/config")
+                self.assertEqual(status, 200)
+                self.assertEqual(saved["default_search_mode"], "subscribe")
+                self.assertEqual(fetched["default_search_mode"], "subscribe")
+                self.assertEqual(fetched["search_ai_review"], review)
 
     def test_import_can_be_saved_as_default_search_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:

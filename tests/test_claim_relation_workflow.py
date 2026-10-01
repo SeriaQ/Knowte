@@ -26,15 +26,15 @@ class ClaimRelationWorkflowTests(unittest.TestCase):
     def test_new_endpoints_resolve_but_relation_requires_own_acceptance(self):
         left, right = self.draft("Premise"), self.draft("Conclusion")
         relation = self.relation(left, right)
-        with self.assertRaisesRegex(ValueError, "both endpoint"):
+        with self.assertRaisesRegex(ValueError, "upstream"):
             accept_claim_proposal(relation["id"], path=self.db)
-        a = accept_claim_proposal(left["id"], {"statement": "Reviewed premise"}, self.db)
-        with self.assertRaisesRegex(ValueError, "both endpoint"):
+        a = accept_claim_proposal(left["id"], path=self.db)
+        with self.assertRaisesRegex(ValueError, "upstream"):
             accept_claim_proposal(relation["id"], path=self.db)
         b = accept_claim_proposal(right["id"], path=self.db)
         self.assertEqual(get_claim(a["id"], self.db)["relations"], [])
         pending = list_claim_proposals(self.db)[0]["payload"]
-        self.assertEqual(pending["subject_statement"], "Reviewed premise")
+        self.assertEqual(pending["subject_claim_id"], a["id"])
         self.assertEqual(pending["object_claim_id"], b["id"])
         accept_claim_proposal(relation["id"], path=self.db)
         self.assertEqual(len(get_claim(a["id"], self.db)["relations"]), 1)
@@ -44,7 +44,7 @@ class ClaimRelationWorkflowTests(unittest.TestCase):
         relation = self.relation(left, right)
         discard_claim_proposal(left["id"], self.db)
         self.assertTrue(any(p["id"] == relation["id"] for p in list_claim_proposals(self.db)))
-        with self.assertRaisesRegex(ValueError, "discarded"):
+        with self.assertRaisesRegex(ValueError, "Recompute"):
             accept_claim_proposal(relation["id"], path=self.db)
 
     def test_audit_includes_existing_links_without_lexical_similarity(self):

@@ -13,6 +13,17 @@ from knowte.search import _allocate_quotas, _source_weights, search_papers
 
 
 class ProviderYearFilterTests(unittest.TestCase):
+    def test_provider_page_offsets(self):
+        with patch("knowte.providers.arxiv.urlopen", side_effect=OSError) as request:
+            search_arxiv("rl", limit=100, page=2)
+        self.assertIn("start=200", request.call_args.args[0])
+        with patch("knowte.providers.openalex.urlopen", side_effect=OSError) as request:
+            _fetch_openalex("rl", None, 100, page=2)
+        self.assertIn("page=3", request.call_args.args[0])
+        with patch("knowte.providers.semanticscholar.urlopen", side_effect=OSError) as request:
+            _fetch_semanticscholar("rl", 100, page=2)
+        self.assertIn("offset=200", request.call_args.args[0].full_url)
+
     def test_citation_counts_merge_without_treating_missing_as_zero(self):
         base = Paper("a", "Same title", "Author", 2025, "", "", [], "arxiv")
         from dataclasses import replace

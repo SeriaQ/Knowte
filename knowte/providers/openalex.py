@@ -28,8 +28,13 @@ def _fetch_openalex(
     concept: str | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    raise_errors: bool = False,
+    page: int = 0,
+    before_request=None,
 ) -> List[dict]:
     params = {"search": query, "per_page": min(max(limit, 1), 100)}
+    if page:
+        params["page"] = page + 1
     if email:
         params["mailto"] = email
     filters = []
@@ -42,16 +47,24 @@ def _fetch_openalex(
     if filters:
         params["filter"] = ",".join(filters)
     url = f"{OPENALEX_BASE}?{urlencode(params)}"
+    if before_request:
+        before_request()
     try:
         with urlopen(url, timeout=10) as response:
             data = response.read()
     except OSError:
+        if raise_errors:
+            raise
         return []
 
     try:
         payload = json.loads(data)
     except json.JSONDecodeError:
+        if raise_errors:
+            raise
         return []
+    if raise_errors and (not isinstance(payload, dict) or not isinstance(payload.get("results"), list)):
+        raise ValueError("Invalid OpenAlex response")
     return payload.get("results", []) or []
 
 
@@ -63,6 +76,9 @@ def search_openalex(
     query_boosts: List[str] | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    raise_errors: bool = False,
+    page: int = 0,
+    before_request=None,
 ) -> List[Paper]:
     if not query:
         return []
@@ -86,6 +102,9 @@ def search_openalex(
             concept,
             year_from,
             year_to,
+            **({"raise_errors": True} if raise_errors else {}),
+            **({"page": page} if page else {}),
+            **({"before_request": before_request} if before_request else {}),
         ):
             item_id = item.get("id") or item.get("title") or ""
             if item_id in seen_ids:

@@ -5,6 +5,166 @@ All notable changes to Knowte will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-02
+
+### Release highlights
+
+- Continuous discovery through reusable Search and Subscribe Actions, multi-Action
+  Plans, local scheduling, durable incremental Runs and independent consumption.
+- An optimistic Evidence → Claims → Relations → Projected Wiki pipeline. Proposals
+  remain pending; dependency tracking reconciles acceptance, revision and rejection.
+- Feed-provided content is preserved for grounded Evidence generation instead of
+  requiring a model to revisit inaccessible original URLs. Content may be excerpted.
+- Model connection failures defer subsequent Evidence batches using that model.
+  Run details expose stage progress, model usage, failures and retained work.
+
+### Added
+
+- GitHub public activity and selectable repository scopes, Hacker News keyword/user
+  subscriptions for posts and comments, and Others for RSS/Atom, RSSHub and declared website
+  feeds. Channel URLs are identified automatically after input; no social-login
+  credentials or WeRSS deployment are managed. Scope is saved with each Channel
+  and captured in Run history; Plan consumption remains independent.
+- Optional, explicit local RSSHub Docker setup/start/stop/removal restricted to
+  this library's owned container. Existing instances remain supported. Secrets are hidden in API responses and can be
+  preserved, cleared, or redacted on Config export.
+
+### Fixed
+
+- Plan Search now pages past previously seen candidates to refill its new-candidate
+  target, with a ten-page/provider bound, request quota accounting and explicit stop
+  reasons. Partial fetch failures retain results without advancing that checkpoint.
+- Completed Plan Runs notify only newly added or changed review items, not an
+  unchanged backlog. Fast first Runs also refresh knowledge and review queues.
+- Claim merge previews resolve existing Claim text instead of exposing internal
+  identifiers. Knowledge-only Run details explicitly distinguish recomputation
+  from discovery and Source capture.
+- Cross-page Claim merges now keep one Wiki membership, turn other occurrences into
+  links, and remap summary references without breaking unrelated links. Merges mark
+  Wiki knowledge stale even when they happen within the same second as organization.
+- Ignore actions explicitly target one draft or its pending draft chain, reject
+  merge/revision conflicts, and cannot waive existing Wiki organization versions.
+- Startup removes unreferenced Knowte Evidence PNGs under a database write lock,
+  preserving current/history references, symlinks and manually named files. Cleanup
+  failures are reported without preventing startup.
+- Abrupt-process recovery is tested before/after acquisition commit, after proposal
+  persistence and during review acceptance. Interrupted Runs warn that requests
+  without persisted results may already have consumed model quota before retrying.
+
+- Initialize the knowledge database before the local scheduler and HTTP handlers
+  start together, preventing first-run WAL initialization lock conflicts.
+- Refresh knowledge and review queues when a Plan finishes, and refresh Evidence
+  proposals on navigation. Pending relation previews show Claim text instead of
+  internal identifiers; Run details route revisions to Evidence-change review.
+- Wrap Wiki import/export controls consistently on narrow screens and hide
+  reviewed-organization call estimates in Projected view.
+- Plans now describe the full optimistic pipeline instead of an outdated
+  not-yet-connected Wiki notice; structured failure responses remain readable.
+
+- Evidence acceptance now commits captures, related Sources, tags, annotations and
+  downstream review dependencies together. Failed saves roll back database changes
+  and remove only newly written snapshot files, leaving existing images intact.
+- Claim proposal acceptance now commits the reviewed object, tags, proposal outcome,
+  and downstream dependency changes together. Interrupted acceptance rolls back,
+  including relation creation, Evidence linking, and Claim merges, so retrying does
+  not leave a partially accepted knowledge chain.
+
+### Added
+
+- Subscribe now has an inline Channel form with Save. Each Channel is directly
+  selectable in Plans; existing grouped Subscribe Actions and Run history remain
+  compatible. Shared feed caching and independent Plan consumption are unchanged.
+- Ignore downstream drafts rebases a pending Claim/relation dependency subtree in
+  one transaction, without accepting it or clearing unrelated branches. Missing,
+  stale external inputs or already-scheduled replacements block the whole operation.
+  Existing Wiki organization snapshots remain unchanged.
+- Non-overlapping Claim merge proposals now preview one combined identity in
+  Projected Wiki. Input snapshots guard against outdated merges; Evidence and
+  relation remapping match reviewed merge rules. Overlapping merges wait for review.
+- Current AI Claim revisions can continue through relation discovery and Projected
+  Wiki organization before review. The projected revision replaces its old version,
+  without inheriting old semantic relations. Unchanged acceptance remaps downstream
+  references; edits, Ignore and withdrawal invalidate affected projected knowledge.
+- Reviewed Plan Claims affected by Evidence edits receive AI revision suggestions
+  on a subsequent enabled Run, using their original model and Focus. Suggestions
+  remain in Evidence-change review; formal Claims stay unchanged until acceptance.
+  Version guards reject outdated responses, receipts prevent duplicate completed
+  calls, and unsupported revisions remain for manual review.
+- Stale pending Plan Claim drafts are grouped into replacement jobs on the next
+  enabled Run, preserving original drafts and review status. Relation jobs can
+  recompute current endpoints; replacement Claims rediscover their own relations.
+  Recompute starts a knowledge-only Run without discovery or Source capture.
+  Ignore impact explicitly rebases one pending draft when its inputs still exist;
+  other impacted drafts remain untouched. Replacement links and status are visible.
+- Projected Wiki structures can enter the existing editable Wiki Patch review
+  workflow once their Claims are reviewed and current. Applying checks inputs again;
+  discarding keeps the projection intact. Review provenance prevents an applied
+  projection from resurfacing as an outdated replacement.
+- Non-logical Evidence edits preserve downstream logical fingerprints while keeping
+  the latest text available to readers/models; earlier stale dependencies remain
+  stale. Legacy revision records keep their existing version semantics.
+- Plans can organize a durable Projected Wiki with an explicit model, without
+  changing reviewed pages or accepting proposals. Organization respects the Wiki
+  batch limit and uses one call, or two with bounded reference-page selection.
+  Version checks reject stale in-flight results; unchanged acceptance remaps links;
+  changed/rejected dependencies hide affected summaries while preserving other
+  pages. Run history retains projection provenance, retries and raw JSON failures.
+- Optional Plan relation discovery continues from pending Claims using the existing
+  Claim Audit skill, bounded nearby-pair retrieval and an explicit model. Atomic
+  proposal/completion receipts, version checks, retry history and raw invalid-JSON
+  output preserve review boundaries and avoid duplicate successful calls. Run
+  details report the separate Relation stage; existing Plans leave it disabled.
+- Wiki Reviewed only / Projected lens previews current pending Claims, Evidence-link
+  updates and Claim relations without accepting them or modifying reviewed pages.
+  Stale/invalidated branches are excluded; pending items link to their review queue.
+  Automatic projected organization is separate from reviewed pages. Merge/revision
+  conflicts are explicitly reported instead of silently applied.
+- Plan Claim generation continues from pending or reviewed Evidence without
+  auto-acceptance, using its own Focus/model and configured batch limit. Cross-Source
+  batches reuse interactive Claim comparison and proposal generation. Durable
+  receipts support retry/recovery; content-version checks prevent outdated model
+  responses from becoming valid proposals when upstream Evidence changes mid-call.
+- Plans can generate pending Evidence with an optional Focus and explicit model. Generation
+  shares the interactive capture/native-document/URL-fetch service, respects
+  Combined / One by one settings, keeps durable batch receipts and retries failed
+  batches on a later Run without duplicating already-saved proposals. Per-Run
+  generation history is retained.
+- Versioned provisional proposal dependencies: pending Claims can reference pending
+  Evidence without accepting it. Unchanged acceptance resolves references; edits
+  or rejection mark affected descendants stale/invalidated, with retained review
+  outcomes and acceptance guards throughout automatic Plan execution.
+- Plan processing can automatically save selected discoveries to global Sources,
+  with cross-Action deduplication, existing Source preservation, a per-Run new
+  Source limit, and durable overflow processed by later Runs. Run history reports
+  created/reused/deferred counts and links to Sources; Source details trace each
+  discovery to its Plan, Run, Action version and provider or subscription.
+  Existing Plans keep discovery-only behavior until explicitly enabled.
+- Discover replaces Search in navigation, with Search / Subscribe / Import entries.
+- Subscribe channel management, native RSS 2.0/Atom fetching and an optional RSSHub
+  Base URL for adding routes. Subscribe Actions can share channels and run alongside
+  Search Actions. ETag/Last-Modified fetching and persistent feed caches are shared,
+  but each Plan consumes independently; Test fetch never advances Plan checkpoints.
+- Reusable Search Actions and multi-Action manual Plans stored in SQLite. Existing
+  saved search Plans migrate transactionally into Actions plus manual Plans;
+  the original JSON file is retained. Actions support editing, version checks,
+  checkpoint-free Test Run and reuse across independently tracked Plan associations.
+- Local scheduling for every N hours, daily and weekly Plans, with IANA timezones,
+  DST handling, durable next-run timestamps, catch-up-once and coalesced triggers.
+  Pause/resume works during an active Run without interrupting it. Scheduling only
+  runs while the Knowte server process is running; no cloud/background OS service.
+- Manual Plan Runs with durable Action snapshots, provider checkpoints, shared
+  identity aliases and independent per-Plan consumption. Repeated/undated results
+  are deduplicated before AI Review; failed or unprocessed candidates remain queued.
+  Run history includes results, errors and checkpoints. Failed provider requests no
+  longer count as successful empty searches in this workflow. Current connectors
+  use explicit user date filters only (not unsafe automatic publication-year windows).
+  Processing policy controls continuation into Sources and knowledge proposals.
+- Evidence edits can be marked as non-logical changes beside Save. The version
+  history records this decision; earlier unresolved logical changes remain pending.
+- Evidence-changed Claim reviews provide Ignore for explicitly non-logical edits,
+  with version checks and persisted decision history. Deletion impacts cannot be
+  ignored; neither action rewrites Claims or calls a model.
+
 ## [0.6.1] - 2026-09-24
 
 ### Added

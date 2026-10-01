@@ -17,6 +17,9 @@ def _fetch_semanticscholar(
     api_key: str | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    raise_errors: bool = False,
+    page: int = 0,
+    before_request=None,
 ) -> List[dict]:
     params = {
         "query": query,
@@ -25,6 +28,8 @@ def _fetch_semanticscholar(
     }
     if fields:
         params["fieldsOfStudy"] = ",".join(fields)
+    if page:
+        params["offset"] = page * params["limit"]
     if year_from is not None and year_to is not None:
         params["year"] = f"{year_from}-{year_to}"
     elif year_from is not None:
@@ -32,6 +37,8 @@ def _fetch_semanticscholar(
     elif year_to is not None:
         params["year"] = f"-{year_to}"
     url = f"{BASE_URL}?{urlencode(params)}"
+    if before_request:
+        before_request()
     headers = {}
     if api_key:
         headers["x-api-key"] = api_key
@@ -40,12 +47,18 @@ def _fetch_semanticscholar(
         with urlopen(request, timeout=10) as response:
             data = response.read()
     except OSError:
+        if raise_errors:
+            raise
         return []
 
     try:
         payload = json.loads(data)
     except json.JSONDecodeError:
+        if raise_errors:
+            raise
         return []
+    if raise_errors and (not isinstance(payload, dict) or not isinstance(payload.get("data"), list)):
+        raise ValueError("Invalid Semantic Scholar response")
     return payload.get("data", []) or []
 
 
@@ -57,6 +70,9 @@ def search_semanticscholar(
     query_boosts: Optional[List[str]] = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    raise_errors: bool = False,
+    page: int = 0,
+    before_request=None,
 ) -> List[Paper]:
     if not query:
         return []
@@ -77,6 +93,9 @@ def search_semanticscholar(
             api_key,
             year_from,
             year_to,
+            **({"raise_errors": True} if raise_errors else {}),
+            **({"page": page} if page else {}),
+            **({"before_request": before_request} if before_request else {}),
         ):
             item_id = (
                 (item.get("externalIds") or {}).get("DOI")

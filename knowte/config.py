@@ -10,7 +10,7 @@ CONFIG_PATH = CONFIG_DIR / "config.yml"
 
 AI_ROLES = (
     "embedding", "intelligent_search", "source_discovery", "copilot",
-    "evidence", "claims", "wiki", "article",
+    "evidence", "claims", "wiki", "article", "subscription_verify",
 )
 AI_CHAT_ROLES = tuple(role for role in AI_ROLES if role != "embedding")
 
@@ -278,7 +278,7 @@ def remove_obsolete_config_items(
 
 def export_config(path: Path | None = None, redact_secrets: bool = True) -> bytes:
     config = load_config(path)
-    secret_markers = ("api_key", "token", "secret", "password", "credential")
+    secret_markers = ("api_key", "token", "secret", "password", "credential", "consumer_key")
 
     def redact(value):
         if isinstance(value, dict):
@@ -388,16 +388,16 @@ def set_default_search_mode(
     ai_review: bool | None = None,
 ) -> Dict[str, str]:
     normalized = str(mode or "").strip().lower()
-    if normalized not in {"keyword", "intelligent", "import"}:
-        raise ValueError("default search mode must be keyword, intelligent, or import")
+    if normalized not in {"keyword", "intelligent", "import", "subscribe"}:
+        raise ValueError("default search mode must be keyword, intelligent, import, or subscribe")
     config = load_config(path)
     if ai_review is not None:
         if not isinstance(ai_review, bool):
             raise ValueError("AI Review must be a boolean")
         config["search_ai_review"] = "true" if ai_review else "false"
-        if normalized != "import":
+        if normalized not in {"import", "subscribe"}:
             normalized = "intelligent" if ai_review else "keyword"
-    elif normalized != "import":
+    elif normalized not in {"import", "subscribe"}:
         config["search_ai_review"] = "true" if normalized == "intelligent" else "false"
     config["default_search_mode"] = normalized
     save_config(config, path)

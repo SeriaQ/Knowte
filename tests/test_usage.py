@@ -8,6 +8,27 @@ from knowte import usage
 
 
 class UsageLimitTests(unittest.TestCase):
+    def test_subscription_counts_are_separate_and_expire(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir)
+            with patch.object(usage, "USAGE_DIR", path), patch.object(usage, "USAGE_PATH", path / "usage.json"):
+                now = 1_700_000_000
+                self.assertEqual(usage.get_usage(now)["last_day_rss"], 0)
+                usage.record_subscription_request("rss", now)
+                usage.record_subscription_request("subscription_api", now)
+                usage.record_subscription_request("subscription_api", now)
+                usage.record_request(["arxiv"], now)
+                usage.record_ai_usage(chat_requests=1, now=now)
+                result = usage.get_usage(now)
+                self.assertEqual(result["last_day_rss"], 1)
+                self.assertEqual(result["last_5_min_subscription_api"], 2)
+                later = usage.get_usage(now + 301)
+                self.assertEqual(later["last_5_min_rss"], 0)
+                self.assertEqual(later["last_day_subscription_api"], 2)
+                tomorrow = usage.get_usage(now + 86400)
+                self.assertEqual(tomorrow["last_day_rss"], 0)
+                self.assertEqual(tomorrow["last_day_subscription_api"], 0)
+
     def test_concurrent_requests_do_not_lose_counts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             usage_path = Path(temp_dir) / "usage.json"

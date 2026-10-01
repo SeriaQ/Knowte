@@ -124,6 +124,7 @@ const findButton = (bar, text) => bar.children.find(item => item.tag === "button
   }
   const appliedWiki = {pages:[], claims:[]};
   const applyContext = {
+    wikiKnowledgeView: "projected", wikiKnowledgeViewSelect: {value: "projected"},
     wikiRefreshVersion:0, reviewState:()=>({selected:new Set()}),
     wikiStatusEl:{}, wikiState:{}, wikiProposals:[{id:"apply"}],
     activeWikiProposalPageKeys:new Map(), activeWikiProposalId:"apply",
@@ -177,6 +178,7 @@ const findButton = (bar, text) => bar.children.find(item => item.tag === "button
   assert.equal(saveContext.wikiStatusEl.textContent, "Save offline");
   const refreshStart = app.indexOf("let wikiRefreshVersion = 0;");
   const refreshContext = {wikiProposals:[{id:"draft",_dirty:true,payload:{title:"local edit"}}],
+    wikiKnowledgeView: "reviewed",
     wikiStatusEl:node("small"), document:{createElement:node},
     wikiState:{},wikiImports:[], reviewState:()=>({busy:false}),renderWiki:()=>{},currentReviewContext:()=>"search",
     fetch:async url=>({ok:true,json:async()=>url.endsWith('/proposals') ? {proposals:[{id:"draft",payload:{title:"server"}}]} : url.endsWith('/imports') ? {imports:[]} : {pages:[]}})};

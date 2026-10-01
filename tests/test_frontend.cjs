@@ -42,11 +42,12 @@ for (const [count, expected] of [[undefined, "Unknown"], [null, "Unknown"], [0, 
 }
 console.log("PASS citation counts and multi-type import prompt JSON");
 
-const modelSelect = () => ({value: "old", options: [],
+const modelSelect = () => ({value: "old", options: [{value: "old"}],
   replaceChildren(...options) { this.options = options; },
   appendChild(option) { this.options.push(option); },
 });
 const modelControls = {
+  document: {querySelector: () => null}, searchMode: "search", searchAIReview: false,
   Option: function(text, value) { this.text = text; this.value = value; },
   aiRoleAssignments: Object.fromEntries(["intelligent_search", "source_discovery", "evidence", "claims", "wiki", "article"].map((role) => [role, "new"])),
   aiModelProfiles: [{id: "old", capabilities: ["chat"]}, {id: "new", capabilities: ["chat"]}],
@@ -136,7 +137,7 @@ assert.equal(search.merge(pages, "intent", 4).can_find_more, false);
 
 const control = (mode) => ({ hidden: false, dataset: { searchMode: mode }, classList: { toggle() {} }, setAttribute() {} });
 const modes = {
-  searchMode: "keyword", searchAIReview: false, searchAIReviewInput: {},
+  searchMode: "keyword", searchAIReview: false, searchModelSelect: {value: "model"},
   searchModeButtons: [control("search"), control("import")],
   searchStrategyActions: [{ query: "attention" }], searchStrategyWaitingActions: [],
   document: { querySelector: () => control() },
@@ -146,9 +147,9 @@ for (const name of ["searchStrategyEl", "searchImportEl", "filtersEl", "discussS
 vm.createContext(modes);
 vm.runInContext(fragment("const setSearchMode =", "const renderDefaultSearchMode =") + "this.setMode = setSearchMode;", modes);
 modes.setMode("smart"); // Legacy Intelligent Plan.
-assert.equal(modes.searchAIReviewInput.checked, true);
+assert.equal(modes.searchAIReview, true);
 modes.setMode("keyword"); // Legacy Keyword Plan.
-assert.equal(modes.searchAIReviewInput.checked, false);
+assert.equal(modes.searchAIReview, false);
 assert.equal(modes.discussSearchBtn.hidden, false);
 assert.equal(modes.searchStrategyEl.hidden, false);
 modes.setMode("import");

@@ -98,6 +98,9 @@ def _normalize_usage(data: Dict[str, object], now: float) -> Dict[str, object]:
         "day_ai_embedding_requests": day_ai_embedding_requests,
         "day_ai_embedding_tokens": day_ai_embedding_tokens,
     }
+    for kind in ("rss", "subscription_api"):
+        normalized["recent_" + kind] = [t for t in data.get("recent_" + kind, []) if now - t <= WINDOW_SECONDS]
+        normalized["day_" + kind] = int(data.get("day_" + kind, 0)) if data.get("day") == day_key else 0
     return normalized
 
 
@@ -108,6 +111,9 @@ def get_usage(now: float | None = None) -> Dict[str, int]:
         data = _normalize_usage(_load_usage(), now)
         _save_usage(data)
         return {
+            **{key: value for kind in ("rss", "subscription_api") for key, value in (
+                ("last_5_min_" + kind, len(data["recent_" + kind])),
+                ("last_day_" + kind, data["day_" + kind]))},
             "last_5_min": len(data["recent_paper"]),
             "last_day": int(data["day_paper_count"]),
             "last_5_min_web": len(data["recent_web"]),
@@ -117,6 +123,17 @@ def get_usage(now: float | None = None) -> Dict[str, int]:
             "last_day_ai_embedding": int(data["day_ai_embedding_requests"]),
             "last_day_ai_embedding_tokens": int(data["day_ai_embedding_tokens"]),
         }
+
+
+def record_subscription_request(kind: str, now: float | None = None) -> None:
+    if kind not in {"rss", "subscription_api"}:
+        raise ValueError("Unknown subscription request kind")
+    now = time.time() if now is None else now
+    with _USAGE_LOCK:
+        data = _normalize_usage(_load_usage(), now)
+        data["recent_" + kind].append(now)
+        data["day_" + kind] += 1
+        _save_usage(data)
 
 
 def record_request(backends: list[str] | None = None, now: float | None = None) -> Dict[str, int]:

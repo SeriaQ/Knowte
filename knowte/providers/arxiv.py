@@ -33,6 +33,9 @@ def search_arxiv(
     categories: List[str] | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    raise_errors: bool = False,
+    page: int = 0,
+    before_request=None,
 ) -> List[Paper]:
     if not query:
         return []
@@ -40,24 +43,34 @@ def search_arxiv(
     area_clause = _build_area_filter(categories or [])
     year_clause = _build_year_filter(year_from, year_to)
     request_limit = min(max(limit, 1), 100)
-    url = f"{ARXIV_BASE}?search_query=all:{encoded}{area_clause}{year_clause}&start=0&max_results={request_limit}"
+    url = f"{ARXIV_BASE}?search_query=all:{encoded}{area_clause}{year_clause}&start={page * request_limit}&max_results={request_limit}"
+    if before_request:
+        before_request()
     try:
         with urlopen(url, timeout=10) as response:
             data = response.read()
     except OSError:
+        if raise_errors:
+            raise
         return []
 
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
+        if raise_errors:
+            raise
         return []
 
     papers: List[Paper] = []
+    if raise_errors and root.tag != "{http://www.w3.org/2005/Atom}feed":
+        raise ValueError("Invalid arXiv response")
     ns = {
         "atom": "http://www.w3.org/2005/Atom",
         "arxiv": "http://arxiv.org/schemas/atom",
     }
     for entry in root.findall("atom:entry", ns):
+        if raise_errors and "/api/errors" in entry.findtext("atom:id", default="", namespaces=ns):
+            raise ValueError("arXiv returned an API error")
         title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
         summary = (entry.findtext("atom:summary", default="", namespaces=ns) or "").strip()
         authors = ", ".join(

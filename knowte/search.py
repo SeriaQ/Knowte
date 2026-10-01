@@ -292,6 +292,9 @@ def search_papers(
     allow_web_external: bool = True,
     diagnostics: Dict[str, object] | None = None,
     strict_match: bool = True,
+    raise_provider_errors: bool = False,
+    academic_page: int = 0,
+    before_provider_request=None,
 ) -> List[dict]:
     query = (query or "").strip()
     if not query:
@@ -322,7 +325,7 @@ def search_papers(
         year_from,
         year_to,
     )
-    academic_results = _cached_academic_pools(academic_cache_key)
+    academic_results = None if raise_provider_errors or academic_page else _cached_academic_pools(academic_cache_key)
     academic_cache_hit = academic_results is not None
     academic_external_request = False
     academic_rate_limited = False
@@ -336,36 +339,46 @@ def search_papers(
                     requests["arxiv"] = executor.submit(
                         search_arxiv,
                         query,
+                        **({"before_request": before_provider_request} if before_provider_request else {}),
+                        **({"page": academic_page} if academic_page else {}),
                         limit=fetch_limit,
                         categories=arxiv_cats,
                         year_from=year_from,
                         year_to=year_to,
+                        **({"raise_errors": True} if raise_provider_errors else {}),
                     )
                 if "openalex" in enabled:
                     requests["openalex"] = executor.submit(
                         search_openalex,
                         query,
+                        **({"before_request": before_provider_request} if before_provider_request else {}),
+                        **({"page": academic_page} if academic_page else {}),
                         email=email,
                         limit=fetch_limit,
                         concepts=openalex_concepts,
                         query_boosts=boosts,
                         year_from=year_from,
                         year_to=year_to,
+                        **({"raise_errors": True} if raise_provider_errors else {}),
                     )
                 if "semanticscholar" in enabled:
                     requests["semanticscholar"] = executor.submit(
                         search_semanticscholar,
                         query,
+                        **({"before_request": before_provider_request} if before_provider_request else {}),
+                        **({"page": academic_page} if academic_page else {}),
                         limit=fetch_limit,
                         fields=s2_fields,
                         api_key=semanticscholar_key,
                         query_boosts=boosts,
                         year_from=year_from,
                         year_to=year_to,
+                        **({"raise_errors": True} if raise_provider_errors else {}),
                     )
                 for source, future in requests.items():
                     academic_results[source] = future.result()
-            _store_academic_pools(academic_cache_key, academic_results)
+            if not academic_page:
+                _store_academic_pools(academic_cache_key, academic_results)
         elif academic_sources:
             academic_rate_limited = True
 
@@ -430,6 +443,7 @@ def search_papers(
         diagnostics["websearch"] = web_diagnostics
     if diagnostics is not None:
         diagnostics["academic"] = {
+            "raw_count": sum(len(items) for items in academic_results.values()),
             "cache_hit": academic_cache_hit,
             "external_request": academic_external_request,
             "rate_limited": academic_rate_limited,

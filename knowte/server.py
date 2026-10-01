@@ -70,6 +70,7 @@ from .knowledge import (
     create_annotation,
     create_artifact,
     accept_claim_proposal,
+    ignore_evidence_change_review,
     create_claim,
     create_claim_relation,
     create_claim_proposal,
@@ -96,6 +97,8 @@ from .knowledge import (
     get_source_workspace,
     get_view,
     get_wiki,
+    review_wiki_projection,
+    ignore_proposal_impact,
     find_claim_comparison_context,
     list_claim_proposals,
     list_evidence_proposals,
@@ -129,7 +132,11 @@ from .knowledge import (
     list_project_wiki_proposals,
     save_project_document,
 )
-from .plans import PLANS_PATH, create_plan, delete_plan, list_plans, update_plan
+from .plans import PLANS_PATH
+from .automation import catalog as automation_catalog, mutate as mutate_automation, search_settings
+from .plan_runs import start_run as start_plan_run, list_runs as list_plan_runs, recover_interrupted
+from .subscriptions import list_subscriptions, save_subscription, delete_subscription, fetch_subscription
+from . import channel_connectors, rsshub
 from .prompts.review_copilot import (
     review_copilot_prompt,
     review_copilot_shared_prompt,
@@ -568,6 +575,16 @@ class KnowteTCPServer(socketserver.ThreadingTCPServer):
     # backlog of five drops bursts before a request handler can even run.
     request_queue_size = 128
 
+    def serve_forever(self, poll_interval=0.5):
+        scheduler = getattr(self, "plan_scheduler", None)
+        if scheduler:
+            scheduler.start()
+        try:
+            super().serve_forever(poll_interval)
+        finally:
+            if scheduler:
+                scheduler.stop()
+
     def handle_error(self, request, client_address):
         error = sys.exc_info()[1]
         if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
@@ -794,6 +811,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             payload = {
                 "library_name": self.library_name,
                 "email": config.get("email", ""),
+                **channel_connectors.public_settings(config),
+                **rsshub.public_credentials(self.config_path),
                 "semanticscholar_api_key": "",
                 "semanticscholar_api_key_configured": bool(
                     config.get("semanticscholar_api_key", "")
@@ -808,7 +827,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 "default_search_mode": (
                     config.get("default_search_mode")
                     if config.get("default_search_mode")
-                    in {"keyword", "intelligent", "import"}
+                    in {"keyword", "intelligent", "import", "subscribe"}
                     else "keyword"
                 ),
                 "search_ai_review": self._parse_bool(config.get("search_ai_review", "true" if config.get("default_search_mode") == "intelligent" else "false")),
@@ -962,6 +981,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 limit = self._parse_bounded_int(
                     params.get("limit", ["20"])[0], 20, 1, 100
                 )
+                raw_settings = json.loads(params.get("action_settings", ["{}"])[0])
+                if not isinstance(raw_settings, dict):
+                    raise ValueError("Action settings must be an object")
+                config = {**config, **search_settings(raw_settings)}
                 raw_strategy = params.get("strategy", [""])[0]
                 search_actions = json.loads(raw_strategy) if raw_strategy else []
                 if not isinstance(search_actions, list):
@@ -1031,13 +1054,21 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
             return
+        if parsed.path.rstrip("/") == "/api/subscriptions":
+            self._send_json({"subscriptions": list_subscriptions(self.knowledge_db_path)})
+            return
+        if parsed.path.rstrip("/") == "/api/plan-runs":
+            params = parse_qs(parsed.query)
+            recover_interrupted(self.knowledge_db_path)
+            self._send_json({"runs": list_plan_runs(self.knowledge_db_path,
+                plan_id=params.get("plan_id", [None])[0], run_id=params.get("run_id", [None])[0])})
+            return
         if parsed.path.rstrip("/") == "/api/plans":
-            body = json.dumps({"plans": list_plans(self.plans_path)}).encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                recover_interrupted(self.knowledge_db_path)
+                self._send_json(automation_catalog(self.knowledge_db_path, self.plans_path))
+            except ValueError as error:
+                self._send_json({"message": str(error)}, HTTPStatus.BAD_REQUEST)
             return
         if parsed.path.rstrip("/") == "/api/artifacts":
             self._send_json(
@@ -1097,7 +1128,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self._send_json({"views": list_views(self.knowledge_db_path)})
             return
         if parsed.path.rstrip("/") == "/api/wiki":
-            self._send_json(get_wiki(self.knowledge_db_path))
+            self._send_json(get_wiki(self.knowledge_db_path,
+                projected=parse_qs(parsed.query).get("view", [""])[0] == "projected"))
             return
         if parsed.path.rstrip("/") == "/api/wiki/proposals":
             self._send_json(
@@ -1456,7 +1488,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             r"/api/library/sources/([0-9a-f]+)/capture", route
         )
         proposal_accept_match = re.fullmatch(
-            r"/api/claim-proposals/([0-9a-f]+)/accept", route
+            r"/api/claim-proposals/([0-9a-f]+)/(accept|ignore)", route
         )
         project_claim_recommendation_accept_match = re.fullmatch(
             r"/api/project-claim-recommendations/([0-9a-f]+)/accept", route
@@ -1491,6 +1523,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/config/default-search-mode",
             "/api/searxng",
             "/api/plans",
+            "/api/subscriptions",
+            "/api/rsshub",
             "/api/artifacts",
             "/api/library/sources",
             "/api/library/sources/batch",
@@ -1509,6 +1543,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "/api/library/documents",
             "/api/wiki/proposals/generate",
             "/api/wiki/proposals/edit",
+            "/api/wiki/projection/review",
+            "/api/claim-proposals/ignore-impact",
             "/api/wiki/reset",
             "/api/wiki/articles/generate",
             "/api/project-articles/generate",
@@ -2031,9 +2067,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             return
         if proposal_accept_match:
             try:
-                claim = accept_claim_proposal(
-                    proposal_accept_match.group(1), payload, self.knowledge_db_path
-                )
+                if proposal_accept_match.group(2) == "ignore":
+                    claim = ignore_evidence_change_review(proposal_accept_match.group(1), str(payload.get("change_token") or ""), self.knowledge_db_path)
+                else:
+                    claim = accept_claim_proposal(proposal_accept_match.group(1), payload, self.knowledge_db_path)
                 self._send_json(claim, HTTPStatus.CREATED)
             except ValueError as error:
                 self._send_json(
@@ -2378,6 +2415,25 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     if error.code in {"ai_unconfigured", "chat_model_missing"}
                     else HTTPStatus.SERVICE_UNAVAILABLE,
                 )
+            return
+        if route == "/api/claim-proposals/ignore-impact":
+            try:
+                if payload.get("confirmed") is not True:
+                    raise ValueError("Confirm that the upstream change does not affect this draft")
+                scope = payload.get("scope", "draft")
+                if scope not in {"draft", "descendants"}:
+                    raise ValueError("Unsupported Ignore scope")
+                from .knowledge import ignore_proposal_descendants
+                ignore = ignore_proposal_descendants if scope == "descendants" else ignore_proposal_impact
+                self._send_json(ignore(str(payload.get("id") or ""), self.knowledge_db_path))
+            except ValueError as error:
+                self._send_json({"message": str(error)}, HTTPStatus.CONFLICT)
+            return
+        if route == "/api/wiki/projection/review":
+            try:
+                self._send_json({"proposal": review_wiki_projection(str(payload.get("projection_id") or ""), self.knowledge_db_path)}, HTTPStatus.CREATED)
+            except ValueError as error:
+                self._send_json({"message": str(error)}, HTTPStatus.CONFLICT)
             return
         if route == "/api/wiki/reset":
             if payload.get("confirmed") is not True:
@@ -2761,8 +2817,9 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 limit = int(payload.get("max_pages", 4))
                 config = load_config(self.config_path)
                 source_limit = self._parse_bounded_int(config.get("ai_evidence_source_limit"), 6, 1, 100)
-                if not isinstance(ids, list) or not 1 <= len(ids) <= source_limit or not focus or not 1 <= limit <= MAX_PAGES:
-                    raise ValueError(f"Choose 1–{source_limit} webpage Sources, a Focus, and a total page limit of 1–{MAX_PAGES}")
+                if not isinstance(ids, list) or not 1 <= len(ids) <= source_limit or not 1 <= limit <= MAX_PAGES:
+                    raise ValueError(f"Choose 1–{source_limit} webpage Sources and a total page limit of 1–{MAX_PAGES}")
+                focus = focus or "Find substantive pages covering the main topics of the selected Sources, prioritizing primary explanations and supporting material."
                 sources = [get_source(str(sid), self.knowledge_db_path) for sid in dict.fromkeys(ids)]
                 if any(s.get("document_hash") or s.get("source_type") == "paper" for s in sources):
                     raise ValueError("Related pages is for webpages. Use Selected pages for papers and uploaded documents.")
@@ -2785,454 +2842,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self._send_json(response, status)
             return
         if route == "/api/evidence-proposals/generate":
-            source_ids = payload.get("source_ids")
-            if not isinstance(source_ids, list):
-                source_ids = []
-            selection_limit = self._parse_bounded_int(load_config(self.config_path).get("ai_evidence_source_limit"), 6, 1, 100)
-            if len(source_ids) > selection_limit:
-                self._send_json({"message": f"Select at most {selection_limit} items for this run."}, HTTPStatus.BAD_REQUEST)
-                return
-            source_ids = list(dict.fromkeys(str(item) for item in source_ids if item))
-            focus = str(payload.get("focus") or "").strip()[:2000]
-            if not source_ids or not focus:
-                self._send_json(
-                    {"error": "source_focus_required",
-                     "message": "Select at least one Source and enter a Focus."},
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
-            try:
-                config = load_config(self.config_path)
-                profile_id = str(payload.get("model_profile_id") or "")[:80]
-                client = _client_from_config(config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="evidence", profile_id=profile_id)
-                profile = next((item for item in ai_model_profiles(config) if item["id"] == profile_id), None) or ai_profile_for_role(config, "evidence")
-                capabilities = set(profile.get("capabilities", []))
-                related_workspaces = {}
-                related_pages = payload.get("related_pages")
-                request_mode = config.get("ai_evidence_request_mode", "combined")
-                seed_ids = list(source_ids)
-                if related_pages is not None:
-                    if not isinstance(related_pages, list) or not 1 <= len(related_pages) <= MAX_PAGES:
-                        raise ValueError(f"Related page count must be between 1 and {MAX_PAGES}; requests are never silently split")
-                    request_mode = payload.get("related_request_mode", request_mode)
-                    if request_mode not in {"combined", "individual"}:
-                        raise ValueError("Invalid related-page request mode")
-                    seeds = {sid: get_source(sid, self.knowledge_db_path) for sid in seed_ids}
-                    saved = {page_url(s["url"]): s for s in list_sources(self.knowledge_db_path) if str(s.get("url") or "").startswith(("http://", "https://"))}
-                    source_ids = []
-                    for page in related_pages:
-                        if not isinstance(page, dict):
-                            raise ValueError("Invalid related page")
-                        parent = seeds.get(str(page.get("parent_source_id") or ""))
-                        url = page_url(page.get("url"))
-                        if parent is None or not in_scope(url, parent.get("url") or parent.get("paper_url")):
-                            raise ValueError("Selected related page is outside the seed website/version")
-                        source = saved.get(url)
-                        if source:
-                            workspace = get_source_workspace(source["id"], self.knowledge_db_path)
-                        else:
-                            source = {"id": hashlib.sha256(url.encode()).hexdigest()[:32], "url": url,
-                                      "title": str(page.get("title") or url)[:1000], "source_type": "web",
-                                      "parent_source_id": parent["id"]}
-                            workspace = {"source": source, "segments": [], "capture": None, "pending_source": True}
-                        if source["id"] not in related_workspaces:
-                            related_workspaces[source["id"]] = workspace
-                            source_ids.append(source["id"])
-                groups = [[sid] for sid in source_ids] if request_mode == "individual" else [source_ids]
-                proposals, warnings, summaries = [], [], []
-                for group in groups:
-                    try:
-                        workspaces, documents, urls, manifest = [], [], [], []
-                        for source_id in group:
-                            workspace = related_workspaces.get(source_id) or get_source_workspace(source_id, self.knowledge_db_path)
-                            source = workspace["source"]
-                            url = source.get("url") or source.get("paper_url")
-                            kind = "capture"
-                            local_document = bool(source.get("document_hash"))
-                            local_pdf = local_document and workspace.get("capture", {}).get("media_type") == "application/pdf"
-                            is_pdf = local_pdf or bool(source.get("pdf_url")) or source.get("source_type") == "paper" or str(url).split("?")[0].endswith(".pdf")
-                            if is_pdf and capabilities & {"native_documents", "file_extraction"}:
-                                if local_pdf:
-                                    original, _, _ = get_capture_file(source_id, self.content_dir, self.knowledge_db_path)
-                                    captured = {"media_type": "application/pdf", "raw_path": str(original)}
-                                elif workspace.get("pending_source"):
-                                    import tempfile
-                                    with tempfile.TemporaryDirectory(prefix="knowte-related-") as temporary:
-                                        captured = capture_source_content(source, Path(temporary), parse_pdf=False)
-                                        document_bytes = Path(captured["raw_path"]).read_bytes()
-                                else:
-                                    captured = capture_source_content(source, self.content_dir, parse_pdf=False)
-                                if captured["media_type"] != "application/pdf":
-                                    raise CaptureError("Source did not return a PDF. Choose URL Fetch or text explicitly.")
-                                documents.append({"data": document_bytes if workspace.get("pending_source") else Path(captured["raw_path"]).read_bytes(), "mime_type": "application/pdf", "filename": f"{source_id}.pdf"})
-                                kind = "native_document"
-                            elif "url_fetch" in capabilities and url:
-                                urls.append(str(url))
-                                kind = "url"
-                            elif not workspace.get("segments"):
-                                if workspace.get("pending_source"):
-                                    import tempfile
-                                    with tempfile.TemporaryDirectory(prefix="knowte-related-") as temporary:
-                                        captured = capture_source_content(source, Path(temporary))
-                                    workspace["segments"] = [{"id": f"{source_id}-{i}", "text": text,
-                                        "locator": captured["locators"][i]} for i, text in enumerate(captured["segments"])]
-                                else:
-                                    captured = capture_source_content(source, self.content_dir)
-                                    workspace = store_capture(source_id, captured, self.knowledge_db_path)
-                            segments, budget = [], 0
-                            if kind == "capture":
-                                if not any(str(s.get("text") or "").strip() for s in workspace.get("segments", [])):
-                                    raise ValueError("No extractable text. Use a native PDF model, or capture Evidence manually in Inspect.")
-                                for segment in workspace.get("segments", []):
-                                    text = str(segment.get("text") or "")[:max(0, 45000 - budget)]
-                                    if not text:
-                                        continue
-                                    segments.append({"segment_id": segment["id"], "locator": segment.get("locator", ""), "text": text})
-                                    budget += len(text)
-                                if sum(len(item.get("text", "")) for item in workspace.get("segments", [])) > budget:
-                                    warnings.append(f"{source['title']}: text truncated to 45,000 characters.")
-                            workspaces.append(workspace)
-                            images = []
-                            if url and not is_pdf and not local_document:
-                                try:
-                                    images = discover_source_images(str(url))
-                                except (CaptureError, OSError, ValueError) as error:
-                                    warnings.append(f"{source['title']}: image discovery unavailable: {error}")
-                            manifest.append({"source_id": source_id, "title": source["title"], "url": url, "input_kind": kind, "segments": segments, "images": images})
-                        request_text = json.dumps({"focus": focus, "sources": manifest}, ensure_ascii=False)
-                        if documents or urls:
-                            result = client.grounded_json(_evidence_document_proposal_prompt(self.config_path.parent / "skills"), request_text, documents=documents, urls=urls, max_tokens=3500)
-                        else:
-                            prompt = _evidence_document_proposal_prompt if any(item["images"] for item in manifest) else _evidence_proposal_prompt
-                            result = client.chat_json(prompt(self.config_path.parent / "skills"), request_text, temperature=0.1, max_tokens=3500)
-                        candidates = result.get("evidence", [])
-                        if result.get("summary"):
-                            summaries.append(str(result["summary"])[:1000])
-                        created = 0
-                        for candidate in candidates[:12] if isinstance(candidates, list) else []:
-                            if not isinstance(candidate, dict):
-                                continue
-                            sid = str(candidate.get("source_id") or "")
-                            if not sid:
-                                sid = next((w["source"]["id"] for w in workspaces if any(s["id"] == candidate.get("segment_id") for s in w.get("segments", []))), "")
-                            workspace = next((w for w in workspaces if w["source"]["id"] == sid), None)
-                            if workspace is None:
-                                continue
-                            entry = next(item for item in manifest if item["source_id"] == sid)
-                            if candidate.get("evidence_type") == "snapshot":
-                                asset = next((item for item in entry["images"] if item["image_url"] == candidate.get("image_url")), None)
-                                if asset is None:
-                                    warnings.append(f"{entry['title']}: proposed image was not in this page's original image directory.")
-                                    continue
-                                try:
-                                    candidate = {**candidate, "image_data": capture_evidence_image(asset["image_url"]),
-                                                 "quote": asset["caption"], "image_alt": asset["alt"],
-                                                 "segment_id": "", "verification": "external_unverified"}
-                                except (CaptureError, OSError, ValueError) as error:
-                                    warnings.append(f"{entry['title']}: {error}")
-                                    continue
-                            mapped = _map_document_quote(workspace, candidate.get("quote", ""))
-                            if candidate.get("evidence_type") == "snapshot":
-                                pass
-                            elif mapped:
-                                segment_id, quote = mapped
-                                candidate = {**candidate, "quote": quote, "segment_id": segment_id, "verification": "local_match"}
-                            elif entry["input_kind"] != "capture":
-                                candidate = {**candidate, "segment_id": "", "verification": "external_unverified"}
-                            else:
-                                warnings.append(f"{entry['title']}: an excerpt did not match captured text.")
-                                continue
-                            try:
-                                related_source = None
-                                if workspace.get("pending_source"):
-                                    related_source = {"title": workspace["source"]["title"], "url": entry["url"],
-                                                      "parent_source_id": workspace["source"]["parent_source_id"]}
-                                    candidate = {**candidate, "segment_id": "", "verification": "external_unverified"}
-                                proposals.append(create_evidence_proposal(
-                                    {**candidate, "source_id": sid, "source_url": entry["url"], "related_source": related_source},
-                                    _EVIDENCE_PROPOSAL_CAPABILITY, _model_name_from_config(config, "evidence", profile_id),
-                                    {"kind": "related_pages" if related_pages is not None else "selected_sources", "source_ids": group, "seed_source_ids": seed_ids, "focus": focus,
-                                     "summary": str(result.get("summary") or "")[:2000],
-                                     "inputs": [{"source_id": item["source_id"], "title": item["title"], "url": item["url"], "input_kind": item["input_kind"],
-                                                 "text_characters": sum(len(s["text"]) for s in item["segments"])} for item in manifest]},
-                                    self.knowledge_db_path,
-                                ))
-                                created += 1
-                            except ValueError as error:
-                                warnings.append(f"{entry['title']}: {error}")
-                        if not created:
-                            warnings.append("No usable Evidence returned for: " + ", ".join(item["title"] for item in manifest))
-                    except (AIError, CaptureError, ValueError, OSError) as error:
-                        warnings.append(f"Sources {', '.join(group)}: {error}")
-                snapshot = client.usage_snapshot()
-                latest_usage = record_ai_usage(chat_requests=snapshot.get("chat_requests", 0), chat_tokens=snapshot.get("chat_tokens", 0))
-                self._send_json({"proposals": proposals, "warnings": warnings, "summary": "\n".join(summaries), "usage": latest_usage}, HTTPStatus.CREATED)
-            except (AIError, CaptureError) as error:
-                self._send_json(
-                    {"error": getattr(error, "code", "evidence_proposal_failed"),
-                     "message": str(error)}, HTTPStatus.BAD_GATEWAY,
-                )
-            except ValueError as error:
-                self._send_json(
-                    {"error": "source_not_found", "message": str(error)},
-                    HTTPStatus.BAD_REQUEST,
-                )
+            data, status = generate_evidence_proposals(payload, self.config_path, self.knowledge_db_path, self.content_dir)
+            self._send_json(data, status)
             return
         if route == "/api/claim-proposals/generate":
-            evidence_ids = payload.get("evidence_ids")
-            if not isinstance(evidence_ids, list):
-                evidence_ids = []
-            selection_limit = self._parse_bounded_int(load_config(self.config_path).get("ai_claim_evidence_limit"), 30, 1, 100)
-            if len(evidence_ids) > selection_limit:
-                self._send_json({"message": f"Select at most {selection_limit} items for this run."}, HTTPStatus.BAD_REQUEST)
-                return
-            evidence_ids = list(dict.fromkeys(
-                str(item) for item in evidence_ids if item
-            ))
-            evidence_items = [
-                item for item in list_evidence(self.knowledge_db_path)
-                if item["id"] in evidence_ids
-            ]
-            if not evidence_items:
-                self._send_json(
-                    {
-                        "error": "evidence_required",
-                        "message": "Select at least one Evidence item.",
-                    },
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
-            try:
-                config = load_config(self.config_path)
-                client = _client_from_config(
-                    config, skills_dir=self.config_path.parent / "skills", require_embedding=False, role="claims",
-                    profile_id=str(payload.get("model_profile_id") or "")[:80],
-                )
-                artifact = payload.get("artifact")
-                artifact = artifact if isinstance(artifact, dict) else {}
-                focus = str(payload.get("focus") or "").strip()[:2000]
-                scope = {
-                    "kind": "selected_evidence",
-                    "evidence_ids": evidence_ids,
-                    "artifact_id": str(artifact.get("id") or ""),
-                    "artifact_title": str(artifact.get("title") or "")[:300],
-                    "focus": focus,
-                }
-                evidence_context = [
-                    {
-                        "evidence_id": item["id"],
-                        "type": item["evidence_type"],
-                        "source_id": item["source_id"],
-                        "source_title": item["source_title"],
-                        "source_provider": item.get("source_provider", ""),
-                        "locator": item["locator"],
-                        "quote": item["quote"][:5000],
-                        "tags": [tag["name"] for tag in item.get("tags", [])],
-                    }
-                    for item in evidence_items
-                ]
-                context_tags = list(dict.fromkeys(
-                    tag
-                    for item in evidence_context
-                    for tag in item.get("tags", [])
-                    if tag
-                ))
-                related_claims, comparison_scope = find_claim_comparison_context(
-                    evidence_context, focus,
-                    self._parse_bounded_int(config.get("ai_claim_comparison_limit"), 100, 1, 1000),
-                    self.knowledge_db_path,
-                )
-                scope["comparison_claim_ids"] = [
-                    item["claim_id"] for item in related_claims
-                ]
-                request_payload = json.dumps(
-                    {
-                        "scope": scope,
-                        "focus": focus,
-                        "artifact": {
-                            "title": str(artifact.get("title") or "")[:300],
-                            "purpose": str(artifact.get("purpose") or "")[:2000],
-                        },
-                        "evidence": evidence_context,
-                        "existing_claims": related_claims,
-                        "instruction": str(payload.get("instruction") or "")[:2000],
-                    },
-                    ensure_ascii=False,
-                )
-                result = client.chat_json(
-                    _claim_proposal_prompt(self.config_path.parent / "skills"), request_payload,
-                    temperature=0.1, max_tokens=3000,
-                )
-                candidates = result.get("claims") if isinstance(result, dict) else []
-                if not isinstance(candidates, list):
-                    candidates = []
-                allowed_evidence = set(evidence_ids)
-                allowed_claims = {
-                    item["claim_id"]: item for item in related_claims
-                }
-                proposals = []
-                new_claim_refs = {}
-                duplicate_refs = set()
-                for candidate in candidates[:20]:
-                    if isinstance(candidate, dict) and candidate.get("temp_id"):
-                        reference = str(candidate["temp_id"])
-                        if reference in new_claim_refs:
-                            duplicate_refs.add(reference)
-                        new_claim_refs[reference] = None
-                for candidate in candidates[:20]:
-                    if not isinstance(candidate, dict):
-                        continue
-                    links = []
-                    for link in candidate.get("evidence") or []:
-                        if not isinstance(link, dict):
-                            continue
-                        if str(link.get("evidence_id") or "") not in allowed_evidence:
-                            continue
-                        links.append(link)
-                    candidate = {**candidate, "evidence": links}
-                    if not links or not any(
-                        str(link.get("stance") or "supports").lower()
-                        in {"supports", "limits"}
-                        for link in links
-                    ):
-                        continue
-                    if str(candidate.get("basis") or "").lower() == "inference" and len({
-                        link.get("evidence_id") for link in links
-                    }) < 2:
-                        continue
-                    try:
-                        proposals.append(create_claim_proposal(
-                            {**candidate, "operation": "create_claim"},
-                            _CLAIM_PROPOSAL_CAPABILITY,
-                            _model_name_from_config(
-                                config, "claims",
-                                str(payload.get("model_profile_id") or "")[:80],
-                            ),
-                            scope,
-                            self.knowledge_db_path,
-                        ))
-                        reference = str(candidate.get("temp_id") or "")
-                        if reference and reference not in duplicate_refs and reference not in allowed_claims:
-                            new_claim_refs[reference] = {
-                                "claim_id": "proposal:" + proposals[-1]["id"],
-                                "statement": candidate.get("statement", ""),
-                            }
-                    except ValueError:
-                        continue
-                updates = result.get("existing_claim_updates") if isinstance(result, dict) else []
-                for candidate in (updates if isinstance(updates, list) else [])[:20]:
-                    if not isinstance(candidate, dict):
-                        continue
-                    target_id = str(candidate.get("claim_id") or "")
-                    target = allowed_claims.get(target_id)
-                    if not target:
-                        continue
-                    links = []
-                    for link in candidate.get("evidence") or []:
-                        if not isinstance(link, dict):
-                            continue
-                        if str(link.get("evidence_id") or "") in allowed_evidence:
-                            links.append(link)
-                    if not links:
-                        continue
-                    try:
-                        proposals.append(create_claim_proposal(
-                            {
-                                "operation": "link_evidence",
-                                "target_claim_id": target_id,
-                                "target_statement": target["statement"],
-                                "evidence": links,
-                                "rationale": str(candidate.get("rationale") or "")[:2000],
-                                "caveats": candidate.get("caveats") or [],
-                            },
-                            _CLAIM_PROPOSAL_CAPABILITY,
-                            _model_name_from_config(
-                                config, "claims",
-                                str(payload.get("model_profile_id") or "")[:80],
-                            ), scope, self.knowledge_db_path,
-                        ))
-                    except ValueError:
-                        continue
-                relations = result.get("claim_relations") if isinstance(result, dict) else []
-                relation_targets = {**allowed_claims, **{key: value for key, value in new_claim_refs.items() if value and key not in duplicate_refs}}
-                for candidate in (relations if isinstance(relations, list) else [])[:20]:
-                    if not isinstance(candidate, dict):
-                        continue
-                    subject_id = str(candidate.get("subject_claim_id") or "")
-                    object_id = str(candidate.get("object_claim_id") or "")
-                    relation_type = str(candidate.get("relation_type") or "").lower()
-                    if (
-                        subject_id not in relation_targets
-                        or object_id not in relation_targets
-                        or subject_id == object_id
-                        or relation_type not in {"supports", "contradicts", "related"}
-                    ):
-                        continue
-                    try:
-                        proposals.append(create_claim_proposal(
-                            {
-                                "operation": "create_relation",
-                                "subject_claim_id": relation_targets[subject_id]["claim_id"],
-                                "subject_statement": relation_targets[subject_id]["statement"],
-                                "object_claim_id": relation_targets[object_id]["claim_id"],
-                                "object_statement": relation_targets[object_id]["statement"],
-                                "relation_type": relation_type,
-                                "rationale": str(candidate.get("rationale") or "")[:2000],
-                                "evidence": [],
-                            },
-                            _CLAIM_PROPOSAL_CAPABILITY,
-                            _model_name_from_config(
-                                config, "claims",
-                                str(payload.get("model_profile_id") or "")[:80],
-                            ), scope, self.knowledge_db_path,
-                        ))
-                    except ValueError:
-                        continue
-                skipped_items = [
-                    {
-                        "evidence_ids": [
-                            str(item) for item in candidate.get("evidence_ids", [])[:12]
-                            if str(item) in allowed_evidence
-                        ],
-                        "reason": str(candidate.get("reason") or "")[:1000],
-                    }
-                    for candidate in (
-                        result.get("skipped", [])
-                        if isinstance(result.get("skipped"), list) else []
-                    )[:20]
-                    if isinstance(candidate, dict) and str(candidate.get("reason") or "").strip()
-                ]
-                if not proposals and not skipped_items:
-                    raise AIError(
-                        "no_claim_proposals",
-                        "The model returned neither valid Claim changes nor skip explanations.",
-                    )
-                snapshot = client.usage_snapshot()
-                latest_usage = record_ai_usage(
-                    chat_requests=snapshot.get("chat_requests", 0),
-                    chat_tokens=snapshot.get("chat_tokens", 0),
-                )
-                self._send_json(
-                    {
-                        "proposals": proposals,
-                        "summary": str(result.get("summary") or "")[:1000],
-                        "skipped": skipped_items,
-                        "comparison_claim_count": len(related_claims),
-                        "comparison_scope": {
-                            **comparison_scope,
-                            "total_claim_count": len(list_claims(self.knowledge_db_path)),
-                            "tag_count": len(context_tags),
-                            "source_count": len({item["source_id"] for item in evidence_context}),
-                        },
-                        "usage": latest_usage,
-                    },
-                    HTTPStatus.CREATED if proposals else HTTPStatus.OK,
-                )
-            except AIError as error:
-                self._send_json(
-                    {"error": error.code, "message": str(error)},
-                    HTTPStatus.BAD_GATEWAY,
-                )
+            data, status = generate_claim_proposals(payload, self.config_path, self.knowledge_db_path)
+            self._send_json(data, status)
             return
         if route == "/api/config/default-search-mode":
             try:
@@ -3617,9 +3232,73 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                     else HTTPStatus.SERVICE_UNAVAILABLE,
                 )
             return
+        if route in {"/api/subscriptions", "/api/rsshub"}:
+            origin = self.headers.get("Origin")
+            if self.client_address[0] not in {"127.0.0.1", "::1"} or (
+                origin and urlparse(origin).netloc != self.headers.get("Host")
+            ):
+                self._send_json({"message": "Channel and local service actions require local access."}, HTTPStatus.FORBIDDEN)
+                return
+        if route == "/api/rsshub":
+            try:
+                operation = payload.get("operation", "status")
+                if operation in {"env_read", "env_save", "env_clear"}:
+                    if operation != "env_read":
+                        rsshub.save_credentials(self.config_path, payload)
+                    path = rsshub.credential_path(self.config_path)
+                    self._send_json({**rsshub.public_credentials(self.config_path), "content": path.read_text() if operation == "env_read" and path.is_file() else ""})
+                    return
+                self._send_json(rsshub.status(self.config_path) if operation == "status" else rsshub.start_operation(self.config_path, operation))
+            except Exception as error:
+                self._send_json({"message": str(error) if isinstance(error, ValueError) else "Docker is unavailable. Install and start Docker separately."}, HTTPStatus.BAD_REQUEST)
+            return
+        if route == "/api/subscriptions":
+            try:
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected an object")
+                operation = payload.get("operation", "save")
+                connector_config = load_config(self.config_path)
+                if operation == "detect":
+                    self._send_json(channel_connectors.detect(payload.get("url", ""), connector_config, payload.get("category"), payload.get("hn_mode", "keyword")))
+                    return
+                if operation == "preview":
+                    spec = channel_connectors.clean_spec(payload.get("spec") or {})
+                    items = channel_connectors.acquire(spec, connector_config, str(payload.get("name") or "Channel"))
+                    message = "Fetched content successfully." if items else "No entries returned. This does not confirm working authentication or a complete history. Check the connector and try again later."
+                    groups = [{"type": kind, "count": sum(item.get("channel_item_type") == kind for item in items), "items": [item for item in items if item.get("channel_item_type") == kind][:5]} for kind in ("story", "comment")] if spec["kind"] in {"hn_keyword", "hn_user"} else []
+                    self._send_json({"items": items[:5], "groups": groups, "count": len(items), "message": message + " " + channel_connectors.fetch_scope(spec["kind"])})
+                    return
+                if operation == "save":
+                    item_id = save_subscription(payload, self.knowledge_db_path, connector_config.get("rsshub_base_url", ""), config=connector_config)
+                elif operation == "delete":
+                    item_id = str(payload.get("id") or "")
+                    delete_subscription(item_id, self.knowledge_db_path)
+                elif operation == "test":
+                    items = fetch_subscription(str(payload.get("id") or ""), self.knowledge_db_path, force=True, config=connector_config)
+                    self._send_json({"items": items, "subscriptions": list_subscriptions(self.knowledge_db_path)})
+                    return
+                else:
+                    raise ValueError("Unknown subscription operation")
+                self._send_json({"id": item_id, "subscriptions": list_subscriptions(self.knowledge_db_path)})
+            except Exception as error:
+                message = str(error) if isinstance(error, ValueError) else f"Feed request failed ({type(error).__name__}). Check the address and network."
+                self._send_json({"message": message}, HTTPStatus.BAD_REQUEST)
+            return
         if route == "/api/plans":
             try:
-                response_payload = create_plan(payload, self.plans_path)
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected an object")
+                if payload.get("operation") in {"run_plan", "recompute_plan"}:
+                    self._send_json(start_plan_run(str(payload.get("id") or ""), self.knowledge_db_path,
+                        self.config_path, self.plans_path, knowledge_only=payload["operation"] == "recompute_plan"), HTTPStatus.ACCEPTED)
+                    return
+                # The old one-search API becomes one Action plus one manual Plan.
+                legacy = "operation" not in payload
+                if legacy:
+                    payload = {"operation": "import_plan", "config": payload, "name": payload.get("name")}
+                response_payload = mutate_automation(payload, self.knowledge_db_path, self.plans_path)
+                if legacy:
+                    response_payload = next(item for item in response_payload["plans"] if item["id"] == response_payload["saved_id"])
                 status_code = HTTPStatus.CREATED
             except ValueError as error:
                 response_payload = {"error": "invalid_plan", "message": str(error)}
@@ -3739,7 +3418,14 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         intelligent_max_results = self._parse_bounded_int(
             payload.get("intelligent_max_results"), 20, 1, 100
         )
+        try:
+            channel_connectors.update_settings({}, payload)
+        except ValueError as error:
+            self._send_json({"message": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         config = set_email(email, self.config_path)
+        config = channel_connectors.update_settings(config, payload)
+        save_config(config, self.config_path)
         if api_key_supplied:
             config = set_semanticscholar_key(api_key, self.config_path)
         if "searxng_url" in payload:
@@ -3854,6 +3540,8 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         embedding_profile = profile_by_id.get(profile_roles.get("embedding", ""), {})
         response_payload = {
             "email": config.get("email", ""),
+            **channel_connectors.public_settings(config),
+            **rsshub.public_credentials(self.config_path),
             "semanticscholar_api_key": "",
             "semanticscholar_api_key_configured": bool(
                 config.get("semanticscholar_api_key", "")
@@ -3868,7 +3556,7 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             "default_search_mode": (
                 config.get("default_search_mode")
                 if config.get("default_search_mode")
-                in {"keyword", "intelligent", "import"}
+                in {"keyword", "intelligent", "import", "subscribe"}
                 else "keyword"
             ),
             "search_ai_review": self._parse_bool(config.get("search_ai_review", "true" if config.get("default_search_mode") == "intelligent" else "false")),
@@ -4010,13 +3698,10 @@ class KnowteHandler(SimpleHTTPRequestHandler):
         body = self.rfile.read(length) if length > 0 else b""
         try:
             payload = json.loads(body.decode("utf-8")) if body else {}
-            plan = update_plan(plan_id, payload, self.plans_path)
-            if plan is None:
-                response_payload = {"error": "plan_not_found"}
-                status_code = HTTPStatus.NOT_FOUND
-            else:
-                response_payload = plan
-                status_code = HTTPStatus.OK
+            if set(payload) - {"name", "enabled", "action_ids", "schedule", "processing"}:
+                raise ValueError("Search conditions now belong to Actions. Reload Knowte to edit them.")
+            response_payload = mutate_automation({**payload, "operation": "save_plan", "id": plan_id}, self.knowledge_db_path, self.plans_path)
+            status_code = HTTPStatus.OK
         except (json.JSONDecodeError, ValueError) as error:
             response_payload = {"error": "invalid_plan", "message": str(error)}
             status_code = HTTPStatus.BAD_REQUEST
@@ -4105,7 +3790,12 @@ class KnowteHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         plan_id = parsed.path[len(prefix):].strip("/")
-        deleted = delete_plan(plan_id, self.plans_path)
+        try:
+            mutate_automation({"operation": "delete_plan", "id": plan_id}, self.knowledge_db_path, self.plans_path)
+            deleted = True
+        except ValueError as error:
+            self._send_json({"message": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         response_payload = {"deleted": deleted}
         response = json.dumps(response_payload).encode("utf-8")
         self.send_response(HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND)
@@ -4183,6 +3873,491 @@ class KnowteHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(chunk)
 
 
+def generate_claim_proposals(payload, config_path, knowledge_db_path, *, evidence_inputs=None, automation_scope=None):
+    evidence_ids = payload.get("evidence_ids")
+    if not isinstance(evidence_ids, list):
+        evidence_ids = []
+    selection_limit = KnowteHandler._parse_bounded_int(load_config(config_path).get("ai_claim_evidence_limit"), 30, 1, 100)
+    if len(evidence_ids) > selection_limit:
+        return ({"message": f"Select at most {selection_limit} items for this run."}, HTTPStatus.BAD_REQUEST)
+    evidence_ids = list(dict.fromkeys(
+        str(item) for item in evidence_ids if item
+    ))
+    evidence_items = evidence_inputs if evidence_inputs is not None else [
+        item for item in list_evidence(knowledge_db_path)
+        if item["id"] in evidence_ids
+    ]
+    if not evidence_items:
+        return (
+            {
+                "error": "evidence_required",
+                "message": "Select at least one Evidence item.",
+            },
+            HTTPStatus.BAD_REQUEST,
+        )
+    try:
+        config = load_config(config_path)
+        client = _client_from_config(
+            config, skills_dir=config_path.parent / "skills", require_embedding=False, role="claims",
+            profile_id=str(payload.get("model_profile_id") or "")[:80],
+        )
+        artifact = payload.get("artifact")
+        artifact = artifact if isinstance(artifact, dict) else {}
+        focus = str(payload.get("focus") or "").strip()[:2000] or "Derive well-grounded Claims from the supplied Evidence, covering its substantive findings without forcing unsupported synthesis."
+        input_versions = {item["id"]: item["input_version"] for item in evidence_items} if evidence_inputs is not None else None
+        scope = {
+            **(automation_scope or {}),
+            "kind": "selected_evidence",
+            "evidence_ids": evidence_ids,
+            "artifact_id": str(artifact.get("id") or ""),
+            "artifact_title": str(artifact.get("title") or "")[:300],
+            "focus": focus,
+        }
+        evidence_context = [
+            {
+                "evidence_id": item["id"],
+                "type": item["evidence_type"],
+                "review_status": "awaiting_review" if str(item["id"]).startswith("proposal:") and item.get("resolved_id") == item["id"] else "accepted",
+                "source_id": item["source_id"],
+                "source_title": item["source_title"],
+                "source_provider": item.get("source_provider", ""),
+                "locator": item["locator"],
+                "quote": item["quote"][:5000],
+                "tags": [tag["name"] for tag in item.get("tags", [])],
+            }
+            for item in evidence_items
+        ]
+        context_tags = list(dict.fromkeys(
+            tag
+            for item in evidence_context
+            for tag in item.get("tags", [])
+            if tag
+        ))
+        related_claims, comparison_scope = find_claim_comparison_context(
+            evidence_context, focus,
+            KnowteHandler._parse_bounded_int(config.get("ai_claim_comparison_limit"), 100, 1, 1000),
+            knowledge_db_path,
+        )
+        scope["comparison_claim_ids"] = [
+            item["claim_id"] for item in related_claims
+        ]
+        request_payload = json.dumps(
+            {
+                "scope": scope,
+                "focus": focus,
+                "artifact": {
+                    "title": str(artifact.get("title") or "")[:300],
+                    "purpose": str(artifact.get("purpose") or "")[:2000],
+                },
+                "evidence": evidence_context,
+                "existing_claims": related_claims,
+                "instruction": str(payload.get("instruction") or "")[:2000],
+            },
+            ensure_ascii=False,
+        )
+        result = client.chat_json(
+            _claim_proposal_prompt(config_path.parent / "skills"), request_payload,
+            temperature=0.1, max_tokens=3000,
+        )
+        if input_versions is not None:
+            scope["input_versions"] = input_versions
+        candidates = result.get("claims") if isinstance(result, dict) else []
+        if not isinstance(candidates, list):
+            candidates = []
+        allowed_evidence = set(evidence_ids)
+        allowed_claims = {
+            item["claim_id"]: item for item in related_claims
+        }
+        proposals = []
+        new_claim_refs = {}
+        duplicate_refs = set()
+        for candidate in candidates[:20]:
+            if isinstance(candidate, dict) and candidate.get("temp_id"):
+                reference = str(candidate["temp_id"])
+                if reference in new_claim_refs:
+                    duplicate_refs.add(reference)
+                new_claim_refs[reference] = None
+        for candidate in candidates[:20]:
+            if not isinstance(candidate, dict):
+                continue
+            links = []
+            for link in candidate.get("evidence") or []:
+                if not isinstance(link, dict):
+                    continue
+                if str(link.get("evidence_id") or "") not in allowed_evidence:
+                    continue
+                links.append(link)
+            candidate = {**candidate, "evidence": links}
+            if not links or not any(
+                str(link.get("stance") or "supports").lower()
+                in {"supports", "limits"}
+                for link in links
+            ):
+                continue
+            if str(candidate.get("basis") or "").lower() == "inference" and len({
+                link.get("evidence_id") for link in links
+            }) < 2:
+                continue
+            try:
+                proposals.append(create_claim_proposal(
+                    {**candidate, "operation": "create_claim"},
+                    _CLAIM_PROPOSAL_CAPABILITY,
+                    _model_name_from_config(
+                        config, "claims",
+                        str(payload.get("model_profile_id") or "")[:80],
+                    ),
+                    scope,
+                    knowledge_db_path,
+                    _input_versions=input_versions,
+                ))
+                reference = str(candidate.get("temp_id") or "")
+                if reference and reference not in duplicate_refs and reference not in allowed_claims:
+                    new_claim_refs[reference] = {
+                        "claim_id": "proposal:" + proposals[-1]["id"],
+                        "statement": candidate.get("statement", ""),
+                    }
+            except ValueError:
+                continue
+        updates = result.get("existing_claim_updates") if isinstance(result, dict) else []
+        for candidate in (updates if isinstance(updates, list) else [])[:20]:
+            if not isinstance(candidate, dict):
+                continue
+            target_id = str(candidate.get("claim_id") or "")
+            target = allowed_claims.get(target_id)
+            if not target:
+                continue
+            links = []
+            for link in candidate.get("evidence") or []:
+                if not isinstance(link, dict):
+                    continue
+                if str(link.get("evidence_id") or "") in allowed_evidence:
+                    links.append(link)
+            if not links:
+                continue
+            try:
+                proposals.append(create_claim_proposal(
+                    {
+                        "operation": "link_evidence",
+                        "target_claim_id": target_id,
+                        "target_statement": target["statement"],
+                        "evidence": links,
+                        "rationale": str(candidate.get("rationale") or "")[:2000],
+                        "caveats": candidate.get("caveats") or [],
+                    },
+                    _CLAIM_PROPOSAL_CAPABILITY,
+                    _model_name_from_config(
+                        config, "claims",
+                        str(payload.get("model_profile_id") or "")[:80],
+                    ), scope, knowledge_db_path, _input_versions=input_versions,
+                ))
+            except ValueError:
+                continue
+        relations = result.get("claim_relations") if isinstance(result, dict) else []
+        relation_targets = {**allowed_claims, **{key: value for key, value in new_claim_refs.items() if value and key not in duplicate_refs}}
+        for candidate in (relations if isinstance(relations, list) else [])[:20]:
+            if not isinstance(candidate, dict):
+                continue
+            subject_id = str(candidate.get("subject_claim_id") or "")
+            object_id = str(candidate.get("object_claim_id") or "")
+            relation_type = str(candidate.get("relation_type") or "").lower()
+            if (
+                subject_id not in relation_targets
+                or object_id not in relation_targets
+                or subject_id == object_id
+                or relation_type not in {"supports", "contradicts", "related"}
+            ):
+                continue
+            try:
+                proposals.append(create_claim_proposal(
+                    {
+                        "operation": "create_relation",
+                        "subject_claim_id": relation_targets[subject_id]["claim_id"],
+                        "subject_statement": relation_targets[subject_id]["statement"],
+                        "object_claim_id": relation_targets[object_id]["claim_id"],
+                        "object_statement": relation_targets[object_id]["statement"],
+                        "relation_type": relation_type,
+                        "rationale": str(candidate.get("rationale") or "")[:2000],
+                        "evidence": [],
+                    },
+                    _CLAIM_PROPOSAL_CAPABILITY,
+                    _model_name_from_config(
+                        config, "claims",
+                        str(payload.get("model_profile_id") or "")[:80],
+                    ), scope, knowledge_db_path, _input_versions=input_versions,
+                ))
+            except ValueError:
+                continue
+        skipped_items = [
+            {
+                "evidence_ids": [
+                    str(item) for item in candidate.get("evidence_ids", [])[:12]
+                    if str(item) in allowed_evidence
+                ],
+                "reason": str(candidate.get("reason") or "")[:1000],
+            }
+            for candidate in (
+                result.get("skipped", [])
+                if isinstance(result.get("skipped"), list) else []
+            )[:20]
+            if isinstance(candidate, dict) and str(candidate.get("reason") or "").strip()
+        ]
+        if not proposals and not skipped_items:
+            raise AIError(
+                "no_claim_proposals",
+                "The model returned neither valid Claim changes nor skip explanations.",
+            )
+        snapshot = client.usage_snapshot()
+        latest_usage = record_ai_usage(
+            chat_requests=snapshot.get("chat_requests", 0),
+            chat_tokens=snapshot.get("chat_tokens", 0),
+        )
+        return (
+            {
+                "proposals": proposals,
+                "summary": str(result.get("summary") or "")[:1000],
+                "skipped": skipped_items,
+                "comparison_claim_count": len(related_claims),
+                "comparison_scope": {
+                    **comparison_scope,
+                    "total_claim_count": len(list_claims(knowledge_db_path)),
+                    "tag_count": len(context_tags),
+                    "source_count": len({item["source_id"] for item in evidence_context}),
+                },
+                "usage": latest_usage,
+                "model_usage": snapshot,
+            },
+            HTTPStatus.CREATED if proposals else HTTPStatus.OK,
+        )
+    except AIError as error:
+        return (
+            {"error": error.code, "message": str(error)},
+            HTTPStatus.BAD_GATEWAY,
+        )
+    except ValueError as error:
+        return ({"error": "claim_proposal_failed", "message": str(error)}, HTTPStatus.BAD_REQUEST)
+
+
+def generate_evidence_proposals(payload, config_path, knowledge_db_path, content_dir, *, automation_scope=None):
+    source_ids = payload.get("source_ids")
+    if not isinstance(source_ids, list):
+        source_ids = []
+    selection_limit = KnowteHandler._parse_bounded_int(load_config(config_path).get("ai_evidence_source_limit"), 6, 1, 100)
+    if len(source_ids) > selection_limit:
+        return ({"message": f"Select at most {selection_limit} items for this run."}, HTTPStatus.BAD_REQUEST)
+    source_ids = list(dict.fromkeys(str(item) for item in source_ids if item))
+    focus = str(payload.get("focus") or "").strip()[:2000] or "Extract substantive Evidence covering the main concepts, findings and limitations of the selected Sources, grounded in their content."
+    if not source_ids:
+        return (
+            {"error": "source_required",
+             "message": "Select at least one Source."},
+            HTTPStatus.BAD_REQUEST,
+        )
+    try:
+        config = load_config(config_path)
+        profile_id = str(payload.get("model_profile_id") or "")[:80]
+        client = _client_from_config(config, skills_dir=config_path.parent / "skills", require_embedding=False, role="evidence", profile_id=profile_id)
+        profile = next((item for item in ai_model_profiles(config) if item["id"] == profile_id), None) or ai_profile_for_role(config, "evidence")
+        capabilities = set(profile.get("capabilities", []))
+        related_workspaces = {}
+        related_pages = payload.get("related_pages")
+        request_mode = config.get("ai_evidence_request_mode", "combined")
+        seed_ids = list(source_ids)
+        if related_pages is not None:
+            if not isinstance(related_pages, list) or not 1 <= len(related_pages) <= MAX_PAGES:
+                raise ValueError(f"Related page count must be between 1 and {MAX_PAGES}; requests are never silently split")
+            request_mode = payload.get("related_request_mode", request_mode)
+            if request_mode not in {"combined", "individual"}:
+                raise ValueError("Invalid related-page request mode")
+            seeds = {sid: get_source(sid, knowledge_db_path) for sid in seed_ids}
+            saved = {page_url(s["url"]): s for s in list_sources(knowledge_db_path) if str(s.get("url") or "").startswith(("http://", "https://"))}
+            source_ids = []
+            for page in related_pages:
+                if not isinstance(page, dict):
+                    raise ValueError("Invalid related page")
+                parent = seeds.get(str(page.get("parent_source_id") or ""))
+                url = page_url(page.get("url"))
+                if parent is None or not in_scope(url, parent.get("url") or parent.get("paper_url")):
+                    raise ValueError("Selected related page is outside the seed website/version")
+                source = saved.get(url)
+                if source:
+                    workspace = get_source_workspace(source["id"], knowledge_db_path)
+                else:
+                    source = {"id": hashlib.sha256(url.encode()).hexdigest()[:32], "url": url,
+                              "title": str(page.get("title") or url)[:1000], "source_type": "web",
+                              "parent_source_id": parent["id"]}
+                    workspace = {"source": source, "segments": [], "capture": None, "pending_source": True}
+                if source["id"] not in related_workspaces:
+                    related_workspaces[source["id"]] = workspace
+                    source_ids.append(source["id"])
+        groups = [[sid] for sid in source_ids] if request_mode == "individual" else [source_ids]
+        proposals, warnings, summaries = [], [], []
+        failed_groups = 0
+        failures = []
+        for group in groups:
+            try:
+                workspaces, documents, urls, manifest = [], [], [], []
+                for source_id in group:
+                    workspace = related_workspaces.get(source_id) or get_source_workspace(source_id, knowledge_db_path)
+                    source = workspace["source"]
+                    url = source.get("url") or source.get("paper_url")
+                    kind = "capture"
+                    local_document = bool(source.get("document_hash"))
+                    local_pdf = local_document and workspace.get("capture", {}).get("media_type") == "application/pdf"
+                    is_pdf = local_pdf or bool(source.get("pdf_url")) or source.get("source_type") == "paper" or str(url).split("?")[0].endswith(".pdf")
+                    feed = source.get("feed_content") or {}
+                    if automation_scope and not feed:
+                        from .source_ingestion import source_feed_content
+                        feed = source_feed_content(source_id, knowledge_db_path)
+                    if feed.get("text") and not is_pdf:
+                        feed_text = str(feed["text"])[:20000]
+                        if not workspace.get("segments"):
+                            workspace = store_capture(source_id, {"url": url, "media_type": "text/plain",
+                                "sha256": hashlib.sha256(feed_text.encode()).hexdigest(), "raw_path": "",
+                                "segments": [feed_text], "locators": ["Feed-provided content (possibly excerpted)"],
+                                "blocks": [{"metadata": {"feed_url": feed.get("feed_url"), "scope": feed.get("scope")}}]}, knowledge_db_path)
+                    elif is_pdf and capabilities & {"native_documents", "file_extraction"}:
+                        if local_pdf:
+                            original, _, _ = get_capture_file(source_id, content_dir, knowledge_db_path)
+                            captured = {"media_type": "application/pdf", "raw_path": str(original)}
+                        elif workspace.get("pending_source"):
+                            import tempfile
+                            with tempfile.TemporaryDirectory(prefix="knowte-related-") as temporary:
+                                captured = capture_source_content(source, Path(temporary), parse_pdf=False)
+                                document_bytes = Path(captured["raw_path"]).read_bytes()
+                        else:
+                            captured = capture_source_content(source, content_dir, parse_pdf=False)
+                        if captured["media_type"] != "application/pdf":
+                            raise CaptureError("Source did not return a PDF. Choose URL Fetch or text explicitly.")
+                        documents.append({"data": document_bytes if workspace.get("pending_source") else Path(captured["raw_path"]).read_bytes(), "mime_type": "application/pdf", "filename": f"{source_id}.pdf"})
+                        kind = "native_document"
+                    elif "url_fetch" in capabilities and url:
+                        urls.append(str(url))
+                        kind = "url"
+                    elif not workspace.get("segments"):
+                        if workspace.get("pending_source"):
+                            import tempfile
+                            with tempfile.TemporaryDirectory(prefix="knowte-related-") as temporary:
+                                captured = capture_source_content(source, Path(temporary))
+                            workspace["segments"] = [{"id": f"{source_id}-{i}", "text": text,
+                                "locator": captured["locators"][i]} for i, text in enumerate(captured["segments"])]
+                        else:
+                            captured = capture_source_content(source, content_dir)
+                            workspace = store_capture(source_id, captured, knowledge_db_path)
+                    segments, budget = [], 0
+                    if kind == "capture":
+                        if not any(str(s.get("text") or "").strip() for s in workspace.get("segments", [])):
+                            raise ValueError("No extractable text. Use a native PDF model, or capture Evidence manually in Inspect.")
+                        for segment in workspace.get("segments", []):
+                            text = str(segment.get("text") or "")[:max(0, 45000 - budget)]
+                            if not text:
+                                continue
+                            segments.append({"segment_id": segment["id"], "locator": segment.get("locator", ""), "text": text})
+                            budget += len(text)
+                        if sum(len(item.get("text", "")) for item in workspace.get("segments", [])) > budget:
+                            warnings.append(f"{source['title']}: text truncated to 45,000 characters.")
+                    workspaces.append(workspace)
+                    images = []
+                    if url and not is_pdf and not local_document and not feed.get("text"):
+                        try:
+                            images = discover_source_images(str(url))
+                        except (CaptureError, OSError, ValueError) as error:
+                            warnings.append(f"{source['title']}: image discovery unavailable: {error}")
+                    manifest.append({"source_id": source_id, "title": source["title"], "url": url, "input_kind": kind, "segments": segments, "images": images})
+                request_text = json.dumps({"focus": focus, "sources": manifest,
+                    "access_reporting": "Also return inaccessible_source_ids: exact source IDs whose content could not be accessed. Return [] if all inputs were accessible, even when none are relevant. Feed-provided segments may be excerpts; never claim full article coverage."}, ensure_ascii=False)
+                if documents or urls:
+                    result = client.grounded_json(_evidence_document_proposal_prompt(config_path.parent / "skills"), request_text, documents=documents, urls=urls, max_tokens=3500)
+                else:
+                    prompt = _evidence_document_proposal_prompt if any(item["images"] for item in manifest) else _evidence_proposal_prompt
+                    result = client.chat_json(prompt(config_path.parent / "skills"), request_text, temperature=0.1, max_tokens=3500)
+                candidates = result.get("evidence", [])
+                inaccessible = [sid for sid in result.get("inaccessible_source_ids", []) if sid in group] if isinstance(result.get("inaccessible_source_ids", []), list) else []
+                if inaccessible:
+                    failures.append({"code": "source_inaccessible", "source_ids": inaccessible})
+                    failed_groups += 1
+                    warnings.append("Source access failed; this is not a successful empty extraction: " + ", ".join(inaccessible))
+                if result.get("summary"):
+                    summaries.append(str(result["summary"])[:1000])
+                created = 0
+                for candidate in candidates[:12] if isinstance(candidates, list) else []:
+                    if not isinstance(candidate, dict):
+                        continue
+                    sid = str(candidate.get("source_id") or "")
+                    if sid in inaccessible:
+                        continue
+                    if not sid:
+                        sid = next((w["source"]["id"] for w in workspaces if any(s["id"] == candidate.get("segment_id") for s in w.get("segments", []))), "")
+                    workspace = next((w for w in workspaces if w["source"]["id"] == sid), None)
+                    if workspace is None:
+                        continue
+                    entry = next(item for item in manifest if item["source_id"] == sid)
+                    if candidate.get("evidence_type") == "snapshot":
+                        asset = next((item for item in entry["images"] if item["image_url"] == candidate.get("image_url")), None)
+                        if asset is None:
+                            warnings.append(f"{entry['title']}: proposed image was not in this page's original image directory.")
+                            continue
+                        try:
+                            candidate = {**candidate, "image_data": capture_evidence_image(asset["image_url"]),
+                                         "quote": asset["caption"], "image_alt": asset["alt"],
+                                         "segment_id": "", "verification": "external_unverified"}
+                        except (CaptureError, OSError, ValueError) as error:
+                            warnings.append(f"{entry['title']}: {error}")
+                            continue
+                    mapped = _map_document_quote(workspace, candidate.get("quote", ""))
+                    if candidate.get("evidence_type") == "snapshot":
+                        pass
+                    elif mapped:
+                        segment_id, quote = mapped
+                        candidate = {**candidate, "quote": quote, "segment_id": segment_id, "verification": "local_match"}
+                    elif entry["input_kind"] != "capture":
+                        candidate = {**candidate, "segment_id": "", "verification": "external_unverified"}
+                    else:
+                        warnings.append(f"{entry['title']}: an excerpt did not match captured text.")
+                        continue
+                    try:
+                        related_source = None
+                        if workspace.get("pending_source"):
+                            related_source = {"title": workspace["source"]["title"], "url": entry["url"],
+                                              "parent_source_id": workspace["source"]["parent_source_id"]}
+                            candidate = {**candidate, "segment_id": "", "verification": "external_unverified"}
+                        proposals.append(create_evidence_proposal(
+                            {**candidate, "source_id": sid, "source_url": entry["url"], "related_source": related_source},
+                            _EVIDENCE_PROPOSAL_CAPABILITY, _model_name_from_config(config, "evidence", profile_id),
+                            {**(automation_scope or {}), "kind": "related_pages" if related_pages is not None else "selected_sources", "source_ids": group, "seed_source_ids": seed_ids, "focus": focus,
+                             "summary": str(result.get("summary") or "")[:2000],
+                             "inputs": [{"source_id": item["source_id"], "title": item["title"], "url": item["url"], "input_kind": item["input_kind"],
+                                         "text_characters": sum(len(s["text"]) for s in item["segments"])} for item in manifest]},
+                            knowledge_db_path,
+                        ))
+                        created += 1
+                    except ValueError as error:
+                        warnings.append(f"{entry['title']}: {error}")
+                if not created:
+                    warnings.append("No usable Evidence returned for: " + ", ".join(item["title"] for item in manifest))
+                    if candidates:
+                        failed_groups += 1
+            except (AIError, CaptureError, ValueError, OSError) as error:
+                failed_groups += 1
+                failures.append({"code": getattr(error, "code", type(error).__name__), "source_ids": group})
+                warnings.append(f"Sources {', '.join(group)}: {error}")
+                if isinstance(error, AIError) and error.code in {"connection_failed", "timeout", "http_error", "invalid_base_url"}:
+                    warnings.append("Remaining groups were not called because the model service failed.")
+                    break
+        snapshot = client.usage_snapshot()
+        latest_usage = record_ai_usage(chat_requests=snapshot.get("chat_requests", 0), chat_tokens=snapshot.get("chat_tokens", 0))
+        return ({"proposals": proposals, "warnings": warnings, "summary": "\n".join(summaries), "usage": latest_usage, "model_usage": snapshot, "failed_groups": failed_groups, "failures": failures}, HTTPStatus.CREATED)
+    except (AIError, CaptureError) as error:
+        return (
+            {"error": getattr(error, "code", "evidence_proposal_failed"),
+             "message": str(error)}, HTTPStatus.BAD_GATEWAY,
+        )
+    except ValueError as error:
+        return (
+            {"error": "source_not_found", "message": str(error)},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+
 def create_server(host, port, config_path: Path | None = None, *, library_name="default"):
     web_root = Path(__file__).resolve().parent / "web"
     KnowteHandler.config_path = config_path or CONFIG_PATH
@@ -4214,7 +4389,21 @@ def create_server(host, port, config_path: Path | None = None, *, library_name="
         "",
     ).strip()
     handler = functools.partial(KnowteHandler, directory=str(web_root))
+    # Establish WAL before the scheduler and first HTTP request can write together.
+    from .knowledge import _connect
+    connection = _connect(KnowteHandler.knowledge_db_path)
+    connection.close()
+    from .knowledge import cleanup_orphan_snapshots
+    import sqlite3
+    try:
+        removed = cleanup_orphan_snapshots(KnowteHandler.knowledge_db_path)
+        if removed:
+            print(f"Removed {removed} unreferenced Evidence snapshot(s) left by interrupted or deleted saves.")
+    except (OSError, sqlite3.OperationalError) as error:
+        print(f"Snapshot cleanup deferred ({type(error).__name__}); your saved Evidence is unchanged.")
     server = KnowteTCPServer((host, port), handler)
+    from .scheduler import LocalScheduler
+    server.plan_scheduler = LocalScheduler(KnowteHandler.knowledge_db_path, KnowteHandler.config_path)
     return server
 
 

@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowte"
-version = "0.6.1"
-description = "Local-first, AI-assisted knowledge workspace for turning sources into reviewed evidence, connected claims, and reusable wikis."
+version = "0.7.0"
+description = "Local-first knowledge workspace with continuous discovery, scheduled research plans, and reviewable AI evidence, claims, and wikis."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
   "pypdf>=6.0,<7",
   "Pillow>=10,<12",
+  "tzdata>=2024.1",
 ]
 license = "MIT"
 license-files = ["LICENSE"]

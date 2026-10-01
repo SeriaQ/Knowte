@@ -35,6 +35,9 @@ Knowte turns learning into an inspectable knowledge chain:
   discard it.
 - **Organize and create.** Every reviewed active Claim belongs to the global
   Wiki. Projects select a topic-specific subset and generate focused Articles.
+- **Keep discovering.** Combine Search and subscription Actions in scheduled
+  Plans. Continue from pending Evidence through Claims and Relations to a
+  Projected Wiki without silently accepting any proposals.
 
 The durable knowledge database and captured content stay on your machine. AI
 and search services are contacted only for features you explicitly configure
@@ -96,12 +99,20 @@ no account or AI configuration.
 
 1. Enter a topic, title, author, or keywords in **Search**.
 2. Optionally choose research areas and a year range.
-3. Leave **AI Review** off and click **Search**.
+3. Choose **No model** for direct retrieval and click **Search**.
 4. Select useful results in the list. The Review panel tracks the selection.
 5. Click **Add selected Sources** to save them to the global Source Library.
 
 Use **Find More** to continue the same retrieval. Knowte reuses cached academic
 candidates when possible before making another provider request.
+
+For ongoing discovery, **Discover → Subscribe** offers **GitHub**, **Hacker News**,
+and **Others** (RSS/Atom, RSSHub, or websites declaring feeds). GitHub supports
+public account activity and explicitly selected repository scopes (Releases,
+Commits, Issues, Pull Requests). HN follows keywords or users, fetching posts and
+comments separately. Save a Channel and add it to a Plan. RSSHub can be connected as an
+existing service or optionally started locally with Docker. See the
+[channel setup guide](docs/subscriptions.md) for authentication, scope, and limits.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/SeriaQ/Knowte/main/docs/images/knowte-workflow-search.jpg" alt="Knowte Search workspace with Intelligent Search, filters, usage channels, and Review workspace" />
@@ -142,12 +153,15 @@ notification.
 
 ## 🧭 The workflow
 
-### Search
+### Discover
 
-Search has two entry points:
+Discover has three entry points, in this order:
 
-- **Search** retrieves from the enabled academic backends. Optional **AI Review**
-  adds embedding ranking (when configured) and LLM relevance verification.
+- **Search** retrieves from the enabled academic backends. Selecting a model
+  adds embedding ranking (when configured) and LLM relevance verification;
+  **No model** skips that review.
+- **Subscribe** follows GitHub, Hacker News, or RSS/Atom Channels. Each Channel
+  saves its scope, optional Focus and verification model, and appears in Actions.
 - **Import** accepts URLs, DOI or arXiv identifiers, and Knowte's structured
   JSON format. **Copy suggested prompt** provides instructions you can give to an
   external LLM.
@@ -169,9 +183,33 @@ With AI Review off, candidates are searched directly and results deduplicated,
 without embedding or LLM review. Discuss itself still uses the model API.
 Old Keyword Plans/defaults map to AI Review off; Intelligent ones map to on.
 
-Filters apply to every retrieval action. **Save Plan** preserves reusable
-search conditions; Plans currently run manually and use the credentials and
-service endpoints currently saved in Config.
+Filters apply to every retrieval action. **Save Action** preserves reusable
+search conditions. Actions use the credentials and service endpoints saved in Config.
+
+### 🔁 Plans and continuous discovery
+
+1. Save a Search Action or a subscription Channel in Discover.
+2. Create a Plan in **Plans**, select Actions from the **Actions** list, and add
+   them to the Plan using the selection panel. Reorder or remove them in its details.
+3. Configure manual, interval, daily or weekly execution and a timezone. Choose
+   the maximum new Sources per Run and how far knowledge processing should continue.
+   Enabled AI stages require an explicit model; Evidence and Claim Focus are optional.
+4. Click **Run now**, or enable the schedule. Scheduling works only while Knowte
+   is running; missed schedules catch up once rather than replaying every interval.
+5. Open **Runs** to follow the current Action or knowledge stage and inspect results,
+   failures, model usage and deferred work. Repeated discoveries are deduplicated;
+   each Plan maintains independent consumption even when Actions are shared.
+
+Automation can use pending Evidence and Claims to compute downstream proposals and
+a **Projected Wiki**, but never marks them accepted. **Reviewed only** shows reviewed
+knowledge. Accepting unchanged inputs resolves dependencies; logical edits or rejection
+mark affected descendants stale or invalid. Recompute can run immediately or on the
+next enabled Run. Use Ignore only for changes that truly have no logical effect.
+
+Failed batches can resume on a later Run; completed proposals are retained. Provider
+limits, feed windows and inaccessible pages mean discovery is not exhaustive. A
+`partial` Run can still contain useful results. Model calls may incur costs even when
+no proposal is produced, so start with a small Source limit.
 
 ### Sources
 
@@ -399,9 +437,10 @@ By default, Knowte stores its durable state under `~/.knowte/`:
 
 - `config.yml` — configuration and locally stored credentials;
 - `knowte.db` — Sources, Evidence, Claims, relations, Tags, Annotations,
-  Projects, review proposals, and Wiki state;
+  Projects, review proposals, Wiki state, Actions, Plans, Run history and checkpoints;
 - `content/` — captured documents, webpages, and snapshots;
-- `plans.json` — saved Search Plans;
+- `plans.json` — retained legacy Search Plans, migrated into SQLite;
+- `rsshub-secrets.env` — optional managed RSSHub environment file; keep private;
 - `usage.json` — local request and token counters.
 
 The browser UI has no authentication or multi-user isolation. Keep the default
@@ -430,9 +469,9 @@ AI proposal queues, global Wiki, Claim graph, Article generation, Projects,
 Tags, Annotations, saved Plans, and browser companion are implemented and
 evolving.
 
-Scheduled or recurring Plans, authentication, and multi-user isolation are not
-implemented yet. Expect data models and UI details to continue changing before
-a stable release.
+Scheduled Plans run locally while Knowte is open. Authentication and multi-user
+isolation are not implemented. Expect data models and UI details to continue changing
+before a stable release. Back up your library directory before upgrading.
 
 Bug reports, ideas, and careful feedback are welcome.
 

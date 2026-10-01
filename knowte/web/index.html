@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knowte</title>
-    <link rel="stylesheet" href="styles.css?v=20260924relationgraph" />
+    <link rel="stylesheet" href="styles.css?v=20261001run-progress" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -27,13 +27,13 @@
           <small id="library-badge" hidden></small>
         </div>
         <nav class="side-nav">
-          <button class="side-link is-active" type="button" data-target="search-panel">Search</button>
+          <button class="side-link is-active" type="button" data-target="search-panel">Discover</button>
           <button class="side-link" type="button" data-target="sources-panel"><span>Sources</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="evidence-panel"><span>Evidence</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="claims-panel"><span>Claims</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="views-panel"><span>Wiki</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="create-panel">Projects</button>
-          <button class="side-link" type="button" data-target="plans-panel">Plans</button>
+          <button class="side-link" type="button" data-target="plans-panel"><span>Plans</span><span class="side-link-signal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span></button>
           <button class="side-link" type="button" data-target="config-panel">Config</button>
         </nav>
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Theme: Auto. Switch to light mode" title="Auto mode">
@@ -51,13 +51,44 @@
                   <button type="button" class="search-mode-default" data-default-search-mode="search" aria-label="Set Search as the default search mode" aria-pressed="true" title="Default search mode">★</button>
                 </div>
                 <div class="search-mode-choice">
+                  <button type="button" class="search-mode-option" data-search-mode="subscribe" aria-pressed="false">Subscribe</button>
+                  <button type="button" class="search-mode-default" data-default-search-mode="subscribe" aria-label="Set Subscribe as the default search mode" aria-pressed="false" title="Set as default">☆</button>
+                </div>
+                <div class="search-mode-choice">
                   <button type="button" class="search-mode-option" data-search-mode="import" aria-pressed="false">Import</button>
                   <button type="button" class="search-mode-default" data-default-search-mode="import" aria-label="Set Import as the default search mode" aria-pressed="false" title="Set as default">☆</button>
                 </div>
               </div>
-              <label id="search-ai-review-control"><input type="checkbox" id="search-ai-review" /> AI Review <small>Semantic ranking and LLM review · uses model API</small></label>
               <small id="search-mode-hint">Search academic sources directly, or discuss queries first.</small>
             </div>
+            <section id="subscribe-placeholder" hidden>
+              <div class="automation-toolbar"><div><strong>Channels you follow</strong><small class="automation-phase-note">Save a channel, then select it directly when editing a Plan.</small></div></div>
+              <form id="subscription-form" class="subscription-form">
+                <label class="automation-field"><span>Channel type</span><select id="subscription-connector"><option value="github">GitHub</option><option value="hackernews">Hacker News</option><option value="others">Others · RSS / RSSHub</option></select></label>
+                <label class="automation-field" id="subscription-hn-mode-field" hidden><span>Follow by</span><select id="subscription-hn-mode"><option value="keyword">Keywords</option><option value="user">User</option></select></label>
+                <label class="automation-field subscription-address"><span id="subscription-address-label">Website, account or Feed URL</span><input id="subscription-address" required /></label>
+                <div id="subscription-detected" class="subscription-detected" hidden>
+                  <label class="automation-field"><span>Channel</span><select id="subscription-choice"></select></label>
+                  <p id="subscription-detection-note" class="automation-phase-note"></p>
+                  <div id="subscription-scope" class="subscription-scope"></div>
+                </div>
+                <label class="automation-field subscription-address"><span>Channel name</span><input id="subscription-name" required maxlength="120" /></label>
+                <div class="subscription-review-row subscription-address">
+                  <label class="automation-field"><span>Focus</span><textarea id="subscription-focus" rows="3" maxlength="2000" placeholder="What should this channel contribute?"></textarea></label>
+                  <div class="subscription-review-controls">
+                    <label class="ai-action-model"><span>Model</span><select id="subscription-model-select"></select></label>
+                    <small>Runs in Plans · titles and supplied excerpts only.</small>
+                  </div>
+                </div>
+                <details class="subscription-help subscription-address"><summary>Scope &amp; verification</summary><p>Strong and Possible continue; Excluded does not. Preview fetches content without model calls.</p><p>GitHub accepts account or repository URLs. HN follows keywords or users. Others accepts Feed, RSSHub or website URLs. Identification starts automatically.</p></details>
+                <div class="subscription-controls subscription-address">
+                  <button type="button" id="subscription-preview" disabled>Preview</button>
+                  <button type="submit" id="subscription-save" class="save-plan-btn stage-save-action" disabled>Save Channel</button>
+                </div>
+                <div id="subscription-preview-list" class="subscription-preview-list subscription-address" hidden></div>
+              </form>
+              <p id="subscription-status" role="status"></p><div id="subscription-list" class="plans-list"></div>
+            </section>
             <form id="search-form">
               <input
                 type="text"
@@ -69,7 +100,7 @@
                 <div class="search-run-actions">
                   <button type="submit" id="search-submit">Search</button>
                   <button type="button" class="save-plan-btn" id="discuss-search" hidden>Discuss</button>
-                  <button type="button" class="save-plan-btn" id="save-plan">Save Plan</button>
+                  <button type="button" class="save-plan-btn" id="save-plan">Save Action</button>
                 </div>
                 <label class="ai-action-model" id="search-model-control"><span>Model</span><select id="search-model-select" aria-label="Model for AI Review and Discuss"></select></label>
               </div>
@@ -96,7 +127,7 @@
             <section class="search-import" id="search-import" hidden aria-label="Import third-party results">
               <div class="search-import-head">
                 <div><strong>Import third-party results</strong><small>Paste links for a quick import, or structured output from an external LLM.</small></div>
-                <button type="button" id="copy-import-prompt">Copy suggested prompt</button>
+                <button type="button" class="save-plan-btn stage-save-action" id="copy-import-prompt">Copy suggested prompt</button>
               </div>
               <details class="import-prompt-preview"><summary>Preview prompt</summary><pre id="import-prompt-preview"></pre></details>
               <label for="import-content">URLs, DOI/arXiv IDs, or structured JSON</label>
@@ -171,7 +202,7 @@
               </div>
             </div>
             <div class="usage" id="usage">
-              <div class="usage-group">
+              <div class="usage-group" id="paper-usage-group">
                 <div class="usage-head">
                   <span class="usage-signal" aria-hidden="true"></span>
                   <div>
@@ -189,6 +220,12 @@
                   <div class="usage-meter"><div class="usage-bar" id="usage-bar-day"></div></div>
                   <strong><span id="usage-day">0</span><small>/ 5000</small></strong>
                 </div>
+              </div>
+              <div class="usage-group" id="subscription-usage-group" hidden>
+                <div class="usage-head"><span class="usage-signal" aria-hidden="true"></span><div><div class="usage-label">RSS &amp; API channels</div><div class="usage-caption">Request attempts · 5 min / Today (UTC)</div></div></div>
+                <div class="usage-row"><span class="usage-period">RSS</span><strong><span id="usage-rss-5min">0</span> / <span id="usage-rss-day">0</span></strong></div>
+                <div class="usage-row"><span class="usage-period">API</span><strong><span id="usage-api-5min">0</span> / <span id="usage-api-day">0</span></strong></div>
+                <small class="usage-caption">Includes detection, preview and Plan fetches; each page counts. Cache hits do not. Not provider quotas.</small>
               </div>
               <div class="usage-group usage-group-web" hidden>
                 <div class="usage-head">
@@ -284,7 +321,7 @@
               </div>
             </div>
             <div class="source-evidence-proposer">
-              <input id="evidence-proposal-focus" type="text" placeholder="Focus for Evidence, e.g. Qwen long-context optimization" />
+              <input id="evidence-proposal-focus" type="text" placeholder="Optional Focus · blank covers the main content" />
               <div class="ai-run-control">
                 <button type="button" class="primary-action" id="propose-evidence" disabled>Propose Evidence via LLM</button>
                 <label class="ai-action-model"><span>Model</span><select id="evidence-model-select" aria-label="Model for Evidence proposals"></select></label>
@@ -322,7 +359,7 @@
             </section>
             <section class="source-reader" id="source-reader" hidden>
               <div class="source-reader-head">
-                <div><small id="source-reader-meta"></small><h2 id="source-reader-title"></h2></div>
+                <div><small id="source-reader-meta"></small><h2 id="source-reader-title"></h2><details id="source-discoveries" hidden></details></div>
               </div>
               <div class="source-viewer-toolbar" id="source-viewer-toolbar">
                 <div class="source-viewer-tools">
@@ -521,6 +558,7 @@
               <small class="wiki-call-detail" id="wiki-call-detail"></small>
               <small class="knowledge-status wiki-action-status" id="wiki-status" role="status"></small>
               <div class="wiki-health-row">
+                <label class="ai-action-model"><span>View</span><select id="wiki-knowledge-view" aria-label="Wiki review status"><option value="reviewed">Reviewed only</option><option value="projected">Projected</option></select></label>
                 <div class="wiki-health" id="wiki-health"></div>
                 <div class="wiki-portability-actions">
                   <button type="button" class="review-queue-action" id="wiki-imports-toggle" disabled>Awaiting imports · 0</button>
@@ -533,6 +571,7 @@
                 <div class="wiki-review-head"><div><strong>Wiki import awaiting review</strong><small>Accept once to merge the complete trusted Wiki package and all of its knowledge.</small></div><button type="button" class="reader-toolbar-btn" id="wiki-import-close">× <span>Close</span></button></div>
                 <div id="wiki-import-list"></div>
               </section>
+              <small class="knowledge-status" id="wiki-projection-status" role="status" hidden></small>
               <section class="wiki-main" id="wiki-main">
                 <nav class="wiki-tree" id="wiki-tree" aria-label="Wiki pages"></nav>
                 <article class="wiki-page" id="wiki-page"></article>
@@ -633,13 +672,19 @@
           <div class="panel">
             <div class="plans-toolbar">
               <div>
-                <div class="plans-label">Reusable search conditions</div>
-                <small>Plans use current credentials and service endpoints from Config.</small>
+                <div class="plans-label">Plans &amp; Actions</div>
+                <small>Reuse Actions across Plans. Credentials stay in Config.</small>
               </div>
-              <button type="button" id="go-to-search">Go to Search</button>
             </div>
+            <div class="automation-toolbar"><div class="search-mode-switch" role="group" aria-label="Plans and Actions"><button type="button" class="search-mode-option is-active" data-plan-view="plans" aria-pressed="true">Plans</button><button type="button" class="search-mode-option" data-plan-view="actions" aria-pressed="false">Actions</button></div><button type="button" id="new-automation-plan">+ New Plan</button></div>
+            <small class="automation-phase-note">Scheduled Plans run only while Knowte is running. Each Plan controls how far processing continues, through Evidence, Claims, relations and Projected Wiki. Proposals stay awaiting review. Test Run does not advance checkpoints or save Sources.</small>
             <div class="plans-status" id="plans-status" role="status"></div>
+            <div id="action-library-filters" class="action-library-filters" hidden>
+              <input id="action-library-search" type="search" placeholder="Find Actions…" aria-label="Find Actions" />
+              <select id="action-library-kind" aria-label="Action type"><option value="">All types</option><option value="search">Search</option><option value="subscribe">Subscribe</option></select>
+            </div>
             <div class="plans-list" id="plans-list"></div>
+            <section id="plan-run-history" class="automation-run-history" hidden></section>
           </div>
         </section>
 
@@ -668,6 +713,38 @@
                   <small>Target number of results that pass LLM verification. Verification stops when this target or the candidate pool is exhausted.</small>
                 </div>
                 </div>
+              </fieldset>
+              <fieldset class="config-section">
+                <legend>Subscription Connectors</legend>
+                <p class="config-connector-status">RSS 2.0 / Atom · Built-in</p>
+                <section class="connector-details" id="rsshub-settings">
+                  <h3 class="connector-heading">RSSHub</h3>
+                  <div class="config-row">
+                    <label for="rsshub-base-url">RSSHub Base URL</label>
+                    <div class="connector-address-row"><input type="url" id="rsshub-base-url" /><button type="button" id="rsshub-use-local" class="service-action">Use local address</button></div>
+                    <small>RSSHub service address. Use your existing instance, or optionally set up one locally below. A complete Feed URL needs no RSSHub setting. <a href="https://docs.rsshub.app/deploy/" target="_blank" rel="noopener noreferrer">RSSHub setup guide ↗</a></small>
+                  </div>
+                  <p class="automation-phase-note">Requires Docker installed and running. Controls only this library’s container on localhost:1200. It keeps running after Knowte closes.</p>
+                  <div class="config-row">
+                    <button type="button" id="rsshub-edit-env" class="service-action semantic-action is-edit">Create environment file</button>
+                    <small>Create and edit the environment file here. Save in the dialog, then Reinstall to apply (Setup if not installed). File contents are excluded from config exports.</small>
+                    <small class="rsshub-credential-warning">⚠ If your token or environment file contains sensitive credentials, keep it private. Local administrators and Docker administrators can read them. Do not share these files or submit credentials over an untrusted connection.</small>
+                  </div>
+
+                  <div id="rsshub-controls" class="subscription-controls">
+                    <button type="button" data-rsshub="status" class="service-action">Check status</button>
+                    <button type="button" data-rsshub="setup" class="service-action semantic-action is-edit">Setup</button>
+                    <button type="button" data-rsshub="start" class="service-action semantic-action is-edit">Start</button>
+                    <button type="button" data-rsshub="reboot" class="service-action semantic-action is-audit" title="Rebuild with saved settings; knowledge data is kept.">Reinstall</button>
+                    <button type="button" data-rsshub="stop" class="service-action semantic-action is-audit">Stop</button>
+                    <button type="button" data-rsshub="remove" class="service-action semantic-action is-destructive">Remove</button>
+                  </div>
+                  <div id="rsshub-status" class="rsshub-status" role="status" aria-live="polite"><strong id="rsshub-state">Status unknown</strong><span id="rsshub-status-detail">Check status to enable service controls.</span></div>
+                </section>
+                <h3 class="connector-heading">GitHub</h3>
+                <div class="config-row"><label for="github-token">GitHub token · optional</label><input type="password" id="github-token" autocomplete="new-password" /><label class="connector-clear"><input type="checkbox" id="clear-github-token" /> Remove saved token</label><small>For public account activity and repository releases. A token raises API rate limits; no private repositories or write permission needed.</small></div>
+                <h3 class="connector-heading">Hacker News</h3>
+                <small>HN Search by Algolia · keyword / author subscriptions, with posts and comments fetched separately. No account or API key required.</small>
               </fieldset>
               <fieldset class="ai-config">
                 <legend>AI Models</legend>
@@ -961,6 +1038,7 @@
               <span class="context-label" id="context-selection-label">Selection</span>
               <strong id="context-selected-count">0 selected</strong>
             </div>
+            <div id="plan-action-selection" hidden></div>
             <div class="context-selection-list" id="context-selection-list">
               <p>Select results in the main workspace to review them here.</p>
             </div>
@@ -1076,6 +1154,6 @@
     </section>
     <script src="vendor/katex/katex.min.js"></script>
     <script src="evidence-math.js?v=20260922star"></script>
-    <script src="app.js?v=20260924graphgestures"></script>
+    <script src="app.js?v=20261001run-progress"></script>
   </body>
 </html>

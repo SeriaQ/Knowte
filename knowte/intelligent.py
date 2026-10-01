@@ -410,6 +410,7 @@ def intelligent_search(
     search_actions: List[dict] | None = None,
     profile_id: str = "",
     skills_dir=None,
+    recall_candidates: List[dict] | None = None,
 ) -> Dict[str, Any]:
     def report(stage: str, **details: Any) -> None:
         if progress is not None:
@@ -455,8 +456,8 @@ def intelligent_search(
         if item["target"] in {"academic", "both"}
     ))
 
-    academic_candidates: List[dict] = []
-    if academic_backends:
+    academic_candidates: List[dict] = list(recall_candidates or [])
+    if academic_backends and recall_candidates is None:
         report("recall", search_actions=actions)
         for retrieval_query in academic_queries:
             academic_candidates.extend(
@@ -555,7 +556,7 @@ def intelligent_search(
         "source_counts": source_counts,
         "request_budget": {
             "retrieval": stages["recall"]["requests"],
-            "academic_retrieval": len(academic_queries) if academic_backends else 0,
+            "academic_retrieval": len(academic_queries) if academic_backends and recall_candidates is None else 0,
             "chat": stages["verify"]["requests"],
             "embedding": stages["embed"]["requests"],
         },
